@@ -2771,13 +2771,8 @@ select_deploy_method() {
         confirm_bm="${confirm_bm:-Y}"
 
         if [[ "$confirm_bm" =~ ^[Yy]$ ]]; then
-            # Bare metal - Docker with host networking
-            DEPLOY_METHOD="docker-baremetal"
-            log "Selected: Bare Metal Server (auto-detected)"
-            echo ""
-            echo -e "  Bare Metal confirmed - will deploy using Docker containers"
-            echo -e "  (Host networking mode for direct miner access)"
-            echo ""
+            # Bare metal - native installation (best performance, no container overhead)
+            select_baremetal_deployment_method
             return
         fi
         echo ""
@@ -2808,12 +2803,8 @@ select_deploy_method() {
         prompt_input "Enter choice (1 or 2): "; read hw_choice
         case $hw_choice in
             1)
-                # Bare metal always uses Docker with host networking
-                DEPLOY_METHOD="docker-baremetal"
-                log "Selected: Bare Metal Server"
-                echo ""
-                echo -e "  ${GREEN}✓${NC} Bare Metal selected - will deploy using Docker containers"
-                echo -e "  ${WHITE}  (Host networking mode for direct miner access)${NC}"
+                # Bare metal - let user choose native or Docker
+                select_baremetal_deployment_method
                 break
                 ;;
             2)
@@ -2826,6 +2817,36 @@ select_deploy_method() {
                 ;;
         esac
     done
+    echo ""
+}
+
+select_baremetal_deployment_method() {
+    # Bare metal defaults to native installation for best performance
+    # Docker is available as an opt-in for users who specifically want containerized deployment
+    echo ""
+    log_step "Bare Metal Installation"
+
+    DEPLOY_METHOD="vm-native"
+    log "Selected: Bare Metal Native Installation"
+
+    echo ""
+    echo -e "${WHITE}Bare metal installations use native deployment for best performance.${NC}"
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "  ${WHITE}What this means:${NC}"
+    echo ""
+    echo -e "     • All components installed directly on the server"
+    echo -e "     • Maximum performance - no container overhead"
+    echo -e "     • Direct hardware access with zero I/O penalty"
+    echo -e "     • Full control over all services"
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "  ${GREEN}✓${NC} Will install all components directly on this server"
+    echo ""
+    echo -e "  ${DIM}Want Docker containers instead? (Not recommended - adds I/O overhead)${NC}"
+    echo -e "  ${DIM}Use: cd docker && docker compose up  (see DOCKER_GUIDE.md)${NC}"
     echo ""
 }
 
