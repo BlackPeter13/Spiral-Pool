@@ -2020,14 +2020,14 @@ detect_available_disks() {
 
         # Only include if it has a usable filesystem
         if [[ "$fstype" == "ext4" || "$fstype" == "ext3" || "$fstype" == "xfs" || "$fstype" == "btrfs" ]]; then
-            devices+=("$name|$size|$fstype|$mountpoint")
+            devices+=("/dev/$name|$size|$fstype|$mountpoint")
         fi
     done < <(lsblk -rno NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE 2>/dev/null | grep -E "^(sd|nvme|vd|xvd)" | grep -E "(disk|part)")
 
     # Also check for unmounted but formatted partitions
     while IFS= read -r line; do
         local dev fstype
-        dev=$(echo "$line" | awk '{print $1}')
+        dev=$(echo "$line" | awk '{print $1}' | tr -d ':')
         fstype=$(echo "$line" | awk -F'TYPE="' '{print $2}' | cut -d'"' -f1)
 
         # Skip if already in our list or if it's swap/unknown
@@ -2041,7 +2041,7 @@ detect_available_disks() {
             if [[ -n "$size" && ( "$fstype" == "ext4" || "$fstype" == "ext3" || "$fstype" == "xfs" || "$fstype" == "btrfs" ) ]]; then
                 # Check if not already in devices array
                 local already_added="false"
-                for d in "${devices[@]}"; do
+                for d in "${devices[@]+"${devices[@]}"}"; do
                     [[ "$d" == "$dev|"* ]] && already_added="true" && break
                 done
                 [[ "$already_added" == "false" ]] && devices+=("$dev|$size|$fstype|unmounted")
@@ -2049,8 +2049,78 @@ detect_available_disks() {
         fi
     done < <(blkid 2>/dev/null)
 
+    # Detect unformatted (raw) disks and partitions
+    local root_dev root_parent_disk
+    root_dev=$(df / | tail -1 | awk '{print $1}')
+    # Extract parent disk name (e.g., sda from /dev/sda1, nvme0n1 from /dev/nvme0n1p1)
+    if [[ "$root_dev" =~ nvme ]]; then
+        root_parent_disk=$(basename "$root_dev" | sed 's/p[0-9]*$//')
+    else
+        root_parent_disk=$(basename "$root_dev" | sed 's/[0-9]*$//')
+    fi
+
+    while IFS= read -r line; do
+        local r_name r_size r_type r_mount r_fstype
+        r_name=$(echo "$line" | awk '{print $1}')
+        r_size=$(echo "$line" | awk '{print $2}')
+        r_type=$(echo "$line" | awk '{print $3}')
+        r_mount=$(echo "$line" | awk '{print $4}')
+        r_fstype=$(echo "$line" | awk '{print $5}')
+
+        # Only interested in devices with NO filesystem and NO mount
+        [[ -n "$r_mount" ]] && continue
+        [[ -n "$r_fstype" ]] && continue
+
+        # Skip if on the same physical disk as root
+        local r_parent
+        if [[ "$r_name" =~ nvme ]]; then
+            r_parent=$(echo "$r_name" | sed 's/p[0-9]*$//')
+        else
+            r_parent=$(echo "$r_name" | sed 's/[0-9]*$//')
+        fi
+        [[ "$r_parent" == "$root_parent_disk" || "$r_name" == "$root_parent_disk" ]] && continue
+
+        # Skip swap (check via blkid)
+        if blkid "/dev/$r_name" 2>/dev/null | grep -qi 'TYPE="swap"'; then
+            continue
+        fi
+
+        # For whole disks: skip if any child partition has a filesystem
+        # (those partitions are already caught by the loops above)
+        if [[ "$r_type" == "disk" ]]; then
+            local child_fs
+            child_fs=$(lsblk -rno FSTYPE "/dev/$r_name" 2>/dev/null | grep -v '^$' || true)
+            [[ -n "$child_fs" ]] && continue
+        fi
+
+        # For partitions: skip if the parent disk is entirely raw
+        # (in that case, the whole disk is shown instead)
+        if [[ "$r_type" == "part" ]]; then
+            local r_parent_disk_name
+            if [[ "$r_name" =~ nvme ]]; then
+                r_parent_disk_name=$(echo "$r_name" | sed 's/p[0-9]*$//')
+            else
+                r_parent_disk_name=$(echo "$r_name" | sed 's/[0-9]*$//')
+            fi
+            local parent_has_fs
+            parent_has_fs=$(lsblk -rno FSTYPE "/dev/$r_parent_disk_name" 2>/dev/null | grep -v '^$' || true)
+            [[ -z "$parent_has_fs" ]] && continue
+        fi
+
+        # Skip if already in our devices list
+        local already_added="false"
+        for d in "${devices[@]+"${devices[@]}"}"; do
+            [[ "$d" == "/dev/$r_name|"* ]] && already_added="true" && break
+        done
+        [[ "$already_added" == "true" ]] && continue
+
+        local raw_type
+        [[ "$r_type" == "disk" ]] && raw_type="RAW" || raw_type="RAW_PART"
+        devices+=("/dev/$r_name|$r_size|$raw_type|unformatted")
+    done < <(lsblk -rno NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE 2>/dev/null | grep -E "^(sd|nvme|vd|xvd)" | grep -E "(disk|part)")
+
     # Output devices
-    for d in "${devices[@]}"; do
+    for d in "${devices[@]+"${devices[@]}"}"; do
         echo "$d"
     done
 }
@@ -2082,6 +2152,64 @@ detect_disk_type() {
         echo "ssd"
     else
         echo "hdd"
+    fi
+}
+
+format_raw_disk() {
+    # Format a raw (unformatted) disk or partition as ext4
+    # Args: $1 = device path, $2 = raw type (RAW or RAW_PART)
+    # Prints: the formatted partition device path on success
+    # Returns: 0 on success, 1 on failure
+    #
+    # RAW (whole disk): creates GPT partition table + single partition, then formats
+    # RAW_PART (existing partition): formats directly as ext4
+
+    local device="$1"
+    local raw_type="$2"
+
+    if [[ "$raw_type" == "RAW" ]]; then
+        # Whole disk — create GPT partition table with single Linux partition
+        log "Creating GPT partition table on $device..."
+        if ! echo ',,L,' | sudo sfdisk --label gpt "$device" 2>/dev/null; then
+            log_error "Failed to create partition table on $device"
+            return 1
+        fi
+
+        # Notify kernel of partition changes
+        sudo partprobe "$device" 2>/dev/null
+        sleep 2
+
+        # Determine the new partition path (NVMe uses p1 suffix, SATA uses 1)
+        local part_device
+        if [[ "$device" =~ nvme ]]; then
+            part_device="${device}p1"
+        else
+            part_device="${device}1"
+        fi
+
+        # Verify partition was created
+        if [[ ! -b "$part_device" ]]; then
+            log_error "Partition $part_device not found after partitioning"
+            return 1
+        fi
+
+        # Format the new partition
+        log "Formatting $part_device as ext4..."
+        if ! sudo mkfs.ext4 -q "$part_device"; then
+            log_error "Failed to format $part_device"
+            return 1
+        fi
+
+        echo "$part_device"
+    else
+        # Existing partition — format directly
+        log "Formatting $device as ext4..."
+        if ! sudo mkfs.ext4 -q "$device"; then
+            log_error "Failed to format $device"
+            return 1
+        fi
+
+        echo "$device"
     fi
 }
 
@@ -2125,7 +2253,7 @@ check_root_disk_speed() {
 
 configure_multi_disk_storage() {
     # Interactive configuration for multi-disk setups
-    # SAFETY: Only runs on fresh installs, never formats disks
+    # SAFETY: Only runs on fresh installs. Formatting requires explicit YES confirmation.
     #
     # This function:
     # 1. Checks if root disk is a slow HDD (warns user)
@@ -2208,7 +2336,13 @@ configure_multi_disk_storage() {
         [[ "$disk_type" == "ssd" ]] && type_label="${GREEN}SSD${NC}" || type_label="${YELLOW}HDD${NC}"
 
         local mount_info
-        [[ "$mount" == "unmounted" ]] && mount_info="${DIM}(not mounted)${NC}" || mount_info="${DIM}(mounted: $mount)${NC}"
+        if [[ "$mount" == "unformatted" ]]; then
+            mount_info="${RED}(unformatted - will be formatted as ext4)${NC}"
+        elif [[ "$mount" == "unmounted" ]]; then
+            mount_info="${DIM}(not mounted)${NC}"
+        else
+            mount_info="${DIM}(mounted: $mount)${NC}"
+        fi
 
         echo -e "    ${WHITE}$idx)${NC} $dev - $size [$type_label] $mount_info"
         disk_array+=("$dev|$fstype|$mount")
@@ -2262,6 +2396,46 @@ configure_multi_disk_storage() {
     if [[ ! -b "$sel_dev" ]]; then
         log_error "Device $sel_dev not found - keeping data on root"
         return 0
+    fi
+
+    # Handle unformatted (raw) disk — requires explicit formatting confirmation
+    if [[ "$sel_fstype" == "RAW" || "$sel_fstype" == "RAW_PART" ]]; then
+        local sel_size_display
+        sel_size_display=$(lsblk -rno SIZE "$sel_dev" 2>/dev/null | head -1)
+        echo ""
+        echo -e "  ${RED}╔══════════════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "  ${RED}║                                                                      ║${NC}"
+        echo -e "  ${RED}║  ${WHITE}WARNING: DESTRUCTIVE OPERATION${RED}                                      ║${NC}"
+        echo -e "  ${RED}║                                                                      ║${NC}"
+        echo -e "  ${RED}║  This will ERASE ALL DATA on ${WHITE}${sel_dev}${RED} (${sel_size_display:-unknown size})${RED}             ║${NC}"
+        echo -e "  ${RED}║  The disk will be partitioned (GPT) and formatted as ext4.           ║${NC}"
+        echo -e "  ${RED}║                                                                      ║${NC}"
+        echo -e "  ${RED}║  ${YELLOW}THIS ACTION CANNOT BE UNDONE.${RED}                                       ║${NC}"
+        echo -e "  ${RED}║                                                                      ║${NC}"
+        echo -e "  ${RED}╚══════════════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+        echo -e "  Type ${WHITE}YES${NC} (uppercase) to confirm formatting, or anything else to cancel:"
+        echo ""
+        local format_confirm
+        prompt_input "Confirm: "; read format_confirm
+        if [[ "$format_confirm" != "YES" ]]; then
+            log "Formatting cancelled - keeping all data on root"
+            return 0
+        fi
+
+        echo ""
+        local formatted_device
+        if ! formatted_device=$(format_raw_disk "$sel_dev" "$sel_fstype"); then
+            log_error "Formatting failed - keeping all data on root"
+            return 0
+        fi
+
+        # Update device and filesystem type for the mount flow below
+        sel_dev="$formatted_device"
+        sel_fstype="ext4"
+        sel_mount="unmounted"
+        log_success "Successfully formatted $formatted_device as ext4"
+        echo ""
     fi
 
     # Determine mount point for blockchain data
