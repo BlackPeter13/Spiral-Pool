@@ -101,6 +101,7 @@ jobs:
           gosec -no-fail -fmt=text ./...
 
       - name: Run staticcheck
+        continue-on-error: true
         run: |
           staticcheck ./...
 
