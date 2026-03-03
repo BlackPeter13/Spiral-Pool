@@ -1990,6 +1990,27 @@ CHAIN_MOUNT_POINT=""
 CHAIN_DIRECT_DEVICE=""
 CHAIN_BIND_SOURCE=""
 
+size_to_bytes() {
+    # Convert lsblk human-readable size (e.g., "1M", "500G", "1T") to bytes
+    # lsblk uses 1024-based units (K=1024, M=1048576, G=1073741824, etc.)
+    local size="$1"
+    local num unit
+    if [[ "$size" =~ ^([0-9]+(\.[0-9]+)?)([KMGTP]?)$ ]]; then
+        num="${BASH_REMATCH[1]%%.*}"  # truncate any decimal
+        unit="${BASH_REMATCH[3]}"
+    else
+        echo "0"; return
+    fi
+    case "$unit" in
+        K) echo $((num * 1024)) ;;
+        M) echo $((num * 1024 * 1024)) ;;
+        G) echo $((num * 1024 * 1024 * 1024)) ;;
+        T) echo $((num * 1024 * 1024 * 1024 * 1024)) ;;
+        P) echo $((num * 1024 * 1024 * 1024 * 1024 * 1024)) ;;
+        *) echo "$num" ;;
+    esac
+}
+
 detect_available_disks() {
     # Detect block devices that could be used for additional storage
     # Returns: Prints list of available devices with size and type
@@ -2018,6 +2039,9 @@ detect_available_disks() {
         [[ "$fstype" == "swap" ]] && continue
         [[ -z "$fstype" || "$fstype" == "null" ]] && continue
 
+        # Skip devices under 8GB (avoids EFI/BIOS/recovery partitions)
+        [[ $(size_to_bytes "$size") -lt 8589934592 ]] && continue
+
         # Only include if it has a usable filesystem
         if [[ "$fstype" == "ext4" || "$fstype" == "ext3" || "$fstype" == "xfs" || "$fstype" == "btrfs" ]]; then
             devices+=("/dev/$name|$size|$fstype|$mountpoint")
@@ -2038,7 +2062,7 @@ detect_available_disks() {
         if ! mount | grep -q "^$dev "; then
             local size
             size=$(lsblk -rno SIZE "$dev" 2>/dev/null | head -1)
-            if [[ -n "$size" && ( "$fstype" == "ext4" || "$fstype" == "ext3" || "$fstype" == "xfs" || "$fstype" == "btrfs" ) ]]; then
+            if [[ -n "$size" && $(size_to_bytes "$size") -ge 8589934592 && ( "$fstype" == "ext4" || "$fstype" == "ext3" || "$fstype" == "xfs" || "$fstype" == "btrfs" ) ]]; then
                 # Check if not already in devices array
                 local already_added="false"
                 for d in "${devices[@]+"${devices[@]}"}"; do
@@ -2070,6 +2094,9 @@ detect_available_disks() {
         # Only interested in devices with NO filesystem and NO mount
         [[ -n "$r_mount" ]] && continue
         [[ -n "$r_fstype" ]] && continue
+
+        # Skip devices under 8GB (avoids EFI/BIOS/recovery partitions)
+        [[ $(size_to_bytes "$r_size") -lt 8589934592 ]] && continue
 
         # Skip if on the same physical disk as root
         local r_parent
