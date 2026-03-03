@@ -9299,7 +9299,9 @@ def get_miners():
             },
             # H-3: Wrong pool detection for UI warning
             "wrong_pool_detected": is_wrong_pool,
-            "pool_status": "wrong_pool" if is_wrong_pool else "ok"
+            "pool_status": "wrong_pool" if is_wrong_pool else "ok",
+            # Quiet hours: suppress browser celebration (confetti/audio) but not text alerts
+            "celebration_quiet_hours": _is_celebration_quiet_hours(),
         })
     except Exception as e:
         # Log the error and return 500 with error info — NOT 200 with zeros
@@ -15664,10 +15666,11 @@ def broadcast_realtime_update():
 
 def broadcast_block_found(block_data):
     """Broadcast when a block is found - MASSIVE celebration!"""
+    quiet = _is_celebration_quiet_hours()
     socketio.emit('block_found', {
         "timestamp": time.time(),
         "block": block_data,
-        "celebration": True,
+        "celebration": not quiet,
         "message": "🎉🎉🎉 BLOCK FOUND! 🎉🎉🎉"
     })
 
@@ -15688,8 +15691,8 @@ def broadcast_block_found(block_data):
         pass
 
     # Trigger LED celebration on all Avalon miners (skip during quiet hours)
-    if _is_celebration_quiet_hours():
-        print("[BLOCK] LED celebration suppressed — quiet hours (efficiency schedule active)")
+    if quiet:
+        print("[BLOCK] LED + browser celebration suppressed — quiet hours active")
     else:
         trigger_avalon_block_celebration()
 
@@ -15699,22 +15702,52 @@ _celebration_active = False                # Guard against thread explosion
 
 
 def _is_celebration_quiet_hours():
-    """Check if any Avalon power schedule indicates quiet hours right now.
+    """Check if celebrations should be suppressed right now.
 
-    Returns True if ANY Avalon miner has an enabled schedule whose active
-    profile is 'efficiency' (the quiet/low-power profile).  When True,
-    LED celebrations should be suppressed.
+    Returns True if EITHER condition is met:
+    1. Clock-based quiet hours (from Sentinel config, default 22:00-06:00)
+    2. Any Avalon miner has an enabled schedule with 'efficiency' profile active
+
+    When True, LED celebrations and browser celebrations are suppressed.
+    Text notifications (Discord/XMPP/Telegram) are NOT affected.
     """
+    # Check clock-based quiet hours (Sentinel config)
     try:
-        if not avalon_schedules:
-            return False
-        current_time = datetime.now().time()
-        for ip, schedule in avalon_schedules.items():
-            if not schedule.get("enabled", False):
-                continue
-            active_profile = get_active_profile_for_time(schedule, current_time)
-            if active_profile == "efficiency":
+        quiet_start = 22  # default
+        quiet_end = 6     # default
+        install_dir = os.environ.get("SPIRALPOOL_INSTALL_DIR", "/spiralpool")
+        sentinel_paths = [
+            Path(install_dir) / "config" / "sentinel" / "config.json",
+            Path.home() / ".spiralsentinel" / "config.json",
+        ]
+        for p in sentinel_paths:
+            if p.exists():
+                with open(p, 'r') as f:
+                    sentinel_cfg = json.load(f)
+                quiet_start = sentinel_cfg.get("quiet_hours_start", 22)
+                quiet_end = sentinel_cfg.get("quiet_hours_end", 6)
+                break
+
+        h = datetime.now().hour
+        if quiet_start < quiet_end:
+            if quiet_start <= h < quiet_end:
                 return True
+        else:
+            if h >= quiet_start or h < quiet_end:
+                return True
+    except Exception:
+        pass
+
+    # Check Avalon power schedule (efficiency = quiet)
+    try:
+        if avalon_schedules:
+            current_time = datetime.now().time()
+            for ip, schedule in avalon_schedules.items():
+                if not schedule.get("enabled", False):
+                    continue
+                active_profile = get_active_profile_for_time(schedule, current_time)
+                if active_profile == "efficiency":
+                    return True
     except Exception:
         pass
     return False
