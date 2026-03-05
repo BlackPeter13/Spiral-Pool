@@ -15618,11 +15618,17 @@ def monitor_loop(state):
             # Even when the pool is offline, fire scheduled reports so the
             # user is never left wondering why their intel report is missing.
             # Sends a one-time "pool offline" notification per report hour.
+            # Covers both regular REPORT_HOURS and FINAL_REPORT_TIME windows.
             if ENABLE_6H_REPORTS and REPORT_FREQUENCY not in ("off", "daily"):
                 now = local_now()
+                report_key = None
                 if now.hour in REPORT_HOURS and now.minute < REPORT_WINDOW:
                     report_key = now.strftime("%Y-%m-%d-") + str(now.hour)
-                    if report_key not in _sync_wait_reports_sent:
+                elif FINAL_REPORT_TIME:
+                    fh, fm = FINAL_REPORT_TIME
+                    if now.hour == fh and fm <= now.minute < fm + FINAL_REPORT_WINDOW:
+                        report_key = now.strftime("%Y-%m-%d-") + f"final-{fh}:{fm:02d}"
+                if report_key and report_key not in _sync_wait_reports_sent:
                         _sync_wait_reports_sent.add(report_key)
                         hrs = elapsed_min // 60
                         mins = elapsed_min % 60
@@ -17210,6 +17216,17 @@ def monitor_loop(state):
                                 missed_report_key = now.strftime("%Y-%m-%d-") + str(rh)
                             break
                     # NOTE: Yesterday's catch-up removed - always > 1 hour stale (min 6h from 18:00 to 00:00)
+
+                    # Catch up missed final report (e.g., Sentinel restarted during/after the 21:45 window)
+                    # The regular REPORT_HOURS loop above won't find it — check explicitly.
+                    if not missed_report_key and FINAL_REPORT_TIME:
+                        fh, fm = FINAL_REPORT_TIME
+                        f_key = now.strftime("%Y-%m-%d-") + f"final-{fh}:{fm:02d}"
+                        if state.last_report_hour != f_key:
+                            window_end_mins = fh * 60 + fm + FINAL_REPORT_WINDOW
+                            now_mins = now.hour * 60 + now.minute
+                            if window_end_mins <= now_mins <= window_end_mins + 60:
+                                missed_report_key = f_key
 
                     # Only catch up if we actually missed it (wasn't sent)
                     if missed_report_key and state.last_report_hour != missed_report_key:
