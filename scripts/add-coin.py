@@ -1099,7 +1099,7 @@ def interactive_mode(params: CoinParams) -> CoinParams:
 # COMPREHENSIVE AUTOMATED ONBOARDING
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def auto_onboard_coin(symbol: str, github_url: str, algorithm_hint: Optional[str] = None) -> Tuple[CoinParams, List[str]]:
+def auto_onboard_coin(symbol: str, github_url: str, algorithm_hint: Optional[str] = None) -> Tuple[CoinParams, List[str], str]:
     """
     Fully automated coin onboarding with minimal user interaction.
 
@@ -1117,7 +1117,7 @@ def auto_onboard_coin(symbol: str, github_url: str, algorithm_hint: Optional[str
         algorithm_hint: Optional algorithm override ("sha256d" or "scrypt")
 
     Returns:
-        Tuple of (CoinParams, warnings_list)
+        Tuple of (CoinParams, warnings_list, chainparams_source_content)
     """
     params = CoinParams(symbol=symbol.upper())
     warnings = []
@@ -1251,7 +1251,807 @@ def auto_onboard_coin(symbol: str, github_url: str, algorithm_hint: Optional[str
     else:
         print(f"\n  All parameters extracted successfully!")
 
-    return params, warnings
+    return params, warnings, source_content
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GITHUB RELEASE DETECTION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def try_detect_release_url(github_url: str, symbol: str) -> Optional[str]:
+    """
+    Try to detect a Linux binary download URL from GitHub releases.
+
+    Hits the releases/latest API and scans assets for Linux x86_64 binaries,
+    preferring tar.gz archives.  Returns the download URL if found, else None.
+    """
+    url = github_url.rstrip('/')
+    if url.endswith('.git'):
+        url = url[:-4]
+
+    match = re.search(r'github\.com/([^/]+/[^/]+?)(?:\.git)?$', url)
+    if not match:
+        return None
+
+    owner_repo = match.group(1)
+    api_url = f"https://api.github.com/repos/{owner_repo}/releases/latest"
+
+    try:
+        req = Request(api_url, headers={
+            "User-Agent": "SpiralPool-CoinOnboarding/1.0",
+            "Accept": "application/vnd.github+json",
+        })
+        with urlopen(req, timeout=15.0) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+    except (URLError, HTTPError, json.JSONDecodeError):
+        return None
+
+    assets = data.get("assets", [])
+    if not assets:
+        return None
+
+    priority_keywords = [
+        ["x86_64-linux-gnu", ".tar.gz"],
+        ["x86_64-linux", ".tar.gz"],
+        ["linux-amd64", ".tar.gz"],
+        ["amd64", "linux", ".tar.gz"],
+        ["linux", "x86_64", ".tar.gz"],
+        ["linux", ".tar.gz"],
+        ["linux", ".zip"],
+    ]
+
+    name_url_pairs = [(a["name"].lower(), a["browser_download_url"]) for a in assets]
+    for keywords in priority_keywords:
+        for name_lower, dl_url in name_url_pairs:
+            if all(kw in name_lower for kw in keywords):
+                return dl_url
+
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DNS SEED DETECTION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def detect_dns_seeds(chainparams_content: str) -> List[str]:
+    """
+    Parse chainparams.cpp for DNS seed entries from the vSeeds array.
+    Returns up to 4 seed addresses.
+    """
+    seeds: List[str] = []
+
+    seed_patterns = [
+        r'vSeeds\.emplace_back\s*\(\s*"([^"]+)"',
+        r'vSeeds\.push_back\s*\(\s*["\']([^"\']+)["\']',
+        r'CDNSSeedData\s*\([^,]+,\s*"([^"]+)"',
+    ]
+
+    for pattern in seed_patterns:
+        for m in re.findall(pattern, chainparams_content, re.IGNORECASE):
+            if re.match(r'^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z]{2,})+$', m):
+                if m not in seeds:
+                    seeds.append(m)
+        if len(seeds) >= 4:
+            break
+
+    return seeds[:4]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DOCKER FILE GENERATORS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def generate_node_dockerfile(params: CoinParams, release_url: Optional[str] = None) -> str:
+    """
+    Generate Dockerfile for the coin's full node.
+
+    Uses pre-built binary from release_url if provided; otherwise compiles
+    from source using the standard Bitcoin Core build system.
+    """
+    coinlower = params.symbol.lower()
+    symbol_upper = params.symbol.upper()
+    algo_desc = "Scrypt" if params.algorithm == "scrypt" else "SHA-256d"
+
+    header = f"""# SPDX-License-Identifier: BSD-3-Clause
+# SPDX-FileCopyrightText: Copyright (c) 2026 Spiral Pool Contributors
+
+# ╔════════════════════════════════════════════════════════════════════════════╗
+# ║                                                                            ║
+# ║                    {symbol_upper} CORE - DOCKER IMAGE{' ' * (44 - len(symbol_upper))}║
+# ║                                                                            ║
+# ║   Separate container for {params.name} node ({algo_desc} mining){' ' * max(0, 28 - len(params.name) - len(algo_desc))}║
+# ║   This allows independent scaling and management                           ║
+# ║                                                                            ║
+# ╚════════════════════════════════════════════════════════════════════════════╝
+
+FROM ubuntu:24.04
+
+LABEL maintainer="Spiral Miner"
+LABEL description="{params.name} Node for Spiral Pool"
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+"""
+
+    if release_url:
+        install_section = f"""
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \\
+    curl \\
+    wget \\
+    ca-certificates \\
+    libzmq3-dev \\
+    gosu \\
+    gettext-base \\
+    && rm -rf /var/lib/apt/lists/*
+
+# Create {coinlower} user
+RUN useradd -r -m -s /bin/bash {coinlower} \\
+    && mkdir -p /home/{coinlower}/.{coinlower} \\
+    && chown -R {coinlower}:{coinlower} /home/{coinlower}
+
+# Download and install {params.name}
+# WARNING: ARM64 (aarch64) support is EXPERIMENTAL and UNTESTED.
+WORKDIR /tmp
+RUN ARCHIVE="$(basename "{release_url}")" \\
+    && wget -q --max-redirect=5 "{release_url}" -O "$ARCHIVE" \\
+    && tar -xzf "$ARCHIVE" \\
+    && find /tmp -maxdepth 4 \\( -name "{coinlower}d" -o -name "{coinlower}-cli" -o -name "{coinlower}-tx" \\) \\
+         -exec install -m 755 {{}} /usr/local/bin/ \\; \\
+    && rm -rf /tmp/*
+"""
+    else:
+        install_section = f"""
+# Install build dependencies (compile from source — no pre-built binary detected)
+# TODO: Set GITHUB_REPO_URL below to the actual repository before building
+RUN apt-get update && apt-get install -y --no-install-recommends \\
+    curl wget ca-certificates libzmq3-dev libzmq5-dev gosu gettext-base \\
+    build-essential autoconf libtool pkg-config git \\
+    libboost-all-dev libssl-dev libevent-dev libdb5.3++-dev \\
+    && rm -rf /var/lib/apt/lists/*
+
+# Create {coinlower} user
+RUN useradd -r -m -s /bin/bash {coinlower} \\
+    && mkdir -p /home/{coinlower}/.{coinlower} \\
+    && chown -R {coinlower}:{coinlower} /home/{coinlower}
+
+# TODO: Replace GITHUB_REPO_URL with the actual repository URL before building
+WORKDIR /tmp
+RUN git clone --depth=1 GITHUB_REPO_URL /tmp/{coinlower}-src \\
+    && cd /tmp/{coinlower}-src \\
+    && ./autogen.sh \\
+    && ./configure --without-gui --disable-tests \\
+    && make -j$(nproc) \\
+    && make install \\
+    && rm -rf /tmp/{coinlower}-src
+"""
+
+    # Build entrypoint using echo with \n\ continuation (matches existing Dockerfile pattern)
+    ep_lines = [
+        "#!/bin/bash",
+        "set -e",
+        "",
+        "# Process config template (replace env vars)",
+        f"if [ -f /config/{coinlower}.conf.template ]; then",
+        f"    envsubst < /config/{coinlower}.conf.template > /home/{coinlower}/.{coinlower}/{coinlower}.conf",
+        "fi",
+        "",
+        "# Ensure proper ownership of data directory",
+        f"chown -R {coinlower}:{coinlower} /home/{coinlower}/.{coinlower}",
+        "",
+        f"# Start {params.name} daemon",
+        f'exec gosu {coinlower} {coinlower}d -printtoconsole "$@"',
+    ]
+    ep_body = "\\n\\\n".join(ep_lines)
+
+    tail = f"""
+# Create entrypoint script
+RUN echo '{ep_body}\\n\\
+' > /entrypoint.sh && chmod +x /entrypoint.sh
+
+# Expose ports
+# P2P
+EXPOSE {params.p2p_port}
+# RPC
+EXPOSE {params.rpc_port}
+# ZMQ
+EXPOSE {params.zmq_port}
+
+# Data volume
+VOLUME ["/home/{coinlower}/.{coinlower}"]
+
+USER root
+ENTRYPOINT ["/entrypoint.sh"]
+"""
+    return header + install_section + tail
+
+
+def generate_conf_template(params: CoinParams, dns_seeds: Optional[List[str]] = None) -> str:
+    """
+    Generate node configuration template for the coin.
+    Follows the litecoin.conf.template / catcoin.conf.template pattern.
+    """
+    symbol_upper = params.symbol.upper()
+    zmq_port = params.zmq_port if params.zmq_port else 28000 + (params.rpc_port % 1000)
+    dbcache = 8192 if params.algorithm == "sha256d" else 4096
+
+    conf = f"""# ═══════════════════════════════════════════════════════════════════════════════
+# {symbol_upper} CORE - SPIRAL POOL CONFIGURATION
+# ═══════════════════════════════════════════════════════════════════════════════
+# Optimized for fast initial blockchain sync and reliable mining operations
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# NETWORK SETTINGS
+# ═══════════════════════════════════════════════════════════════════════════════
+listen=1
+port={params.p2p_port}
+
+# Maximum peer connections
+maxconnections=125
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# RPC CONFIGURATION
+# ═══════════════════════════════════════════════════════════════════════════════
+server=1
+rpcuser=${{RPC_USER}}
+rpcpassword=${{RPC_PASSWORD}}
+rpcallowip=127.0.0.1
+rpcallowip=172.17.0.0/16
+rpcallowip=10.0.0.0/8
+rpcallowip=192.168.0.0/16
+rpcbind=0.0.0.0
+rpcport={params.rpc_port}
+
+# RPC work queue for mining
+rpcworkqueue=64
+rpcthreads=4
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZMQ BLOCK NOTIFICATIONS (for instant job updates)
+# ═══════════════════════════════════════════════════════════════════════════════
+zmqpubhashblock=tcp://0.0.0.0:{zmq_port}
+zmqpubrawtx=tcp://0.0.0.0:{zmq_port}
+zmqpubrawblock=tcp://0.0.0.0:{zmq_port}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PERFORMANCE TUNING
+# ═══════════════════════════════════════════════════════════════════════════════
+# Database cache size in MB
+dbcache={dbcache}
+
+# Script verification threads (0 = auto-detect CPU cores)
+par=0
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# WALLET (required for solo mining)
+# ═══════════════════════════════════════════════════════════════════════════════
+disablewallet=0
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LOGGING
+# ═══════════════════════════════════════════════════════════════════════════════
+printtoconsole=1
+debug=0
+logtimestamps=1
+shrinkdebugfile=1
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STORAGE (Full node - no pruning for mining)
+# ═══════════════════════════════════════════════════════════════════════════════
+prune=0
+txindex=1
+"""
+
+    if dns_seeds:
+        conf += "\n# ═══════════════════════════════════════════════════════════════════════════════\n"
+        conf += "# DNS SEEDS (extracted from chainparams.cpp)\n"
+        conf += "# ═══════════════════════════════════════════════════════════════════════════════\n"
+        conf += "dnsseed=1\n"
+        for seed in dns_seeds:
+            conf += f"addnode={seed}\n"
+
+    conf += "\n# ═══════════════════════════════════════════════════════════════════════════════\n"
+    conf += "# MINING SPECIFIC\n"
+    conf += "# ═══════════════════════════════════════════════════════════════════════════════\n"
+    conf += "blockmaxweight=4000000\n"
+    conf += "minrelaytxfee=0.00001\n"
+
+    # AuxPoW / merge mining — only present if the coin explicitly supports it
+    # and has a confirmed BTC or LTC parent chain.
+    # NOTE: No node-level merge mining config is needed. The node mines normally.
+    # Spiral Pool's stratum handles AuxPoW proof construction and submission
+    # automatically when the coin's role is "aux".
+    if params.supports_auxpow and params.parent_chain in ("BTC", "LTC"):
+        conf += f"\n# ═══════════════════════════════════════════════════════════════════════════════\n"
+        conf += f"# MERGE MINING (AuxPoW)\n"
+        conf += f"# ═══════════════════════════════════════════════════════════════════════════════\n"
+        conf += f"# This coin supports AuxPoW merge mining with {params.parent_chain}.\n"
+        conf += f"# Chain ID: {params.chain_id}  |  Parent: {params.parent_chain}  |  Algorithm: {params.algorithm}\n"
+        conf += f"# No special node config is required — AuxPoW is handled by the stratum layer.\n"
+        conf += f"# Ensure the {params.parent_chain} node is running and reachable before mining.\n"
+
+    return conf
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DOCKER COMPOSE PATCHER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def patch_docker_compose(params: CoinParams, compose_path: Path) -> None:
+    """
+    Patch docker-compose.yml in-place to add support for the new coin.
+
+    Uses unique string anchors to insert content at the correct locations.
+    Idempotent: skips gracefully if the coin is already present.
+    """
+    coinlower = params.symbol.lower()
+    symbol_upper = params.symbol.upper()
+    zmq_port = params.zmq_port if params.zmq_port else 28000 + (params.rpc_port % 1000)
+    stratum_v1 = params.stratum_port
+    stratum_tls = params.stratum_tls_port
+    algo_upper = params.algorithm.upper()
+
+    # AuxPoW coins require a parent chain — they cannot run standalone.
+    # Standalone and parent coins get added to "multi"; aux coins do not.
+    is_aux = params.role == "aux" or params.supports_auxpow
+    if is_aux:
+        node_profiles = f'["{coinlower}"]'
+        if params.parent_chain:
+            print(f"  AuxPoW coin: profile will be [{coinlower}] only (requires {params.parent_chain} parent, not added to 'multi')")
+    else:
+        node_profiles = f'["{coinlower}", "multi"]'
+
+    if not compose_path.exists():
+        print(f"  [SKIP] docker-compose.yml not found at {compose_path}")
+        return
+
+    content = compose_path.read_text(encoding='utf-8')
+
+    # Idempotency guard
+    if f'container_name: spiralpool-{coinlower}' in content:
+        print(f"  [SKIP] {symbol_upper} already in docker-compose.yml")
+        return
+
+    # Port conflict detection
+    existing_ports = set(re.findall(r'"(\d+):\d+"', content))
+    for port, label in [(stratum_v1, "Stratum V1"), (stratum_tls, "Stratum TLS")]:
+        if str(port) in existing_ports:
+            print(f"  [WARN] {label} port {port} already in docker-compose.yml")
+
+    # AuxPoW comment in service header
+    auxpow_comment = ""
+    if is_aux and params.parent_chain:
+        auxpow_comment = f"\n  # NOTE: AuxPoW — merge-mined with {params.parent_chain}. Start alongside the {params.parent_chain.lower()} profile."
+
+    # ── Anchor 1: Insert coin service block before PostgreSQL ─────────────────
+    service_block = f"""
+  # {params.name} ({symbol_upper}) - {algo_upper}{auxpow_comment}
+  # NOTE: no-new-privileges NOT set - gosu requires setuid for privilege drop
+  {coinlower}:
+    profiles: {node_profiles}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.{coinlower}
+    container_name: spiralpool-{coinlower}
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - spiralpool
+    ports:
+      - "{params.p2p_port}:{params.p2p_port}"   # P2P
+      - "127.0.0.1:{params.rpc_port}:{params.rpc_port}"   # RPC — localhost only
+    environment:
+      - RPC_USER=${{{symbol_upper}_RPC_USER:-spiral{coinlower}}}
+      - RPC_PASSWORD=${{{symbol_upper}_RPC_PASSWORD:?{symbol_upper}_RPC_PASSWORD must be set}}
+      - ZMQ_PORT={zmq_port}
+    volumes:
+      - ${{{symbol_upper}_DATA_DIR:-{coinlower}-data}}:/home/{coinlower}/.{coinlower}
+      - ./config/{coinlower}.conf.template:/config/{coinlower}.conf.template:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          memory: 1G
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    healthcheck:
+      test: ["CMD", "{coinlower}-cli", "-conf=/home/{coinlower}/.{coinlower}/{coinlower}.conf", "getblockchaininfo"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+"""
+    pg_anchor = '  # ═══════════════════════════════════════════════════════════════════════════\n  # POSTGRESQL DATABASE'
+    if pg_anchor in content:
+        content = content.replace(pg_anchor, service_block + pg_anchor, 1)
+    else:
+        print(f"  [WARN] PostgreSQL anchor not found — service block not inserted")
+
+    # ── Anchor 2: Add symbol to all shared service profiles ───────────────────
+    # The coin's own profile is always added to shared services (postgres, stratum,
+    # dashboard, sentinel, prometheus, grafana) so that `--profile {coinlower}` starts
+    # the full stack.  "multi" stays at the end of these lists regardless of AuxPoW
+    # status — "multi" inclusion in the COIN NODE service itself is what controls
+    # whether the coin starts with `--profile multi` (handled above via node_profiles).
+    old_prof = '"pep", "cat", "multi"]'
+    new_prof = f'"pep", "cat", "{coinlower}", "multi"]'
+    if old_prof in content:
+        content = content.replace(old_prof, new_prof)
+    else:
+        print(f"  [WARN] Profile anchor not found — shared profiles not updated")
+
+    # ── Anchor 3: Add stratum port pair before API port ───────────────────────
+    port_entry = (
+        f'      - "{stratum_v1}:{stratum_v1}"   # {symbol_upper} Stratum V1\n'
+        f'      - "{stratum_tls}:{stratum_tls}"   # {symbol_upper} Stratum TLS\n'
+    )
+    api_anchor = '      # API\n      - "4000:4000"'
+    if api_anchor in content:
+        content = content.replace(api_anchor, port_entry + api_anchor, 1)
+    else:
+        print(f"  [WARN] API port anchor not found — stratum ports not added")
+
+    # ── Anchor 4: Add depends_on entry after catcoin ──────────────────────────
+    cat_dep = '      catcoin:\n        condition: service_healthy\n        required: false'
+    new_dep = (
+        f'      catcoin:\n        condition: service_healthy\n        required: false\n'
+        f'      {coinlower}:\n        condition: service_healthy\n        required: false'
+    )
+    if cat_dep in content:
+        content = content.replace(cat_dep, new_dep, 1)
+    else:
+        print(f"  [WARN] catcoin depends_on anchor not found")
+
+    # ── Anchor 5: Add stratum RPC env vars after CAT credentials ──────────────
+    cat_rpc = '      - CAT_RPC_USER=${CAT_RPC_USER:-spiralcat}\n      - CAT_RPC_PASSWORD=${CAT_RPC_PASSWORD:-}'
+    new_rpc = (
+        f'      - CAT_RPC_USER=${{CAT_RPC_USER:-spiralcat}}\n'
+        f'      - CAT_RPC_PASSWORD=${{CAT_RPC_PASSWORD:-}}\n'
+        f'      - {symbol_upper}_RPC_USER=${{{symbol_upper}_RPC_USER:-spiral{coinlower}}}\n'
+        f'      - {symbol_upper}_RPC_PASSWORD=${{{symbol_upper}_RPC_PASSWORD:-}}'
+    )
+    if '      - CAT_RPC_USER=${CAT_RPC_USER:-spiralcat}' in content:
+        content = content.replace(cat_rpc, new_rpc, 1)
+    else:
+        print(f"  [WARN] CAT RPC anchor not found — stratum env vars not added")
+
+    # ── Anchor 6: Add sentinel wallet env var after CAT ───────────────────────
+    cat_wallet = '      - CAT_WALLET_ADDRESS=${CAT_POOL_ADDRESS:-}'
+    new_wallet = (
+        f'      - CAT_WALLET_ADDRESS=${{CAT_POOL_ADDRESS:-}}\n'
+        f'      - {symbol_upper}_WALLET_ADDRESS=${{{symbol_upper}_POOL_ADDRESS:-}}'
+    )
+    if cat_wallet in content:
+        content = content.replace(cat_wallet, new_wallet, 1)
+    else:
+        print(f"  [WARN] CAT wallet anchor not found — sentinel env var not added")
+
+    # ── Anchor 7: Add volume before shared service volumes ────────────────────
+    shared_anchor = '  # Shared service volumes'
+    new_vol = f'  {coinlower}-data:\n    name: spiralpool-{coinlower}-data\n  # Shared service volumes'
+    if shared_anchor in content:
+        content = content.replace(shared_anchor, new_vol, 1)
+    else:
+        print(f"  [WARN] Shared volumes anchor not found — volume not added")
+
+    # ── Anchor 8: Add port comment in file header ─────────────────────────────
+    cat_comment = '#     CAT:                           12335   12337   9932    9933'
+    if cat_comment in content:
+        pad = ' ' * max(1, 35 - len(symbol_upper))
+        new_line = (
+            f'{cat_comment}\n'
+            f'#     {symbol_upper}:{pad}{stratum_v1}   {stratum_tls}   {params.rpc_port}    {params.p2p_port}'
+        )
+        content = content.replace(cat_comment, new_line, 1)
+
+    compose_path.write_text(content, encoding='utf-8')
+    print(f"  Updated: {compose_path}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# NATIVE INSTALL SCRIPT GENERATOR
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def generate_native_install_script(params: CoinParams, release_url: Optional[str] = None) -> str:
+    """
+    Generate scripts/install-{SYMBOL}.sh — a self-contained bash script for
+    native Linux installation, following the install_catcoin() pattern.
+    """
+    coinlower = params.symbol.lower()
+    symbol_upper = params.symbol.upper()
+    zmq_port = params.zmq_port if params.zmq_port else 28000 + (params.rpc_port % 1000)
+    dbcache = 8192 if params.algorithm == "sha256d" else 4096
+
+    auxpow_note = ""
+    # Only emit AuxPoW guidance when the coin explicitly declares it AND the parent
+    # chain is a supported one (BTC or LTC).  Do not add merge mining notes for
+    # standalone coins or coins where detection was ambiguous.
+    confirmed_auxpow = (
+        params.supports_auxpow
+        and params.parent_chain in ("BTC", "LTC")
+        and params.chain_id > 0
+    )
+    if confirmed_auxpow:
+        auxpow_note = (
+            f"\n# ── AuxPoW / Merge Mining ───────────────────────────────────────────────────\n"
+            f"# {params.name} supports merge mining (AuxPoW) with {params.parent_chain}.\n"
+            f"# Chain ID : {params.chain_id}\n"
+            f"# Algorithm: {params.algorithm} (matches {params.parent_chain} parent)\n"
+            f"#\n"
+            f"# The {params.parent_chain} parent node MUST be installed and fully synced before\n"
+            f"# this coin can produce merge-mined blocks.  Spiral Pool's stratum handles\n"
+            f"# AuxPoW proof construction automatically — no extra node config is needed.\n"
+            f"# ─────────────────────────────────────────────────────────────────────────────\n"
+        )
+
+    if release_url:
+        binary_section = f"""    echo "[1/7] Downloading {params.name} binaries..."
+    ARCHIVE="$(basename "{release_url}")"
+    cd /tmp
+    wget -q --show-progress --max-redirect=5 "{release_url}" -O "$ARCHIVE"
+    if [ ! -f "$ARCHIVE" ]; then
+        echo "ERROR: Download failed: {release_url}"
+        echo "  Try setting {symbol_upper}_SOURCE_URL and re-running for compile-from-source."
+        exit 1
+    fi
+    tar -xzf "$ARCHIVE"
+    find /tmp -maxdepth 4 \\( -name "{coinlower}d" -o -name "{coinlower}-cli" -o -name "{coinlower}-tx" \\) \\
+        -exec install -m 755 {{}} /usr/local/bin/ \\;
+    rm -rf /tmp/"$ARCHIVE" /tmp/{coinlower}* 2>/dev/null || true
+    if ! command -v {coinlower}d &>/dev/null; then
+        echo "ERROR: {coinlower}d not found after extraction. Binary names may differ."
+        echo "  Release URL: {release_url}"
+        exit 1
+    fi
+    echo "  Installed: $(command -v {coinlower}d)"
+"""
+    else:
+        binary_section = f"""    # No pre-built binary detected — compile from source
+    SOURCE_URL="${{{symbol_upper}_SOURCE_URL:-}}"
+    if [ -z "$SOURCE_URL" ]; then
+        echo "ERROR: No binary URL available and {symbol_upper}_SOURCE_URL is not set."
+        echo "  Set {symbol_upper}_SOURCE_URL=https://github.com/owner/repo and re-run."
+        exit 1
+    fi
+    echo "[1/7] Compiling {params.name} from source (may take 20-40 minutes)..."
+    apt-get install -y --no-install-recommends \\
+        build-essential autoconf libtool pkg-config git \\
+        libboost-all-dev libssl-dev libevent-dev libzmq5-dev libdb5.3++-dev >/dev/null 2>&1
+    cd /tmp
+    git clone --depth=1 "$SOURCE_URL" {coinlower}-src
+    cd {coinlower}-src
+    ./autogen.sh
+    ./configure --without-gui --disable-tests
+    make -j$(nproc)
+    make install
+    cd /
+    rm -rf /tmp/{coinlower}-src
+    echo "  Compiled and installed {coinlower}d"
+"""
+
+    # Build pre-flight check block only for confirmed AuxPoW coins with a valid parent
+    if confirmed_auxpow:
+        parent_lower = params.parent_chain.lower()
+        auxpow_preflight = (
+            f"# ─── AuxPoW pre-flight check ────────────────────────────────────────────────\n"
+            f"# {params.name} requires {params.parent_chain} for merge mining.\n"
+            f"if ! command -v {parent_lower}d &>/dev/null; then\n"
+            f"    echo \"WARN: {params.parent_chain} ({parent_lower}d) not found.\"\n"
+            f"    echo \"  Merge mining will not work until {params.parent_chain} is installed and synced.\"\n"
+            f"fi"
+        )
+    else:
+        auxpow_preflight = ""
+
+    script = f"""#!/usr/bin/env bash
+# SPDX-License-Identifier: BSD-3-Clause
+# SPDX-FileCopyrightText: Copyright (c) 2026 Spiral Pool Contributors
+#
+# {symbol_upper} NATIVE INSTALL SCRIPT FOR SPIRAL POOL
+# Generated by: scripts/add-coin.py
+#
+# Installs {params.name} ({symbol_upper}) as a systemd service for Spiral Pool.
+#
+# Usage:
+#   sudo bash scripts/install-{symbol_upper}.sh
+#
+# Prerequisites:
+#   - Ubuntu 22.04+ or Debian 12+
+#   - Root/sudo access
+#   - Spiral Pool at $INSTALL_DIR
+#{auxpow_note}
+set -euo pipefail
+
+# ─── Environment defaults ────────────────────────────────────────────────────
+POOL_USER="${{POOL_USER:-spiralpool}}"
+INSTALL_DIR="${{INSTALL_DIR:-/spiralpool}}"
+DATA_DIR="${{DATA_DIR:-$INSTALL_DIR/{coinlower}}}"
+CONFIG_FILE="$DATA_DIR/{coinlower}.conf"
+SERVICE_NAME="{coinlower}d"
+WALLET_NAME="wallet-{symbol_upper}"
+
+# ─── Sanity checks ───────────────────────────────────────────────────────────
+if [ "$EUID" -ne 0 ]; then
+    echo "ERROR: Run as root: sudo bash $0"
+    exit 1
+fi
+
+echo ""
+echo "Installing {params.name} ({symbol_upper}) for Spiral Pool..."
+echo ""
+{auxpow_preflight}
+install_{coinlower}() {{
+{binary_section}
+    # ─── User and directory setup ─────────────────────────────────────────────
+    echo "[2/7] Setting up user and directories..."
+    if ! id -u "$POOL_USER" &>/dev/null; then
+        useradd -r -m -s /bin/bash "$POOL_USER"
+        echo "  Created pool user: $POOL_USER"
+    fi
+    mkdir -p "$DATA_DIR/wallets/$WALLET_NAME"
+    # Enforce ownership and permissions on the data directory and all contents
+    chown -R "$POOL_USER:$POOL_USER" "$DATA_DIR"
+    chmod 750 "$DATA_DIR"
+    # Wallet dirs need execute bit for directory traversal
+    find "$DATA_DIR" -type d -exec chmod 750 {{}} \;
+    # Wallet files are sensitive — restrict to owner only
+    find "$DATA_DIR" -type f -exec chmod 640 {{}} \;
+
+    # ─── Generate config ──────────────────────────────────────────────────────
+    echo "[3/7] Generating configuration..."
+    RPC_PASSWORD=$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 32)
+    RPC_USER="spiral{coinlower}"
+    cat > "$CONFIG_FILE" << COINCONF
+# {params.name} ({symbol_upper}) - Spiral Pool config
+listen=1
+port={params.p2p_port}
+maxconnections=125
+server=1
+rpcuser=$RPC_USER
+rpcpassword=$RPC_PASSWORD
+rpcallowip=127.0.0.1
+rpcbind=127.0.0.1
+rpcport={params.rpc_port}
+rpcworkqueue=64
+rpcthreads=4
+zmqpubhashblock=tcp://127.0.0.1:{zmq_port}
+zmqpubrawtx=tcp://127.0.0.1:{zmq_port}
+zmqpubrawblock=tcp://127.0.0.1:{zmq_port}
+dbcache={dbcache}
+par=0
+disablewallet=0
+walletdir=$DATA_DIR/wallets
+prune=0
+txindex=1
+printtoconsole=0
+logtimestamps=1
+shrinkdebugfile=1
+COINCONF
+    chown "$POOL_USER:$POOL_USER" "$CONFIG_FILE"
+    chmod 600 "$CONFIG_FILE"
+    echo "  Config: $CONFIG_FILE"
+
+    # ─── Firewall ─────────────────────────────────────────────────────────────
+    echo "[4/7] Opening firewall ports..."
+    if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+        ufw allow {params.p2p_port}/tcp comment "{symbol_upper} P2P" 2>/dev/null || true
+        ufw allow {params.stratum_port}/tcp comment "{symbol_upper} Stratum V1" 2>/dev/null || true
+        ufw allow {params.stratum_tls_port}/tcp comment "{symbol_upper} Stratum TLS" 2>/dev/null || true
+        echo "  UFW: opened {params.p2p_port} (P2P), {params.stratum_port} (V1), {params.stratum_tls_port} (TLS)"
+    elif command -v firewall-cmd &>/dev/null; then
+        firewall-cmd --permanent --add-port={params.p2p_port}/tcp 2>/dev/null || true
+        firewall-cmd --permanent --add-port={params.stratum_port}/tcp 2>/dev/null || true
+        firewall-cmd --permanent --add-port={params.stratum_tls_port}/tcp 2>/dev/null || true
+        firewall-cmd --reload 2>/dev/null || true
+        echo "  firewalld: opened {params.p2p_port}, {params.stratum_port}, {params.stratum_tls_port}"
+    else
+        echo "  [WARN] No active firewall detected — open ports manually:"
+        echo "    {params.p2p_port}/tcp  P2P"
+        echo "    {params.stratum_port}/tcp  Stratum V1"
+        echo "    {params.stratum_tls_port}/tcp  Stratum TLS"
+    fi
+
+    # ─── Systemd service ──────────────────────────────────────────────────────
+    echo "[5/7] Installing systemd service..."
+    cat > "/etc/systemd/system/$SERVICE_NAME.service" << SVCFILE
+[Unit]
+Description={params.name} daemon for Spiral Pool
+After=network.target
+
+[Service]
+Type=forking
+User=$POOL_USER
+Group=$POOL_USER
+ExecStart=/usr/local/bin/{coinlower}d -conf=$CONFIG_FILE -daemon
+ExecStop=/usr/local/bin/{coinlower}-cli -conf=$CONFIG_FILE stop
+Restart=on-failure
+RestartSec=30
+TimeoutStartSec=120
+TimeoutStopSec=60
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target
+SVCFILE
+    systemctl daemon-reload
+    systemctl enable "$SERVICE_NAME"
+
+    # ─── Start and wait ───────────────────────────────────────────────────────
+    echo "[6/7] Starting $SERVICE_NAME..."
+    systemctl start "$SERVICE_NAME"
+    MAX_WAIT=120
+    WAITED=0
+    until {coinlower}-cli -conf="$CONFIG_FILE" getblockchaininfo &>/dev/null; do
+        if [ $WAITED -ge $MAX_WAIT ]; then
+            echo "  ERROR: daemon did not start within $MAX_WAIT seconds"
+            echo "  Check: journalctl -u $SERVICE_NAME -n 50"
+            exit 1
+        fi
+        echo "  Waiting for {coinlower}d... ($WAITED / $MAX_WAIT s)"
+        sleep 5
+        WAITED=$((WAITED + 5))
+    done
+
+    # ─── Wallet and address ───────────────────────────────────────────────────
+    echo "[7/7] Creating wallet and mining address..."
+    CLI="{coinlower}-cli -conf=$CONFIG_FILE"
+    $CLI createwallet "$WALLET_NAME" 2>/dev/null || true
+    POOL_ADDRESS=$($CLI -rpcwallet="$WALLET_NAME" getnewaddress "pool" "legacy")
+    echo "  Pool address: $POOL_ADDRESS"
+
+    # Re-apply permissions after wallet creation (daemon may have created new files)
+    chown -R "$POOL_USER:$POOL_USER" "$DATA_DIR"
+    find "$DATA_DIR" -type d -exec chmod 750 {{}} \;
+    find "$DATA_DIR" -type f -exec chmod 640 {{}} \;
+
+    ENV_FILE="$INSTALL_DIR/.env"
+    touch "$ENV_FILE"
+    for PAIR in "{symbol_upper}_POOL_ADDRESS=$POOL_ADDRESS" "{symbol_upper}_RPC_PASSWORD=$RPC_PASSWORD" "{symbol_upper}_RPC_USER=$RPC_USER"; do
+        KEY="${{PAIR%%=*}}"
+        VAL="${{PAIR#*=}}"
+        if grep -q "^$KEY=" "$ENV_FILE" 2>/dev/null; then
+            sed -i "s|^$KEY=.*|$KEY=$VAL|" "$ENV_FILE"
+        else
+            echo "$KEY=$VAL" >> "$ENV_FILE"
+        fi
+    done
+    echo "  Credentials saved to $ENV_FILE"
+
+    CONFIG_YAML="$INSTALL_DIR/config/config.yaml"
+    if [ -f "$CONFIG_YAML" ] && grep -q "^  pool_address:" "$CONFIG_YAML"; then
+        sed -i "s|^  pool_address:.*|  pool_address: $POOL_ADDRESS  # {symbol_upper}|" "$CONFIG_YAML"
+    fi
+
+    WALLET_BIN="/usr/local/bin/spiralpool-wallet"
+    if [ -f "$WALLET_BIN" ] && ! grep -q "^    {coinlower})" "$WALLET_BIN"; then
+        sed -i "/^esac$/i\\\\    {coinlower})\\\\n        CONF=\\"$CONFIG_FILE\\"\\\\n        WALLET=\\"$WALLET_NAME\\"\\\\n        ;;" "$WALLET_BIN"
+    fi
+
+    echo ""
+    echo "  {params.name} ({symbol_upper}) install complete!"
+    echo "  Pool address : $POOL_ADDRESS"
+    echo "  Stratum V1   : {params.stratum_port}"
+    echo "  Stratum TLS  : {params.stratum_tls_port}"
+    echo "  RPC port     : {params.rpc_port} (localhost only)"
+    echo "  Service      : systemctl status $SERVICE_NAME"
+    echo ""
+    echo "  Connection   : stratum+tcp://YOUR_IP:{params.stratum_port}"
+    echo "  Sync status  : $CLI getblockchaininfo"
+    echo ""
+    echo "  IMPORTANT: Blockchain sync needed before mining (hours to days)."
+}}
+
+install_{coinlower}
+"""
+    return script
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1303,6 +2103,12 @@ Examples:
                         help="Skip CoinGecko API lookup")
     parser.add_argument("--force", "-f", action="store_true",
                         help="Overwrite existing files without prompting")
+    parser.add_argument("--binary-url", metavar="URL",
+                        help="Override auto-detected binary download URL for Dockerfile/installer")
+    parser.add_argument("--skip-docker", action="store_true",
+                        help="Skip Docker file generation (Dockerfile + conf.template + compose patch)")
+    parser.add_argument("--skip-native", action="store_true",
+                        help="Skip native install script generation")
 
     args = parser.parse_args()
 
@@ -1318,6 +2124,7 @@ Examples:
     # Initialize params based on mode
     params = None
     warnings = []
+    chainparams_content = ""
 
     if args.from_json:
         # Load from JSON
@@ -1331,7 +2138,7 @@ Examples:
 
     elif args.github:
         # Fully automated mode
-        params, warnings = auto_onboard_coin(args.symbol, args.github, args.algorithm)
+        params, warnings, chainparams_content = auto_onboard_coin(args.symbol, args.github, args.algorithm)
 
         # Override with command line args if provided
         if args.name:
@@ -1405,55 +2212,125 @@ Examples:
     # Get stratum ports for the new coin
     stratum_ports = get_next_available_ports(manifest_file)
 
-    # Generate files
+    # Ensure stratum ports are set on params (used by docker/install generators)
+    if params.stratum_port == 0:
+        params.stratum_port = stratum_ports["stratum_v1"]
+    if params.stratum_v2_port == 0:
+        params.stratum_v2_port = stratum_ports["stratum_v2"]
+    if params.stratum_tls_port == 0:
+        params.stratum_tls_port = stratum_ports["stratum_tls"]
+    if params.zmq_port == 0:
+        params.zmq_port = 28000 + (params.rpc_port % 1000)
+
+    # Generate core files
     go_code = generate_go_code(params)
     manifest_entry = generate_manifest_entry(params, stratum_ports)
+
+    # Step A: Binary URL detection
+    symbol_lower = params.symbol.lower()
+    release_url: Optional[str] = None
+    if getattr(args, 'binary_url', None):
+        release_url = args.binary_url
+        print(f"\n  Using provided binary URL: {release_url}")
+    elif args.github and not getattr(args, 'skip_docker', False) and not getattr(args, 'skip_native', False):
+        print(f"\n[A] Detecting release binary URL...")
+        release_url = try_detect_release_url(args.github, params.symbol)
+        if release_url:
+            print(f"  Found: {release_url}")
+        else:
+            print(f"  [!] No Linux binary found — Dockerfile will use compile-from-source")
+
+    # Step B–C: Docker files
+    dockerfile_content = ""
+    conf_content = ""
+    if not getattr(args, 'skip_docker', False):
+        dns_seeds = detect_dns_seeds(chainparams_content) if chainparams_content else []
+        dockerfile_content = generate_node_dockerfile(params, release_url)
+        conf_content = generate_conf_template(params, dns_seeds)
+
+    # Step D: Native install script
+    install_script = ""
+    if not getattr(args, 'skip_native', False):
+        install_script = generate_native_install_script(params, release_url)
+
+    # ── File paths ────────────────────────────────────────────────────────────
+    docker_dir = output_dir / "docker"
+    dockerfile_path = docker_dir / f"Dockerfile.{symbol_lower}"
+    conf_template_path = docker_dir / "config" / f"{symbol_lower}.conf.template"
+    compose_path = docker_dir / "docker-compose.yml"
+    install_script_path = output_dir / "scripts" / f"install-{params.symbol.upper()}.sh"
+    params_file = output_dir / "scripts" / f"{symbol_lower}_params.json"
 
     print("\n" + "=" * 70)
     print("GENERATED OUTPUT")
     print("=" * 70)
 
     if args.dry_run:
-        print(f"\n[DRY RUN] Would write to: {go_file}")
-        print("-" * 70)
-        print(go_code[:3000] + "\n... (truncated)" if len(go_code) > 3000 else go_code)
-        print("-" * 70)
-        print(f"\n[DRY RUN] Would append to: {manifest_file}")
-        print("-" * 70)
-        print(manifest_entry)
-        print("-" * 70)
+        print(f"\n[DRY RUN] Would write: {go_file}")
+        print(f"[DRY RUN] Would append: {manifest_file}")
+        if dockerfile_content:
+            print(f"[DRY RUN] Would write: {dockerfile_path}")
+            print(f"[DRY RUN] Would write: {conf_template_path}")
+            print(f"[DRY RUN] Would patch: {compose_path}")
+        if install_script:
+            print(f"[DRY RUN] Would write: {install_script_path}")
+        print("\n--- Go stub (first 1000 chars) ---")
+        print(go_code[:1000] + "\n...(truncated)")
     else:
         # Write Go file
         go_dir.mkdir(parents=True, exist_ok=True)
         with open(go_file, 'w') as f:
             f.write(go_code)
-        print(f"\nWrote Go implementation: {go_file}")
+        print(f"\n  Go implementation:  {go_file}")
 
-        # Append to manifest (if file exists)
+        # Append to manifest
         if manifest_file.exists():
             with open(manifest_file, 'a') as f:
                 f.write("\n" + manifest_entry)
-            print(f"Appended manifest entry: {manifest_file}")
+            print(f"  Manifest entry:     {manifest_file}")
         else:
-            print(f"Manifest file not found: {manifest_file}")
-            print("Manifest entry to add manually:")
+            print(f"  [WARN] Manifest not found: {manifest_file}")
             print(manifest_entry)
 
-    # Save params to JSON for reference
-    params_file = output_dir / "scripts" / f"{params.symbol.lower()}_params.json"
-    if not args.dry_run:
+        # Write Dockerfile
+        if dockerfile_content:
+            docker_dir.mkdir(parents=True, exist_ok=True)
+            (docker_dir / "config").mkdir(parents=True, exist_ok=True)
+            with open(dockerfile_path, 'w') as f:
+                f.write(dockerfile_content)
+            print(f"  Dockerfile:         {dockerfile_path}")
+
+            with open(conf_template_path, 'w') as f:
+                f.write(conf_content)
+            print(f"  Node config:        {conf_template_path}")
+
+            # Patch docker-compose.yml
+            print(f"  Patching compose...")
+            patch_docker_compose(params, compose_path)
+
+        # Write native install script
+        if install_script:
+            with open(install_script_path, 'w') as f:
+                f.write(install_script)
+            try:
+                import stat
+                install_script_path.chmod(install_script_path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+            except Exception:
+                pass
+            print(f"  Native installer:   {install_script_path}")
+
+        # Save params to JSON
         params_file.parent.mkdir(parents=True, exist_ok=True)
         with open(params_file, 'w') as f:
             json.dump(asdict(params), f, indent=2)
-        print(f"Parameters saved to: {params_file}")
+        print(f"  Parameters JSON:    {params_file}")
 
     # Summary
     print("\n" + "=" * 70)
     print("NEXT STEPS")
     print("=" * 70)
 
-    # Output stratum ports in a parseable format for Windows batch script
-    # This line is parsed by spiralpool-add-coin.bat to configure Windows Firewall
+    # Parseable output for spiralpool-add-coin.bat (Windows Firewall configuration)
     print(f"\n__STRATUM_PORTS__:{stratum_ports['stratum_v1']}:{stratum_ports['stratum_v2']}:{stratum_ports['stratum_tls']}")
 
     if warnings:
@@ -1461,11 +2338,25 @@ Examples:
         for warn in warnings:
             print(f"  ⚠ {warn}")
 
+    if not args.dry_run:
+        if dockerfile_content:
+            print(f"""
+  Docker deployment:
+    docker compose --profile {symbol_lower} build --no-cache
+    docker compose --profile {symbol_lower} up -d
+""")
+        if install_script:
+            print(f"""  Native deployment:
+    sudo bash {install_script_path}
+""")
+
     print(f"""
 1. REVIEW generated files:
    - Go implementation: {go_file}
    - Manifest entry: {manifest_file}
-   - Saved parameters: {params_file}
+   {"- Dockerfile:        " + str(dockerfile_path) if dockerfile_content else ""}
+   {"- Node config:       " + str(conf_template_path) if conf_content else ""}
+   {"- Native installer:  " + str(install_script_path) if install_script else ""}
 
 2. VERIFY consensus-critical values:
    - genesis_hash: {params.genesis_hash[:16]}... (verify against official sources)
@@ -1483,11 +2374,6 @@ Examples:
 4. RUN validation tests:
    cd {output_dir}/src/stratum
    go test -v ./internal/coin/... -run TestManifest
-
-5. UPDATE documentation (if this is a production coin):
-   - docs/MULTI-COIN.md (add to port table)
-   - README.md (add to supported coins list)
-   - config/config.example.yaml (add example configuration)
 """)
 
     return 0
