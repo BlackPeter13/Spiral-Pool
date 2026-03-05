@@ -156,7 +156,16 @@ get_node_uuid() {
             return
         fi
     fi
-    echo "unknown"
+    # Generate and persist a new UUID if file is missing or empty
+    local new_uuid
+    if command -v uuidgen &>/dev/null; then
+        new_uuid=$(uuidgen)
+    else
+        new_uuid=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "node-$(hostname)-$(date +%s)")
+    fi
+    mkdir -p "${INSTALL_DIR}/config" 2>/dev/null || true
+    echo "$new_uuid" > "$uuid_file" 2>/dev/null || true
+    echo "$new_uuid"
 }
 
 # Load notification settings from Sentinel config
