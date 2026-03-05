@@ -16693,9 +16693,14 @@ def monitor_loop(state):
                         # One alert per episode: skip if already alerted during this high-odds session
                         already_alerted = state.high_odds_session_alerted.get(_ho_sym, False)
 
-                        # Only send if: sustained for 1 hour AND not already alerted this episode
+                        # Hard 6-hour cooldown — prevents re-firing when odds briefly dip and recover
+                        HIGH_ODDS_COOLDOWN = 6 * 3600
+                        last_alert_time = state.high_odds_last_alert.get(_ho_sym, 0)
+                        on_cooldown = (odds_now - last_alert_time) < HIGH_ODDS_COOLDOWN
+
+                        # Only send if: sustained for 1 hour AND not already alerted AND not on cooldown
                         sustained_duration = odds_now - state.high_odds_first_detected[_ho_sym]
-                        if sustained_duration >= HIGH_ODDS_SUSTAIN and not already_alerted:
+                        if sustained_duration >= HIGH_ODDS_SUSTAIN and not already_alerted and not on_cooldown:
                             if send_alert("high_odds", create_high_odds_embed(_ho_pct, _ho_net_phs, _ho_odds.get("days_per_block", float('inf')), _ho_sym), state):
                                 state.high_odds_last_alert[_ho_sym] = odds_now
                                 state.high_odds_session_alerted[_ho_sym] = True
