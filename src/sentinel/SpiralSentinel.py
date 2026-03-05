@@ -4932,7 +4932,7 @@ def get_alert_cooldowns():
         "hashrate_divergence": 3600,   # 1 hour - pool/miner discrepancy
         # Fleet/network alerts
         "power_event": 600,            # 10 minutes
-        "hashrate_crash": 3600,        # 1 hour
+        "hashrate_crash": 21600,       # 6 hours - prevent repeated crash alerts on sustained drops
         "pool_hashrate_drop": 1800,    # 30 minutes
         # Block alerts
         "block_found": 0,              # No cooldown - always celebrate!
