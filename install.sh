@@ -8219,17 +8219,6 @@ update_existing_peers() {
         return 0
     fi
 
-    # Locate ha-add-peer.sh source (same logic as create_helper_scripts)
-    local script_src=""
-    if [[ -f "${SCRIPT_DIR}/scripts/linux/ha-add-peer.sh" ]]; then
-        script_src="${SCRIPT_DIR}/scripts/linux/ha-add-peer.sh"
-    elif [[ -f "${SCRIPT_DIR}/scripts/ha-add-peer.sh" ]]; then
-        script_src="${SCRIPT_DIR}/scripts/ha-add-peer.sh"
-    else
-        log_warn "ha-add-peer.sh not found in installer — cannot update existing peers"
-        return 0
-    fi
-
     local ssh_key="/home/${POOL_USER}/.ssh/id_ed25519"
     local ssh_opts="-o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10"
     if [[ -f "$ssh_key" ]]; then
@@ -8253,39 +8242,19 @@ update_existing_peers() {
             continue
         fi
 
-        # SCP the script to the peer
-        # Always stage through /tmp: fixes both permission issues (installer dir
-        # under another user's home with 700) and CRLF from Windows zip extractions.
-        cp "$script_src" /tmp/.ha-add-peer-scp.sh
-        sed -i 's/\r//' /tmp/.ha-add-peer-scp.sh
-        chmod 644 /tmp/.ha-add-peer-scp.sh
-        local scp_src="/tmp/.ha-add-peer-scp.sh"
-        if ! sudo -u "$POOL_USER" scp $ssh_opts "$scp_src" "${POOL_USER}@${peer_ip}:/tmp/ha-add-peer.sh" &>/dev/null; then
-            log_warn "Cannot SCP ha-add-peer.sh to ${peer_ip} — update manually"
-            rm -f /tmp/.ha-add-peer-scp.sh 2>/dev/null || true
-            failed=$((failed + 1))
-            continue
-        fi
-        rm -f /tmp/.ha-add-peer-scp.sh 2>/dev/null || true
-
-        # Install the script on the peer and run it
-        # /spiralpool/scripts/ is owned by spiraluser — no sudo needed for cp/chmod
-        # sudo is only needed for ha-add-peer.sh itself (UFW + patroni.yml edits)
-        if sudo -u "$POOL_USER" ssh $ssh_opts "${POOL_USER}@${peer_ip}" \
-            "cp /tmp/ha-add-peer.sh /spiralpool/scripts/ha-add-peer.sh && \
-             chmod +x /spiralpool/scripts/ha-add-peer.sh && \
-             sudo /spiralpool/scripts/ha-add-peer.sh ${our_ip}" 2>/dev/null; then
+        # Run ha-add-peer.sh on the peer to add our IP to its firewall/pg_hba.
+        # The peer already has the script from its own install — just execute it.
+        # sudo is needed because the script modifies UFW rules and patroni.yml.
+        local ssh_output
+        if ssh_output=$(sudo -u "$POOL_USER" ssh $ssh_opts "${POOL_USER}@${peer_ip}" \
+            "sudo /spiralpool/scripts/ha-add-peer.sh ${our_ip}" 2>&1); then
             log_success "Peer ${peer_ip} updated with our IP (${our_ip})"
             updated=$((updated + 1))
         else
-            log_warn "ha-add-peer.sh failed on ${peer_ip} — update manually:"
+            log_warn "ha-add-peer.sh failed on ${peer_ip}: ${ssh_output:-no output}"
             log_warn "  On ${peer_ip}, run: sudo /spiralpool/scripts/ha-add-peer.sh ${our_ip}"
             failed=$((failed + 1))
         fi
-
-        # Clean up temp file on peer
-        sudo -u "$POOL_USER" ssh $ssh_opts "${POOL_USER}@${peer_ip}" \
-            "rm -f /tmp/ha-add-peer.sh" &>/dev/null || true
     done
 
     if [[ $updated -gt 0 ]]; then
@@ -17015,22 +16984,24 @@ setup_patroni() {
         log_success "Patroni setup complete - PostgreSQL now has automatic failover"
     fi
 
-    # On HA master: create sudoers for backup nodes to replicate PostgreSQL data
-    # Backup nodes SSH as spiraluser and need sudo access to rsync as postgres
-    # and to stop/start PostgreSQL/Patroni services during cold-copy replication
-    if [[ "$HA_MODE" == "ha-master" ]]; then
-        local ha_sudoers="/etc/sudoers.d/spiralpool-ha-postgres"
-        if [[ ! -f "$ha_sudoers" ]]; then
-            log "Creating sudoers rules for HA replication access..."
-            sudo tee "$ha_sudoers" > /dev/null << SUDOERS_EOF
+    # Create sudoers for HA operations on ALL HA nodes (master AND backup).
+    # Both roles need these rules because:
+    #   - Backup nodes SSH to master to run ha-add-peer.sh during install
+    #   - Master nodes SSH to backups for the same reason during peer updates
+    #   - Either node may need replication access after a failover/role swap
+    local ha_sudoers="/etc/sudoers.d/spiralpool-ha-postgres"
+    if [[ ! -f "$ha_sudoers" ]] || ! grep -q "ha-add-peer" "$ha_sudoers" 2>/dev/null; then
+        log "Creating sudoers rules for HA operations..."
+        sudo tee "$ha_sudoers" > /dev/null << SUDOERS_EOF
 # Allow ${POOL_USER} to run rsync as postgres (for HA PostgreSQL replication)
 ${POOL_USER} ALL=(postgres) NOPASSWD: /usr/bin/rsync, /usr/bin/true, /usr/bin/ls
 # Allow ${POOL_USER} to stop/start PostgreSQL and Patroni (for cold-copy replication)
 ${POOL_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl stop postgresql@*, /usr/bin/systemctl start postgresql@*, /usr/bin/systemctl is-active postgresql@*, /usr/bin/systemctl stop patroni, /usr/bin/systemctl start patroni
+# Allow ${POOL_USER} to run ha-add-peer.sh (called remotely during HA peer setup)
+${POOL_USER} ALL=(root) NOPASSWD: ${INSTALL_DIR}/scripts/ha-add-peer.sh
 SUDOERS_EOF
-            sudo chmod 440 "$ha_sudoers"
-            log_success "HA replication sudoers created"
-        fi
+        sudo chmod 440 "$ha_sudoers"
+        log_success "HA sudoers created"
     fi
 }
 
