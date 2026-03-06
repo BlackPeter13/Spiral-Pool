@@ -32691,9 +32691,10 @@ main() {
 
     # Strip Windows CRLF line endings from all installed scripts.
     # Prevents shebangs from becoming /bin/bash\r when files are copied from a Windows checkout.
-    find "$INSTALL_DIR/bin" "$INSTALL_DIR/scripts" /usr/local/bin -maxdepth 2 -type f 2>/dev/null \
-        | xargs grep -lU $'\r' 2>/dev/null \
-        | xargs sed -i 's/\r//' 2>/dev/null || true
+    # Only targets known text file types — never touches Go/C binaries.
+    find "$INSTALL_DIR/bin" "$INSTALL_DIR/scripts" /usr/local/bin -maxdepth 2 -type f \
+        \( -name "*.sh" -o -name "*.py" -o -name "*.yaml" -o -name "*.yml" -o -name "*.conf" -o -name "*.json" \) \
+        2>/dev/null | xargs -r sed -i 's/\r//' 2>/dev/null || true
 
     start_services
     print_completion
