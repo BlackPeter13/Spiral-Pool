@@ -10521,6 +10521,13 @@ def create_block_embed(block_num, prices=None, bri=None, found_by=None, miner_de
                 "value": hero_display,
                 "inline": False
             })
+        elif found_by:
+            # Worker name from pool API didn't match any miner name — show it anyway
+            fields.append({
+                "name": "🎯 Captured By",
+                "value": f"⚡ **{found_by}** {found_by_text}",
+                "inline": False
+            })
     elif found_by:
         fields.append({
             "name": "🎯 Captured By",
@@ -14518,7 +14525,8 @@ class MonitorState:
 
                 # Check if this block belongs to our wallet/workers
                 block_miner = block.get("miner", "")
-                block_worker = block.get("worker", block.get("miner", "unknown"))
+                # Prefer 'source' (worker name from stratum), fall back to 'miner' (wallet address)
+                block_worker = block.get("source", "") or block.get("miner", "unknown")
 
                 # Only process blocks from our wallet
                 if wallet and block_miner and not block_miner.startswith(wallet):
@@ -16588,13 +16596,14 @@ def monitor_loop(state):
                 state.pool_blocks_found += 1
                 state.record_block_time()
                 # Build miner details for the block embed
+                # Case-insensitive comparison: pool API worker name may differ in case from miner name
                 miner_details = {}
                 for mname, hr in md.items():
                     miner_details[mname] = {
                         "hashrate": hr,
                         "online": miner_status.get(mname) != "offline",
                         "power": power.get(mname, 0),
-                        "found_block": mname == worker
+                        "found_block": mname.lower() == worker.lower()
                     }
                 send_alert("block_found", create_block_embed(
                     block["height"], prices, bri, worker,
