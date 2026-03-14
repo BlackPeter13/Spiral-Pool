@@ -980,9 +980,12 @@ func (m *Manager) buildCoinbase2Only(template *daemon.BlockTemplate) (coinbase1U
 	// Sequence
 	cb2 = append(cb2, 0xff, 0xff, 0xff, 0xff)
 
-	// Output count
+	// Output count — skip witness commitment for non-SegWit coins.
+	// Some non-SegWit daemons (e.g. QBX) still include default_witness_commitment
+	// in getblocktemplate; including it causes "unexpected-witness" rejection.
+	includeWitness := template.DefaultWitnessCommitment != "" && m.coinImpl.SupportsSegWit()
 	outputCount := byte(0x01)
-	if template.DefaultWitnessCommitment != "" {
+	if includeWitness {
 		outputCount = 0x02
 	}
 	cb2 = append(cb2, outputCount)
@@ -1001,8 +1004,8 @@ func (m *Manager) buildCoinbase2Only(template *daemon.BlockTemplate) (coinbase1U
 	cb2 = append(cb2, byte(len(script)))
 	cb2 = append(cb2, script...)
 
-	// Output 2: Witness commitment (if present)
-	if template.DefaultWitnessCommitment != "" {
+	// Output 2: Witness commitment (SegWit coins only)
+	if includeWitness {
 		witnessScript, err := hex.DecodeString(template.DefaultWitnessCommitment)
 		if err != nil {
 			m.logger.Errorw("CRITICAL: Invalid witness commitment hex",
