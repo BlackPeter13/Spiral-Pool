@@ -1274,7 +1274,7 @@ pool_stats_cache = {
     "shares_per_second": 0,
     "network_difficulty": 0,
     "block_height": 0,
-    "blocks_found": 0,
+    "blocks_found": -1,
     "blocks_pending": 0,
     "last_block_time": None,
     "last_block_finder": None,  # Miner that found the last block
@@ -1688,8 +1688,11 @@ def fetch_pool_stats():
                     pool_stats_cache["last_block_height"] = latest_block.get("blockHeight")
                     # Get the miner who found the block (worker name or address)
                     pool_stats_cache["last_block_finder"] = latest_block.get("miner") or latest_block.get("worker") or latest_block.get("minerAddress")
-                # Detect newly found blocks (count increased since last poll)
-                if new_count > old_count and old_count > 0:
+                # Detect newly found blocks (count increased since last poll).
+                # old_count == -1 on the very first poll — just establishes the baseline,
+                # no celebration (avoids false-triggering existing blocks on startup).
+                # All subsequent increases (old_count >= 0) trigger the celebration.
+                if new_count > old_count and old_count >= 0:
                     # Announce the newest blocks (difference = new blocks found since last check)
                     num_new = new_count - old_count
                     new_blocks_to_announce = blocks[:num_new]
