@@ -2166,6 +2166,7 @@
                 <div style="display:flex; align-items:center; gap:0.5rem;">
                     <select id="chart-period" class="chart-period-select" onclick="event.stopPropagation()" onchange="changeChartPeriod()">
                         <option value="1h">1 Hour</option>
+                        <option value="15m">15 Minutes</option>
                         <option value="24h" selected>24 Hours</option>
                         <option value="7d">7 Days</option>
                         <option value="30d">30 Days</option>
@@ -2555,6 +2556,7 @@
 
         // Separate history storage for each time period
         const hashrateHistoryData = {
+            '15m': [],   // 15-sec intervals, max 60 points
             '1h': [],    // 1-min intervals, max 60 points
             '24h': [],   // 5-min intervals, max 288 points
             '7d': [],    // 30-min intervals, max 336 points
@@ -2562,13 +2564,14 @@
         };
 
         const historyConfig = {
+            '15m': { maxPoints: 60, intervalMs: 15 * 1000, label: '15 Minutes' },
             '1h': { maxPoints: 60, intervalMs: 60 * 1000, label: '1 Hour' },
             '24h': { maxPoints: 288, intervalMs: 5 * 60 * 1000, label: '24 Hours' },
             '7d': { maxPoints: 336, intervalMs: 30 * 60 * 1000, label: '7 Days' },
             '30d': { maxPoints: 360, intervalMs: 2 * 60 * 60 * 1000, label: '30 Days' }
         };
 
-        let lastHistoryUpdate = { '1h': 0, '24h': 0, '7d': 0, '30d': 0 };
+        let lastHistoryUpdate = { '15m': 0, '1h': 0, '24h': 0, '7d': 0, '30d': 0 };
 
         // Initialize Chart
         function initHashrateChart() {
@@ -2723,7 +2726,7 @@
         // Format time label based on period
         function formatTimeLabel(period) {
             const now = new Date();
-            if (period === '1h') {
+            if (period === '15m' || period === '1h') {
                 return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
             } else if (period === '24h') {
                 return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -2746,6 +2749,7 @@
                 // Seed each period with the appropriate time range
                 const now = Date.now();
                 const periodCutoffs = {
+                    '15m': now - 15 * 60 * 1000,
                     '1h':  now - 1 * 3600 * 1000,
                     '24h': now - 24 * 3600 * 1000,
                     '7d':  now - 7 * 24 * 3600 * 1000,
@@ -2767,7 +2771,7 @@
                         if (tsMs - lastTs >= targetIntervalMs * 0.8) {
                             const d = new Date(tsMs);
                             let label;
-                            if (period === '1h') {
+                            if (period === '15m' || period === '1h') {
                                 label = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
                             } else if (period === '24h') {
                                 label = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
