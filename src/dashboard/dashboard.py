@@ -3992,7 +3992,13 @@ def fetch_health_data():
             node_health["blocks"] = bc_info.get("blocks", 0)
             node_health["headers"] = bc_info.get("headers", 0)
             node_health["verification_progress"] = bc_info.get("verificationprogress", 0)
-            node_health["sync_progress"] = round(bc_info.get("verificationprogress", 0) * 100, 2)
+            # QBX has near-zero verificationprogress due to low chain work — use blocks/headers instead
+            _blocks = bc_info.get("blocks", 0)
+            _headers = bc_info.get("headers", 0)
+            if primary_coin and primary_coin.upper() in ("QBX", "QBITX") and _headers > 0:
+                node_health["sync_progress"] = round(min(_blocks / _headers * 100, 100), 2)
+            else:
+                node_health["sync_progress"] = round(bc_info.get("verificationprogress", 0) * 100, 2)
             node_health["size_on_disk_gb"] = round(bc_info.get("size_on_disk", 0) / 1024 / 1024 / 1024, 2)
             # For multi-algo coins (DGB), getblockchaininfo "difficulty" is
             # whichever algo mined the last block - NOT the SHA256 difficulty.
