@@ -1,16 +1,16 @@
-# Spiral Pool
+# Spiral Pool — Open-Source Self-Hosted Solo Mining Pool Software
 
 <p align="center">
   <img src="assets/logo.png" alt="Spiral Pool Logo" width="400">
 </p>
 
 <p align="center">
-  <strong>Self-Hosted Cryptocurrency Mining Pool Software</strong><br>
+  <strong>Self-Hosted Bitcoin &amp; Altcoin Mining Pool Software &mdash; Stratum V1/V2/TLS, SHA-256d &amp; Scrypt</strong><br>
   <em>Black Ice 1.0 &mdash; Convergent difficulty. Minimal oscillation.</em>
 </p>
 
 <p align="center">
-  Free and Open Source &bull; BSD-3-Clause &bull; Non-Custodial &bull; Solo Mining
+  Free and Open Source &bull; BSD-3-Clause &bull; Non-Custodial &bull; Solo Mining &bull; Proof-of-Work
 </p>
 
 <p align="center">
@@ -28,7 +28,7 @@
 
 ## What Is Spiral Pool?
 
-Spiral Pool is **free, open-source, self-hosted mining pool software** &mdash; you install it on your own hardware, you control the stack, and you own every block reward that hits your wallet. No custodians. No middlemen. No cloud.
+Spiral Pool is **free, open-source, self-hosted Stratum mining pool software** for proof-of-work (PoW) cryptocurrencies &mdash; install it on your own bare-metal server, connect your ASIC miners (Antminer, Whatsminer, Avalon, BitAxe) directly, and every block reward goes straight to your wallet. No custodians. No middlemen. No cloud.
 
 It implements a non-custodial solo mining architecture where block rewards are embedded directly in the coinbase transaction paying the **miner's own wallet address**. The fund flow is absolute: **Blockchain &rarr; Coinbase Transaction &rarr; Miner's Wallet.** There is no pool wallet, no intermediate balance, no fees, and no withdrawal process &mdash; the full block reward goes directly to the miner, and the software never holds, routes, or has access to funds at any point in the payment path.
 
@@ -57,6 +57,23 @@ In this documentation, "operator" means the individual or entity that installs a
 | **Prometheus metrics** | Per-session observability with worker-level labels |
 | **Runtime tuning** | Live operator control via `spiralctl` CLI |
 | **3,500+ tests** | Unit, integration, chaos, and fuzz tests including 10 numbered chaos test suites |
+
+---
+
+## Compatible Mining Hardware
+
+Spiral Pool supports any Stratum V1-compatible ASIC miner or GPU rig. The Spiral Router automatically classifies hardware at connection time using 280+ device signatures.
+
+**SHA-256d (Bitcoin, DigiByte, Namecoin, and more):**
+Antminer S9 / S17 / S19 / S19 Pro / S21 / S21 Pro, Whatsminer M20S / M30S / M50S / M60S, Avalon A1246 / A1346 / A1366, BitAxe Gamma / Ultra / Max, iBeLink BM-S1 Max, FutureBit Apollo BTC, NerdAxe, NerdQAxe, Compac F, LuckyMiner
+
+**Scrypt (Litecoin, Dogecoin, PepeCoin, and more):**
+Antminer L3+ / L7 / L9, Whatsminer M31S, Innosilicon A6+ LTC Master, FutureBit Apollo LTC
+
+**Low-power / DIY / lottery miners:**
+BitAxe (ESP32-S3 open-source ASIC), NerdAxe, NerdQAxe, Compac F, LuckyMiner, any Stratum V1-compatible firmware
+
+> The Spiral Router identifies miner model, firmware, and hashrate class from the Stratum user-agent string. Unknown hardware falls back to a safe default profile automatically.
 
 ---
 
@@ -124,9 +141,9 @@ QBX (standalone — no merge mining)
 
 ---
 
-## Who This Is For
+## Who This Is For — Solo Miners &amp; Pool Operators
 
-- **Solo miners** running dedicated hardware who want full control over their pool infrastructure
+- **Solo miners** running dedicated ASIC hardware who want full control over their pool infrastructure
 - **Home miners** with diverse hardware (ESP32 lottery miners, BitAxe, Avalon, Antminer) on the same pool
 - **Pool operators** who need complete vardiff visibility and runtime tuning capability
 
@@ -188,7 +205,7 @@ cd Spiral-Pool && ./install.sh
 
 The installer handles everything: coin daemon(s), PostgreSQL, Go toolchain, stratum compilation, TLS certificates, systemd services, firewall rules, and monitoring stack. Checkpoint resume means a failed install can be re-run safely.
 
-### Connect
+### Connect Your Miners
 
 ```
 URL:      stratum+tcp://YOUR_SERVER_IP:PORT
@@ -243,12 +260,12 @@ See [OPERATIONS.md](docs/setup/OPERATIONS.md) for complete blockchain replicatio
 
 ## Documentation
 
-### Setup & Operations
+### Setup &amp; Operations
 
 | Document | Description |
 |----------|-------------|
 | [OPERATIONS.md](docs/setup/OPERATIONS.md) | Installation, configuration, monitoring, HA setup, upgrading, troubleshooting |
-| [DOCKER_GUIDE.md](docs/setup/DOCKER_GUIDE.md) | Docker & WSL2 deployment guide |
+| [DOCKER_GUIDE.md](docs/setup/DOCKER_GUIDE.md) | Docker &amp; WSL2 deployment guide |
 
 ### Architecture
 
