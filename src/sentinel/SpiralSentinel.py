@@ -15836,7 +15836,7 @@ def monitor_loop(state):
         if startup_new_blocks:
             logger.info(f"SIGNAL ACQUIRED: {len(startup_new_blocks)} block(s) found while offline — initiating celebration protocol!")
             for block in startup_new_blocks:
-                worker = block["miner"]
+                worker = block.get("worker") or block["miner"]
                 state.pool_blocks_found += 1
                 state.record_block_time()
                 miner_details = {}
@@ -15874,7 +15874,7 @@ def monitor_loop(state):
                     pool_id=aux_pool_id
                 )
                 for block in aux_blocks:
-                    worker = block["miner"]
+                    worker = block.get("worker") or block["miner"]
                     aux_coin = block.get("coin", aux_symbol)
                     state.pool_blocks_found += 1
                     state.record_block_time()
@@ -16634,7 +16634,7 @@ def monitor_loop(state):
             # Skip workers already alerted via miner-reported detection to avoid duplicates.
             pool_new_blocks = state.check_pool_for_new_blocks(net_phs, odds, primary_coin)
             for block in pool_new_blocks:
-                worker = block["miner"]
+                worker = block.get("worker") or block["miner"]
                 # Skip if already alerted via miner-reported detection
                 if worker in alerted_workers_this_cycle:
                     logger.debug(f"Pool block for {worker} already alerted via miner-reported detection")
@@ -16697,7 +16697,7 @@ def monitor_loop(state):
                     )
 
                     for block in aux_blocks:
-                        worker = block["miner"]
+                        worker = block.get("worker") or block["miner"]
                         aux_coin = block.get("coin", aux_symbol)
 
                         state.pool_blocks_found += 1
