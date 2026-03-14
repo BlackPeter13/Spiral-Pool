@@ -617,8 +617,8 @@ var SupportedCoins = map[string]CoinInfo{
 		Algorithm:     "sha256d",
 		DefaultPort:   8344,
 		P2PPort:       8345,
-		AddressPrefix: []byte{0x00}, // Same as Bitcoin
-		BlockTime:     600,          // 10 minutes
+		AddressPrefix: []byte{0x32}, // M prefix (50 decimal) — Dilithium-derived, NOT Bitcoin's 0x00
+		BlockTime:     150,          // 2.5 minutes
 	},
 	// Syscoin (SYS) - merge-mined with Bitcoin via AuxPoW
 	"syscoin": {
