@@ -24007,7 +24007,12 @@ watch_sync() {
                         echo -e "  ${GREEN}✓${NC} ${wallet_coin^^} wallet created successfully"
                         # Read the generated address from config and display it prominently
                         local generated_addr
-                        generated_addr=$(sudo grep -E '^\s*address:' /spiralpool/config/config.yaml 2>/dev/null | head -1 | sed 's/.*address:\s*["'\'']\?\([^"'\'']*\)["'\'']\?.*/\1/' | tr -d ' ')
+                        generated_addr=$(sudo awk -v sym="$wallet_coin" '
+                            /symbol:/ { in_section = ($0 ~ "\"?"sym"\"?") }
+                            in_section && /address:/ && !/PENDING_GENERATION/ {
+                                gsub(/.*address:[[:space:]]*"?/, ""); gsub(/".*/, ""); gsub(/[[:space:]]/, ""); print; exit
+                            }
+                        ' /spiralpool/config/config.yaml 2>/dev/null)
                         if [[ -n "$generated_addr" ]] && [[ "$generated_addr" != "PENDING_GENERATION" ]] && [[ "$generated_addr" != '""' ]]; then
                             echo ""
                             echo -e "  ${WHITE}╔══════════════════════════════════════════════╗${NC}"
