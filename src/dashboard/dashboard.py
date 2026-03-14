@@ -15779,6 +15779,7 @@ def _is_celebration_quiet_hours():
     try:
         quiet_start = 22  # default
         quiet_end = 6     # default
+        tz_name = "America/New_York"  # default — matches install.sh DISPLAY_TIMEZONE default
         install_dir = os.environ.get("SPIRALPOOL_INSTALL_DIR", "/spiralpool")
         sentinel_paths = [
             Path(install_dir) / "config" / "sentinel" / "config.json",
@@ -15790,9 +15791,17 @@ def _is_celebration_quiet_hours():
                     sentinel_cfg = json.load(f)
                 quiet_start = sentinel_cfg.get("quiet_hours_start", 22)
                 quiet_end = sentinel_cfg.get("quiet_hours_end", 6)
+                tz_name = sentinel_cfg.get("display_timezone", "America/New_York")
                 break
 
-        h = datetime.now().hour
+        # Use configured display timezone so quiet hours match the user's local
+        # time, not the server's UTC clock (server always runs UTC).
+        try:
+            import zoneinfo
+            tz = zoneinfo.ZoneInfo(tz_name)
+            h = datetime.now(tz).hour
+        except Exception:
+            h = datetime.now().hour
         if quiet_start < quiet_end:
             if quiet_start <= h < quiet_end:
                 return True
