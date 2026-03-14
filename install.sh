@@ -15727,13 +15727,13 @@ install_qbx() {
     QBX_DIR=$(get_blockchain_dir "qbx")
     local QBX_BIN_DIR="$INSTALL_DIR/qbx-bin"
 
-    if [[ -f "$QBX_BIN_DIR/qbitx" ]]; then
-        log "Q-BitX already installed"
-        return 0
-    fi
-
     # Try copying binaries from source node (HA primary or user-specified) before downloading
     local qbx_download_needed=true
+    if [[ -f "$QBX_BIN_DIR/qbitx" ]]; then
+        log "Q-BitX binary already installed — skipping download, regenerating config"
+        # Fall through to config/service creation below (password may have been blank on first run)
+        qbx_download_needed=false
+    fi
     if copy_binaries_from_primary "Q-BitX" "$QBX_BIN_DIR" "$QBX_BIN_DIR"; then
         sudo mkdir -p "$QBX_BIN_DIR" "$QBX_DIR"
         sudo chown -R "$POOL_USER:$POOL_USER" "$QBX_BIN_DIR" "$QBX_DIR"
