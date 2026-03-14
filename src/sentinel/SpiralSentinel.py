@@ -7266,6 +7266,24 @@ def fetch_network_stats(coin=None):
             logger.warning("CAT network stats unavailable")
             return None
 
+        elif coin in ("QBX", "QBITX"):
+            # Q-BitX - SHA256d, 150 second block time
+            # No external API available — use pool API then local RPC fallback
+            pool_stats = fetch_pool_stats_by_symbol(coin)
+            pool_data = pool_stats.get("poolStats", {}) if pool_stats else {}
+            if pool_data.get("networkDifficulty"):
+                diff = float(pool_data.get("networkDifficulty", 0))
+                if diff > 0:
+                    return {"network_phs": (diff * (2**32) / 150) / 1e15, "difficulty": diff, "algorithm": "sha256d"}
+            qbx_rpc_port = coin_config.get("rpc_port", 8344) if coin_config else 8344
+            rpc_result = _rpc_call("127.0.0.1", qbx_rpc_port, "getmininginfo")
+            if rpc_result and "difficulty" in rpc_result:
+                diff = float(rpc_result["difficulty"])
+                if diff > 0:
+                    return {"network_phs": (diff * (2**32) / 150) / 1e15, "difficulty": diff, "algorithm": "sha256d"}
+            logger.warning("QBX network stats unavailable")
+            return None
+
         else:
             # Unknown coin - cannot fetch stats
             logger.warning(f"Unknown coin {coin}, cannot fetch network stats")
