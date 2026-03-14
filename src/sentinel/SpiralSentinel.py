@@ -3403,12 +3403,12 @@ VS_CURRENCIES = ",".join(c["code"] for c in SUPPORTED_CURRENCIES.values())
 CURRENCY_CODES = VS_CURRENCIES.split(",")
 
 # All supported coin symbols (lowercase, for price dict keys)
-SUPPORTED_COIN_SYMBOLS = ["dgb", "btc", "bch", "bc2", "nmc", "sys", "xmy", "fbtc", "ltc", "doge", "dgb-scrypt", "pep", "cat"]
+SUPPORTED_COIN_SYMBOLS = ["dgb", "btc", "bch", "bc2", "qbx", "nmc", "sys", "xmy", "fbtc", "ltc", "doge", "dgb-scrypt", "pep", "cat"]
 
 # Default block rewards by coin (used as fallback when API data unavailable)
 DEFAULT_BLOCK_REWARDS = {
     # SHA-256d coins
-    "DGB": 277.38, "BTC": 3.125, "BCH": 3.125, "BC2": 50.0,
+    "DGB": 277.38, "BTC": 3.125, "BCH": 3.125, "BC2": 50.0, "QBX": 12.5,
     # SHA-256d merge-mineable aux chains
     "NMC": 6.25, "SYS": 1.25, "XMY": 500.0, "FBTC": 25.0,
     # Scrypt coins
@@ -5082,7 +5082,7 @@ def get_net_crash_thresholds(coin=None):
 
 NET_CRASH_PCT = 25  # Alert if network drops 25%+
 NET_CRASH_FLOOR = None  # Must use get_net_crash_thresholds() for coin-specific values
-NET_CRASH_SUSTAIN = 1800  # Must be sustained for 30 minutes (1800 seconds)
+NET_CRASH_SUSTAIN = 7200  # Must be sustained for 2 hours (7200 seconds)
 
 # Pool hashrate drop thresholds
 POOL_DROP_PCT = 50  # Alert if pool drops 50%+
@@ -8475,6 +8475,27 @@ def fetch_block_reward_for_coin(symbol):
         reward = 50 / (2 ** halvings)  # Initial 50 BC2, halved each cycle
         return {"block_height": bh, "sha256_reward": reward, "symbol": "BC2"}
 
+    def _fetch_qbx():
+        # Q-BitX (QBX): Post-Quantum Bitcoin fork, SHA-256d
+        # 12.5 QBX initial reward, halving every 840,000 blocks (~4 years at 150s blocks)
+        # 2.5 min block time, 21M max supply
+        bh = 1000  # Default fallback (new chain, launched April 2025)
+
+        # Method 1: Pool API (if mining QBX)
+        pool_bh = _get_block_height_from_pool("QBX")
+        if pool_bh > 0:
+            bh = pool_bh
+        else:
+            # Method 2: Direct RPC to QBX daemon (port 8344)
+            rpc_bh = _get_block_height_from_rpc("QBX", 8344)
+            if rpc_bh > 0:
+                bh = rpc_bh
+
+        # Calculate reward based on halvings (every 840,000 blocks)
+        halvings = bh // 840000
+        reward = 12.5 / (2 ** min(halvings, 10))  # Initial 12.5 QBX, halved each cycle
+        return {"block_height": bh, "sha256_reward": reward, "symbol": "QBX"}
+
     # === SHA-256d MERGE-MINEABLE COINS ===
 
     def _fetch_nmc():
@@ -8629,6 +8650,8 @@ def fetch_block_reward_for_coin(symbol):
         return _cached_fetch("block_reward_bch", _fetch_bch, 43200)
     elif symbol == "BC2":
         return _cached_fetch("block_reward_bc2", _fetch_bc2, 43200)
+    elif symbol == "QBX":
+        return _cached_fetch("block_reward_qbx", _fetch_qbx, 43200)
     # SHA-256d merge-mineable coins
     elif symbol == "NMC":
         return _cached_fetch("block_reward_nmc", _fetch_nmc, 43200)
@@ -11447,6 +11470,7 @@ HA replica count dropped from **{old_count}** to **{new_count}**
 def create_ha_promoted_embed(node_ip, role, vip, reason=""):
     """Sentinel alert: Node promoted to MASTER - services starting."""
 
+    hostname = _SENTINEL_HOSTNAME
     ha_bar = "👑═══════════════════════════════👑"
     banner_text = theme("ha.promoted.banner")
     desc = f"""```ansi
@@ -11455,14 +11479,14 @@ def create_ha_promoted_embed(node_ip, role, vip, reason=""):
 {ha_bar}\u001b[0m
 ```
 
-{theme("ha.promoted.body")}
+`{hostname}` has been promoted to **MASTER**. All services starting.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
 
     fields = [
         {
             "name": "👑 Promotion Details",
-            "value": f"**Node:** `{node_ip}`\n**New Role:** `{role}`\n**VIP:** `{vip or 'N/A'}`",
+            "value": f"**Host:** `{hostname}`\n**Node IP:** `{node_ip}`\n**New Role:** `{role}`\n**VIP:** `{vip or 'N/A'}`",
             "inline": False
         },
     ]
@@ -11473,13 +11497,14 @@ def create_ha_promoted_embed(node_ip, role, vip, reason=""):
             "inline": False
         })
 
-    return _embed(theme("ha.promoted.title"), desc, COLORS["green"], fields,
-                  footer=f"🌀 Spiral Sentinel v{__version__} • {theme('ha.promoted.footer')}")
+    return _embed(f"👑 {hostname} PROMOTED TO MASTER", desc, COLORS["green"], fields,
+                  footer=f"🌀 {hostname} • {theme('ha.promoted.footer')}")
 
 
 def create_ha_demoted_embed(node_ip, old_role, new_role, reason=""):
     """Sentinel alert: Node demoted to BACKUP - services stopping."""
 
+    hostname = _SENTINEL_HOSTNAME
     ha_bar = "🔄═══════════════════════════════🔄"
     banner_text = theme("ha.demoted.banner")
     desc = f"""```ansi
@@ -11488,14 +11513,14 @@ def create_ha_demoted_embed(node_ip, old_role, new_role, reason=""):
 {ha_bar}\u001b[0m
 ```
 
-{theme("ha.demoted.body")}
+`{hostname}` has been demoted to **{new_role}**. Managed services stopping.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
 
     fields = [
         {
             "name": "🔄 Demotion Details",
-            "value": f"**Node:** `{node_ip}`\n**Previous Role:** `{old_role}`\n**New Role:** `{new_role}`",
+            "value": f"**Host:** `{hostname}`\n**Node IP:** `{node_ip}`\n**Previous Role:** `{old_role}`\n**New Role:** `{new_role}`",
             "inline": False
         },
     ]
@@ -11506,8 +11531,8 @@ def create_ha_demoted_embed(node_ip, old_role, new_role, reason=""):
             "inline": False
         })
 
-    return _embed(theme("ha.demoted.title"), desc, COLORS["yellow"], fields,
-                  footer=f"🌀 Spiral Sentinel v{__version__} • {theme('ha.demoted.footer')}")
+    return _embed(f"🔄 {hostname} DEMOTED TO {new_role}", desc, COLORS["yellow"], fields,
+                  footer=f"🌀 {hostname} • {theme('ha.demoted.footer')}")
 
 
 def create_ha_replication_lag_embed(lag_bytes, lag_seconds, threshold):

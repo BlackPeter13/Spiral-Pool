@@ -596,7 +596,7 @@ def safe_error_response(error: Exception, error_type: str = "internal", log_full
 # Must match frontend coinInfo/allCoins/validCoins arrays in setup.html
 VALID_COINS = {
     # SHA-256d coins
-    'BC2', 'BCH', 'BTC', 'DGB', 'FBTC', 'NMC', 'SYS', 'XMY',
+    'BC2', 'BCH', 'BTC', 'DGB', 'FBTC', 'NMC', 'QBX', 'SYS', 'XMY',
     # Scrypt coins
     'CAT', 'DGB-SCRYPT', 'DOGE', 'LTC', 'PEP'
 }
@@ -645,6 +645,15 @@ WALLET_PATTERNS = {
         r'^bc1q[a-z0-9]{38}$|'
         r'^bc1q[a-z0-9]{58}$|'
         r'^bc1p[a-z0-9]{58}$'
+    ),
+    # QBX - Q-BitX: same format as BTC plus post-quantum Dilithium (pq...)
+    'QBX': re.compile(
+        r'^(?:'
+        r'1[a-km-zA-HJ-NP-Z1-9]{25,34}'   # P2PKH (same as BTC)
+        r'|3[a-km-zA-HJ-NP-Z1-9]{25,34}'  # P2SH (same as BTC)
+        r'|bc1q[a-z0-9]{38,58}'            # Bech32 (same as BTC)
+        r'|pq[a-zA-Z0-9]{20,80}'           # Post-quantum Dilithium
+        r')$'
     ),
     # NMC - Namecoin: N/M prefix for P2PKH, nc1q for bech32
     'NMC': re.compile(r'^[NM][a-km-zA-HJ-NP-Z1-9]{25,34}$|^nc1q[a-z0-9]{38,58}$'),
@@ -2113,6 +2122,7 @@ def load_stratum_ports_from_config():
                         'SYSCOIN': 'SYS', 'SYS': 'SYS',
                         'MYRIADCOIN': 'XMY', 'MYRIAD': 'XMY', 'XMY': 'XMY',
                         'FRACTALBITCOIN': 'FBTC', 'FRACTAL-BITCOIN': 'FBTC', 'FBTC': 'FBTC',
+                        'QBITX': 'QBX', 'Q-BITX': 'QBX', 'QBX': 'QBX',
                         'PEPECOIN': 'PEP', 'PEP': 'PEP',
                         'CATCOIN': 'CAT', 'CAT': 'CAT'
                     }
@@ -2183,6 +2193,11 @@ def load_pool_config():
             "conf_path": "/spiralpool/fbtc/fractal.conf",
             "default_port": 8340,
             "name": "Fractal Bitcoin"
+        },
+        "QBX": {
+            "conf_path": "/spiralpool/qbx/qbitx.conf",
+            "default_port": 8344,
+            "name": "Q-BitX"
         },
         # Scrypt coins
         "LTC": {
@@ -2264,6 +2279,8 @@ def load_pool_config():
                         detected_coin = "XMY"
                     elif 'fractal' in coin_type or 'fbtc' in coin_type:
                         detected_coin = "FBTC"
+                    elif 'qbitx' in coin_type or 'q-bitx' in coin_type or 'qbx' in coin_type:
+                        detected_coin = "QBX"
 
                 # Format 2: pool.coin (single-pool format)
                 if not detected_coin:
@@ -2300,6 +2317,8 @@ def load_pool_config():
                         detected_coin = "XMY"
                     elif 'fractal' in coin_type or 'fbtc' in coin_type or 'fbtc' in pool_id:
                         detected_coin = "FBTC"
+                    elif 'qbitx' in coin_type or 'q-bitx' in coin_type or 'qbx' in coin_type or 'qbx' in pool_id:
+                        detected_coin = "QBX"
 
                 # Format 3: Fallback to daemon port
                 if not detected_coin:
@@ -2318,6 +2337,7 @@ def load_pool_config():
                         8370: "SYS",   # Syscoin RPC
                         10889: "XMY",  # Myriadcoin RPC
                         8340: "FBTC",  # Fractal Bitcoin RPC
+                        8344: "QBX",   # Q-BitX RPC
                     }
                     detected_coin = PORT_TO_COIN.get(daemon_port)
                     if not detected_coin:
@@ -2547,6 +2567,23 @@ MULTI_COIN_NODES = {
         "merge_mining": {"role": "auxiliary", "parent_chain": "BTC", "chain_id": 8228},
         "enabled": False
     },
+    # Q-BitX - SHA-256d standalone coin (NOT merge-mineable)
+    "QBX": {
+        "name": "Q-BitX",
+        "symbol": "QBX",
+        "algorithm": "sha256d",
+        "rpc_host": "127.0.0.1",
+        "rpc_port": 8344,
+        "rpc_user": "",
+        "rpc_password": "",
+        "data_dir": "/spiralpool/qbx",
+        "config_file": "/spiralpool/qbx/qbitx.conf",
+        "service_name": "qbitxd",
+        "stratum_ports": {"v1": 20335, "v2": 20336, "tls": 20337},
+        "block_time": 150,  # 2.5 minutes
+        "merge_mining": None,  # Standalone, NOT merge-mineable
+        "enabled": False
+    },
     # === Scrypt Coins ===
     # Catcoin - first cat-themed memecoin
     "CAT": {
@@ -2675,6 +2712,7 @@ COINGECKO_IDS = {
     "SYS": "syscoin",    # Syscoin - UTXO platform with AuxPoW
     "XMY": "myriadcoin", # Myriad - Multi-algo coin
     "FBTC": "fractal-bitcoin",  # Fractal Bitcoin - Bitcoin scaling with AuxPoW
+    "QBX": None,  # Q-BitX - not listed on CoinGecko
     # Scrypt coins
     "LTC": "litecoin",
     "DOGE": "dogecoin",
@@ -2747,6 +2785,12 @@ BLOCK_EXPLORERS = {
         "fallbacks": [
             {"api": None, "url": "https://fractal.unisat.io/explorer", "name": "UniSat Explorer"},
         ]
+    },
+    "QBX": {
+        "api": None,
+        "url": None,
+        "name": "Q-BitX Explorer",
+        "fallbacks": []  # Not yet listed - no public explorer
     },
     # === Scrypt Coins ===
     "LTC": {
@@ -2844,6 +2888,7 @@ COIN_BLOCK_REWARDS = {
     "SYS": 1.25,        # Syscoin block reward (approximate current)
     "XMY": 500,         # Myriad block reward per algo (approximate)
     "FBTC": 25,         # Fractal Bitcoin block reward (25 FB per block)
+    "QBX": 12.5,        # Q-BitX block reward (12.5 QBX per block)
     # Scrypt coins
     "LTC": 6.25,        # Litecoin block reward after 2023 halving
     "DOGE": 10000,      # Dogecoin block reward (fixed at 10,000)
@@ -2864,6 +2909,7 @@ COIN_BLOCK_TIMES = {
     "SYS": 60,          # Syscoin 1-minute blocks
     "XMY": 60,          # Myriad 1-minute blocks per algo
     "FBTC": 30,         # Fractal Bitcoin 30-second blocks (NOT 600 like Bitcoin!)
+    "QBX": 150,         # Q-BitX 2.5-minute blocks
     # Scrypt coins
     "LTC": 150,         # Litecoin 2.5-minute blocks
     "DOGE": 60,         # Dogecoin 1-minute blocks
@@ -3288,7 +3334,7 @@ def fetch_live_block_reward_bc2():
 def fetch_live_block_reward(coin):
     """Fetch live block reward for any supported coin.
 
-    Supports 13 coins: DGB, BTC, BCH, BC2, NMC, SYS, XMY, FBTC, LTC, DOGE, DGB-SCRYPT, PEP, CAT.
+    Supports 14 coins: DGB, BTC, BCH, BC2, NMC, SYS, XMY, FBTC, QBX, LTC, DOGE, DGB-SCRYPT, PEP, CAT.
     """
     coin = coin.upper()
     # SHA-256d coins with live API lookup
@@ -3320,6 +3366,8 @@ def fetch_live_block_reward(coin):
         return {"block_height": 0, "block_reward": COIN_BLOCK_REWARDS.get("XMY", 250), "symbol": "XMY"}
     elif coin == "FBTC":
         return {"block_height": 0, "block_reward": COIN_BLOCK_REWARDS.get("FBTC", 25), "symbol": "FBTC"}
+    elif coin == "QBX":
+        return {"block_height": 0, "block_reward": COIN_BLOCK_REWARDS.get("QBX", 12.5), "symbol": "QBX"}
     else:
         return {"block_height": 0, "block_reward": 0, "symbol": coin}
 
@@ -3374,6 +3422,8 @@ def get_enabled_coins():
             primary = "XMY"
         elif "fbtc" in pool_id_lower or "fractal" in pool_id_lower:
             primary = "FBTC"
+        elif "qbx" in pool_id_lower or "qbitx" in pool_id_lower or "q-bitx" in pool_id_lower:
+            primary = "QBX"
 
     # Method 2: Load from config file
     load_multi_coin_config()
@@ -3523,6 +3573,9 @@ def load_multi_coin_config():
                     elif 'fractal' in pool_id_lower or 'fbtc' in pool_id_lower or daemon_port == 8340:
                         detected_coin = 'FBTC'
                         default_port = 8340
+                    elif 'qbitx' in pool_id_lower or 'q-bitx' in pool_id_lower or 'qbx' in pool_id_lower or daemon_port == 8344:
+                        detected_coin = 'QBX'
+                        default_port = 8344
                     elif 'pepecoin' in pool_id_lower or 'pep' in pool_id_lower or daemon_port == 33873:
                         detected_coin = 'PEP'
                         default_port = 33873
@@ -3740,7 +3793,7 @@ def fetch_coin_node_health(symbol):
                 "DGB": 15, "BTC": 600, "BCH": 600, "BC2": 600,
                 "LTC": 150, "DOGE": 60, "DGB-SCRYPT": 15,
                 "PEP": 60, "CAT": 600,
-                "NMC": 600, "SYS": 60, "XMY": 60, "FBTC": 30
+                "NMC": 600, "SYS": 60, "XMY": 60, "FBTC": 30, "QBX": 150
             }
             block_time = coin_block_times.get(symbol, 600)
             health["network_hashrate"] = health["difficulty"] * (2**32) / block_time
@@ -8733,14 +8786,15 @@ def get_server_mode():
     VALID_COINS = {
         # Standard symbols
         "DGB", "BTC", "BCH", "BC2", "LTC", "DOGE", "DGB-SCRYPT",
-        "PEP", "CAT", "NMC", "SYS", "XMY", "FBTC",
+        "PEP", "CAT", "NMC", "SYS", "XMY", "FBTC", "QBX",
         # Full names
         "DIGIBYTE", "BITCOIN", "BITCOINCASH", "BITCOIN-CASH",
         "BITCOINII", "BITCOIN-II", "BITCOIN2",
         "LITECOIN", "DOGECOIN", "DIGIBYTE-SCRYPT",
         "PEPECOIN", "CATCOIN",
         "NAMECOIN", "SYSCOIN", "MYRIADCOIN", "MYRIAD",
-        "FRACTALBITCOIN", "FRACTAL"
+        "FRACTALBITCOIN", "FRACTAL",
+        "QBITX", "Q-BITX"
     }
 
     def normalize_coin(coin_type):
@@ -8761,6 +8815,7 @@ def get_server_mode():
             "SYSCOIN": "SYS", "SYS": "SYS",
             "MYRIADCOIN": "XMY", "MYRIAD": "XMY", "XMY": "XMY",
             "FRACTALBITCOIN": "FBTC", "FRACTAL": "FBTC", "FBTC": "FBTC",
+            "QBITX": "QBX", "Q-BITX": "QBX", "QBX": "QBX",
         }
         return coin_map.get(coin_type, coin_type)
 
@@ -8806,7 +8861,7 @@ def get_server_mode():
         coins_config = []
         pool_addresses = {}
         merge_mining_info = None
-        COIN_WHITELIST = {"DGB", "BTC", "BCH", "BC2", "LTC", "DOGE", "DGB-SCRYPT", "PEP", "CAT", "NMC", "SYS", "XMY", "FBTC"}
+        COIN_WHITELIST = {"DGB", "BTC", "BCH", "BC2", "LTC", "DOGE", "DGB-SCRYPT", "PEP", "CAT", "NMC", "SYS", "XMY", "FBTC", "QBX"}
 
         for pool in pools:
             if not isinstance(pool, dict):
@@ -9080,11 +9135,11 @@ def save_pool_coin_config(coins, multi_coin_enabled):
     default_ports = {"BC2": 6333, "BCH": 5333, "BTC": 4333, "CAT": 12335,
                      "DGB": 3333, "DGB-SCRYPT": 3336, "DOGE": 8335,
                      "FBTC": 18335, "LTC": 7333, "NMC": 14335,
-                     "PEP": 10335, "SYS": 15335, "XMY": 17335}
+                     "PEP": 10335, "QBX": 20335, "SYS": 15335, "XMY": 17335}
     default_rpc_ports = {"BC2": 8339, "BCH": 8432, "BTC": 8332, "CAT": 9932,
                          "DGB": 14022, "DGB-SCRYPT": 14022, "DOGE": 22555,
                          "FBTC": 8340, "LTC": 9332, "NMC": 8336,
-                         "PEP": 33873, "SYS": 8370, "XMY": 10889}
+                         "PEP": 33873, "QBX": 8344, "SYS": 8370, "XMY": 10889}
 
     # Scrypt coins need different algorithm suffix
     scrypt_coins = {"LTC", "DOGE", "DGB-SCRYPT", "PEP", "CAT"}
@@ -11278,11 +11333,12 @@ def get_stratum_address():
     # SECURITY: Uses global VALID_COINS and validate_wallet_address() for proper validation
     # Extended whitelist includes long-form names that get normalized to standard symbols
     VALID_COIN_TYPES_EXTENDED = {"DGB", "BTC", "BCH", "BC2", "LTC", "DOGE", "DGB-SCRYPT",
-                                  "PEP", "CAT", "NMC", "SYS", "XMY", "FBTC",
+                                  "PEP", "CAT", "NMC", "SYS", "XMY", "FBTC", "QBX",
                                   "DIGIBYTE", "BITCOIN", "BITCOINCASH", "BITCOINII", "BITCOIN2",
                                   "LITECOIN", "DOGECOIN", "DIGIBYTE-SCRYPT",
                                   "PEPECOIN", "CATCOIN",
-                                  "NAMECOIN", "SYSCOIN", "MYRIADCOIN", "FRACTALBITCOIN", "FRACTAL"}
+                                  "NAMECOIN", "SYSCOIN", "MYRIADCOIN", "FRACTALBITCOIN", "FRACTAL",
+                                  "QBITX", "Q-BITX"}
 
     wallet_addresses = {}
     try:
@@ -11321,6 +11377,7 @@ def get_stratum_address():
                         "SYSCOIN": "SYS",
                         "MYRIADCOIN": "XMY", "MYRIAD": "XMY",
                         "FRACTALBITCOIN": "FBTC", "FRACTAL-BITCOIN": "FBTC",
+                        "QBITX": "QBX", "Q-BITX": "QBX",
                         "PEPECOIN": "PEP",
                         "CATCOIN": "CAT",
                     }
@@ -13862,7 +13919,7 @@ def batch_update_pool():
     default_port = {"BC2": 6333, "BCH": 5333, "BTC": 4333, "CAT": 12335,
                     "DGB": 3333, "DGB-SCRYPT": 3336, "DOGE": 8335,
                     "FBTC": 18335, "LTC": 7333, "NMC": 14335,
-                    "PEP": 10335, "SYS": 15335, "XMY": 17335}.get(primary, 3333) if primary else 3333
+                    "PEP": 10335, "QBX": 20335, "SYS": 15335, "XMY": 17335}.get(primary, 3333) if primary else 3333
     pool_port = data.get("pool_port", default_port)
     worker_prefix = data.get("worker_prefix", "")
     password = data.get("password", "x")
