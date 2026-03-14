@@ -3608,15 +3608,15 @@ collect_docker_coin_addresses() {
     if [[ "$ENABLE_QBX" == "true" ]]; then
         echo -e "${WHITE}⚛️ Q-BitX Wallet Address${NC}"
         echo -e "${CYAN}   ──────────────────────────${NC}"
-        echo -e "   Addresses start with ${GREEN}1${NC}, ${GREEN}3${NC}, ${GREEN}bc1q${NC}, or ${GREEN}pq${NC}"
+        echo -e "   Addresses start with ${GREEN}M${NC} (P2PKH), ${GREEN}P${NC} (P2SH), or ${GREEN}pq${NC} (post-quantum)"
         echo ""
         while true; do
             prompt_input "QBX Address: "; read QBX_POOL_ADDRESS
-            if [[ "$QBX_POOL_ADDRESS" =~ ^(M[a-km-zA-HJ-NP-Z1-9]{25,34}|P[a-km-zA-HJ-NP-Z1-9]{25,34}|(1|3)[a-km-zA-HJ-NP-Z1-9]{25,34}|bc1q[a-z0-9]{38,58}|pq[a-zA-Z0-9]{20,80})$ ]]; then
+            if [[ "$QBX_POOL_ADDRESS" =~ ^(M[a-km-zA-HJ-NP-Z1-9]{25,34}|P[a-km-zA-HJ-NP-Z1-9]{25,34}|pq[a-zA-Z0-9]{20,80})$ ]]; then
                 log_success "Valid QBX address"
                 break
             else
-                echo -e "  ${RED}Invalid QBX address. Must start with M, P, bc1q, or pq.${NC}"
+                echo -e "  ${RED}Invalid QBX address. Must start with M (P2PKH), P (P2SH), or pq (post-quantum).${NC}"
             fi
         done
         echo ""
@@ -4090,11 +4090,11 @@ merge_docker_configuration() {
         if [[ "$ENABLE_QBX" == "true" && "$EXISTING_ENABLE_QBX" != "true" ]]; then
             echo -e "${WHITE}⚛️ Q-BitX Wallet Address${NC}"
             echo -e "${CYAN}   ──────────────────────────${NC}"
-            echo -e "   Addresses start with ${GREEN}1${NC}, ${GREEN}3${NC}, ${GREEN}bc1q${NC}, or ${GREEN}pq${NC} (post-quantum)"
+            echo -e "   Addresses start with ${GREEN}M${NC} (P2PKH), ${GREEN}P${NC} (P2SH), or ${GREEN}pq${NC} (post-quantum)"
             echo ""
             while true; do
                 prompt_input "QBX Address: "; read QBX_POOL_ADDRESS
-                if [[ "$QBX_POOL_ADDRESS" =~ ^(M[a-km-zA-HJ-NP-Z1-9]{25,34}|P[a-km-zA-HJ-NP-Z1-9]{25,34}|(1|3)[a-km-zA-HJ-NP-Z1-9]{25,34}|bc1q[a-z0-9]{38,58}|pq[a-zA-Z0-9]{20,80})$ ]]; then
+                if [[ "$QBX_POOL_ADDRESS" =~ ^(M[a-km-zA-HJ-NP-Z1-9]{25,34}|P[a-km-zA-HJ-NP-Z1-9]{25,34}|pq[a-zA-Z0-9]{20,80})$ ]]; then
                     log_success "Valid QBX address format"
                     break
                 else
@@ -10243,11 +10243,11 @@ collect_configuration() {
                             echo ""
                             while true; do
                                 prompt_input "QBX Address: "; read QBX_ADDRESS
-                                if [[ "$QBX_ADDRESS" =~ ^(M[a-km-zA-HJ-NP-Z1-9]{25,34}|P[a-km-zA-HJ-NP-Z1-9]{25,34}|(1|3)[a-km-zA-HJ-NP-Z1-9]{25,34}|bc1q[a-z0-9]{38,58}|pq[a-zA-Z0-9]{20,80})$ ]]; then
+                                if [[ "$QBX_ADDRESS" =~ ^(M[a-km-zA-HJ-NP-Z1-9]{25,34}|P[a-km-zA-HJ-NP-Z1-9]{25,34}|pq[a-zA-Z0-9]{20,80})$ ]]; then
                                     log_success "Valid QBX address format"
                                     break
                                 else
-                                    log_error "Invalid QBX address format. Must start with M, P, bc1q, or pq."
+                                    log_error "Invalid QBX address format. Must start with M (P2PKH), P (P2SH), or pq (post-quantum)."
                                 fi
                             done
                             break
@@ -11005,12 +11005,12 @@ collect_configuration() {
                         echo ""
                         while true; do
                             prompt_input "QBX Address: "; read QBX_ADDRESS
-                            if [[ "$QBX_ADDRESS" =~ ^(M[a-km-zA-HJ-NP-Z1-9]{25,34}|P[a-km-zA-HJ-NP-Z1-9]{25,34}|(1|3)[a-km-zA-HJ-NP-Z1-9]{25,34}|bc1q[a-z0-9]{38,58}|pq[a-zA-Z0-9]{20,80})$ ]]; then
+                            if [[ "$QBX_ADDRESS" =~ ^(M[a-km-zA-HJ-NP-Z1-9]{25,34}|P[a-km-zA-HJ-NP-Z1-9]{25,34}|pq[a-zA-Z0-9]{20,80})$ ]]; then
                                 log_success "Valid QBX address format"
                                 QBX_POOL_ADDRESS="$QBX_ADDRESS"
                                 break
                             else
-                                log_error "Invalid QBX address format. Must start with M, P, bc1q, or pq."
+                                log_error "Invalid QBX address format. Must start with M (P2PKH), P (P2SH), or pq (post-quantum)."
                             fi
                         done
                         break
@@ -24959,7 +24959,7 @@ case "$COIN" in
         CLI="qbitx-cli -conf=$CONF -datadir=$INSTALL_DIR/qbx"
         SERVICE_NAME="qbitxd"
         CONFIG_FILE="$INSTALL_DIR/config/config.yaml"
-        ADDRESS_PREFIX="1, 3, or pq"
+        ADDRESS_PREFIX="M (P2PKH), P (P2SH), or pq (post-quantum)"
         ADDRESS_TYPE="pq"
         WALLET_DIR="$INSTALL_DIR/qbx"
         ;;
@@ -25399,8 +25399,8 @@ prompt_manual_address() {
                 fi
                 ;;
             qbx|qbitx)
-                # QBX supports BTC-style addresses plus post-quantum (pq) addresses
-                if [[ "$MANUAL_ADDRESS" =~ ^(M[a-km-zA-HJ-NP-Z1-9]{25,34}|P[a-km-zA-HJ-NP-Z1-9]{25,34}|(1|3)[a-km-zA-HJ-NP-Z1-9]{25,34}|bc1q[a-z0-9]{38,58}|pq[a-zA-Z0-9]{20,80})$ ]]; then
+                # QBX uses M... (P2PKH, version 0x32), P... (P2SH, version 0x37), or pq... (post-quantum Dilithium)
+                if [[ "$MANUAL_ADDRESS" =~ ^(M[a-km-zA-HJ-NP-Z1-9]{25,34}|P[a-km-zA-HJ-NP-Z1-9]{25,34}|pq[a-zA-Z0-9]{20,80})$ ]]; then
                     valid=true
                 fi
                 ;;
@@ -25845,8 +25845,9 @@ case "$COIN" in
         fi
         ;;
     qbx|qbitx)
-        # QBX supports pq, 1, or 3 prefix addresses
-        if [[ ! "$NEW_ADDRESS" =~ ^pq ]] && [[ ! "$NEW_ADDRESS" =~ ^[13] ]]; then
+        # QBX uses M... (P2PKH, version 0x32) or P... (P2SH, version 0x37)
+        # getnewaddress "" pq returns M... addresses backed by Dilithium keys
+        if [[ ! "$NEW_ADDRESS" =~ ^[MP] ]] && [[ ! "$NEW_ADDRESS" =~ ^pq ]]; then
             echo -e "  ${YELLOW}WARNING: Unexpected address format, regenerating...${NC}"
             NEW_ADDRESS=$($CLI getnewaddress "pool-rewards" "pq" 2>&1)
         fi
@@ -25972,6 +25973,20 @@ if [[ -f "$CONFIG_FILE" ]]; then
         echo -e "  ${YELLOW}Config file: ${CONFIG_FILE}${NC}"
     fi
     echo ""
+fi
+
+# For QBX: add wallet=<name> to qbitx.conf so it auto-loads on daemon restart.
+# QBX (unlike older Bitcoin forks) does NOT auto-create a default wallet, so
+# without this line the named wallet is gone after every restart.
+# Only do this when a local wallet was actually generated (not manual address entry).
+if [[ "$MANUAL_INPUT_USED" != "true" ]] && [[ "$COIN" == "qbx" || "$COIN" == "qbitx" ]]; then
+    qbx_node_conf="$INSTALL_DIR/qbx/qbitx.conf"
+    if [[ -f "$qbx_node_conf" ]]; then
+        if ! grep -q "^wallet=" "$qbx_node_conf" 2>/dev/null; then
+            echo "wallet=$WALLET_NAME" | sudo -u "$POOL_USER" tee -a "$qbx_node_conf" > /dev/null
+            echo -e "  ${GREEN}✓${NC} Added wallet auto-load to qbitx.conf (wallet=${WALLET_NAME})"
+        fi
+    fi
 fi
 
 # Create backup directory and backup wallet (only if not using manual input)
