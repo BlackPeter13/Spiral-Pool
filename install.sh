@@ -12017,6 +12017,12 @@ collect_configuration() {
                 display_stratum_port="18335"
                 display_wallet="$FBTC_ADDRESS"
                 ;;
+            QBX)
+                display_coin="Q-BitX (QBX)"
+                display_rpc_user="$QBX_RPC_USER"
+                display_stratum_port="20335"
+                display_wallet="$QBX_ADDRESS"
+                ;;
             *)
                 display_coin="Unknown"
                 display_rpc_user="$RPC_USER"
