@@ -23317,7 +23317,13 @@ show_status() {
     local IBD=$(echo "$INFO" | grep -o '"initialblockdownload":[^,]*' | cut -d: -f2 | tr -d ' ')
     local CHAIN=$(echo "$INFO" | grep -o '"chain":"[^"]*' | cut -d'"' -f4)
 
-    local PCT=$(echo "$PROGRESS" | awk '{printf "%.2f", $1 * 100}')
+    # QBX has near-zero verificationprogress due to low chain work — use blocks/headers instead
+    local PCT
+    if [[ "$COIN_SYMBOL" == "QBX" ]] && [[ -n "$BLOCKS" ]] && [[ -n "$HEADERS" ]] && [[ "$HEADERS" -gt 0 ]]; then
+        PCT=$(echo "scale=4; $BLOCKS / $HEADERS * 100" | bc 2>/dev/null | awk '{printf "%.2f", $1}')
+    else
+        PCT=$(echo "$PROGRESS" | awk '{printf "%.2f", $1 * 100}')
+    fi
     local BLOCKS_FMT=$(format_number "$BLOCKS")
     local HEADERS_FMT=$(format_number "$HEADERS")
 
@@ -23703,7 +23709,13 @@ watch_sync() {
             continue
         fi
 
-        local PCT=$(echo "$PROGRESS" | awk '{printf "%.2f", $1 * 100}')
+        # QBX has near-zero verificationprogress due to low chain work — use blocks/headers instead
+        local PCT
+        if [[ "$COIN_SYMBOL" == "QBX" ]] && [[ -n "$BLOCKS" ]] && [[ -n "$HEADERS" ]] && [[ "$HEADERS" -gt 0 ]]; then
+            PCT=$(echo "scale=4; $BLOCKS / $HEADERS * 100" | bc 2>/dev/null | awk '{printf "%.2f", $1}')
+        else
+            PCT=$(echo "$PROGRESS" | awk '{printf "%.2f", $1 * 100}')
+        fi
         local BLOCKS_FMT=$(format_number "$BLOCKS")
         local HEADERS_FMT=$(format_number "$HEADERS")
 
