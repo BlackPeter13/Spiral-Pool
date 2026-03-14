@@ -12206,11 +12206,13 @@ Match User ${POOL_USER}
 SSHDEOF
             log_success "SSH password auth enabled for ${POOL_USER} (appended to $sshd_main)"
         fi
-        # Validate config before reloading (don't break sshd on bad syntax)
+        # Validate config before reloading — defer if sshd not ready yet (host keys
+        # may not exist on fresh installs; a deferred reload runs after prerequisites)
         if sudo sshd -t 2>/dev/null; then
             sudo systemctl reload sshd 2>/dev/null || sudo systemctl reload ssh 2>/dev/null || true
         else
-            log_warn "sshd config test failed — check $sshd_main manually"
+            log_warn "sshd config test deferred — will reload after prerequisites are installed"
+            SSHD_RELOAD_DEFERRED=true
         fi
     fi
 
@@ -12273,6 +12275,19 @@ SSHDEOF
         net-tools lsof \
         cron \
         xz-utils || { log_error "Failed to install prerequisite packages"; return 1; }
+
+    # Deferred sshd reload — sshd -t may have failed earlier if host keys weren't
+    # generated yet (common on fresh installs). Now that packages are installed, retry.
+    if [[ "${SSHD_RELOAD_DEFERRED:-false}" == "true" ]]; then
+        if sudo sshd -t 2>&1; then
+            sudo systemctl reload sshd 2>/dev/null || sudo systemctl reload ssh 2>/dev/null || true
+            log_success "sshd reloaded — SSH password auth now active for ${POOL_USER}"
+        else
+            log_warn "sshd config test failed — check /etc/ssh/sshd_config manually"
+        fi
+        SSHD_RELOAD_DEFERRED=false
+    fi
+
     # Note: xz-utils provides 'xz' for extracting .tar.xz archives
     # Note: iproute2 provides 'ip' command for macvlan VIP interface
     # Note: iputils-arping provides 'arping' for gratuitous ARP announcements
