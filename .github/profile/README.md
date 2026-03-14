@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/SpiralPool/Spiral-Pool/main/assets/logo.png" alt="Spiral Pool" width="300">
+  <img src="https://raw.githubusercontent.com/SpiralPool/Spiral-Pool/main/assets/logo.png" alt="Spiral Pool — Open-Source Self-Hosted Solo Mining Pool Software" width="300">
 </p>
 
-<h3 align="center">⛏️ Self-Hosted Solo Mining Pool Software 🌀</h3>
+<h3 align="center">⛏️ Open-Source Self-Hosted Bitcoin & Altcoin Solo Mining Pool Software 🌀</h3>
 
 <p align="center">
-  <em>Non-custodial · Lock-free vardiff · Stratum V1/V2/TLS · 14 coins · BSD-3-Clause</em>
+  <em>Non-custodial · Proof-of-Work · Lock-free vardiff · Stratum V1/V2/TLS · 14 coins · BSD-3-Clause</em>
 </p>
 
 <p align="center">
@@ -19,22 +19,23 @@
 
 ### 🌀 What is Spiral Pool?
 
-Free, open-source mining pool software you run on your own hardware. Non-custodial — block rewards go directly to the miner's wallet. No middleman, no custody, no fees.
+Free, open-source Stratum server software for proof-of-work (PoW) cryptocurrency mining — run it on your own bare-metal hardware and connect your ASICs (Antminer, Whatsminer, Avalon, BitAxe) directly. Non-custodial: block rewards go straight to the miner's wallet via the coinbase transaction. No middleman, no custody, no fees.
 
 ### ⛏️ Supported Coins
 
-**SHA-256d:** BTC · BCH · DGB · BC2 · NMC · SYS · XMY · FBTC · QBX
-**Scrypt:** LTC · DOGE · DGB-SCRYPT · PEP · CAT
+**SHA-256d (Bitcoin & forks):** Bitcoin (BTC) · Bitcoin Cash (BCH) · DigiByte (DGB) · Bitcoin II (BC2) · Namecoin (NMC) · Syscoin (SYS) · Myriad (XMY) · Fractal Bitcoin (FBTC) · Q-BitX (QBX)
+
+**Scrypt (Litecoin & forks):** Litecoin (LTC) · Dogecoin (DOGE) · DigiByte-Scrypt (DGB-SCRYPT) · PepeCoin (PEP) · Catcoin (CAT)
 
 ### ✨ Highlights
 
-- 🔄 **Spiral Router** — 280+ miner patterns, auto-classification at connect time
+- 🔄 **Spiral Router** — 280+ ASIC & miner patterns (Antminer, Whatsminer, BitAxe, ESP32), auto-classification at connect time
 - ⚡ **Lock-free vardiff** — Per-session atomic difficulty, zero contention
-- 🔐 **Stratum V2 + TLS** — Noise Protocol encryption
-- 🔗 **Merge mining** — 6 AuxPoW pairs across BTC and LTC
-- 🏥 **High availability** — VIP failover, database replication, advisory lock fencing
+- 🔐 **Stratum V1/V2 + TLS** — Multi-port per coin, Noise Protocol encryption
+- 🔗 **Merge mining** — 6 AuxPoW pairs across BTC and LTC parent chains
+- 🏥 **High availability** — VIP failover, Patroni database replication, advisory lock fencing
 - 📊 **Prometheus metrics** — Per-session, per-worker observability
-- 🤖 **Spiral Sentinel** — Device discovery, health monitoring, Discord/Telegram alerts
+- 🤖 **Spiral Sentinel** — Device discovery, health monitoring, Discord/Telegram/XMPP alerts
 
 ### 📬 Connect
 
