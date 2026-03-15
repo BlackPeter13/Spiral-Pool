@@ -22945,8 +22945,18 @@ OUTAGE_THRESHOLD=180         # 3 minutes = network outage (not just a hiccup)
 check_network() {
     # Try multiple methods to verify connectivity
     # 1. Check if we can reach the daemon locally
-    if $CLI getblockchaininfo &>/dev/null; then
+    local cli_out
+    cli_out=$($CLI getblockchaininfo 2>&1)
+    if [[ $? -eq 0 ]]; then
         return 0
+    fi
+    # Distinguish RPC auth failure from real network/daemon outage.
+    # An auth error means the daemon IS running but qbitx.conf rpcpassword
+    # does not match what the daemon started with — this is a config issue,
+    # not a network outage. Surface it clearly instead of masking it.
+    if echo "$cli_out" | grep -qi "incorrect\|unauthorized\|forbidden\|wrong password\|error code: -32\|error code: -1"; then
+        echo "RPC_AUTH_FAILURE"
+        return 2
     fi
     # 2. Check if daemon process is running (local check, no network needed)
     if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
@@ -23679,7 +23689,20 @@ watch_sync() {
             # Check if this is a network issue vs daemon issue
             local DAEMON_RUNNING=$(systemctl is-active "$SERVICE_NAME" 2>/dev/null || echo "unknown")
 
-            if [[ "$DAEMON_RUNNING" == "active" ]] && [[ $CONSECUTIVE_FAILURES -gt 0 ]]; then
+            # Check for RPC auth failure specifically (return code 2 from check_network)
+            local NET_CHECK_OUTPUT
+            NET_CHECK_OUTPUT=$(check_network 2>&1)
+            local NET_CHECK_RC=$?
+
+            if [[ "$DAEMON_RUNNING" == "active" ]] && [[ $NET_CHECK_RC -eq 2 ]] || echo "$NET_CHECK_OUTPUT" | grep -q "RPC_AUTH_FAILURE"; then
+                # RPC auth failure — password mismatch between qbitx.conf and running daemon
+                echo -e "  ${RED}⚠ RPC AUTH FAILURE — password mismatch${NC}                               "
+                echo -e "                                                                            "
+                echo -e "  ${YELLOW}The daemon is running but rejecting the CLI password.${NC}                  "
+                echo -e "  ${WHITE}Fix:${NC} ${CYAN}sudo systemctl restart $SERVICE_NAME${NC}                             "
+                echo -e "  ${DIM}This reloads qbitx.conf and syncs the password with the CLI.${NC}           "
+                echo -e "                                                                            "
+            elif [[ "$DAEMON_RUNNING" == "active" ]] && [[ $CONSECUTIVE_FAILURES -gt 0 ]]; then
                 # Daemon running but CLI failing - likely network or temporary issue
                 local CHECK_INTERVAL=$(get_check_interval)
 
