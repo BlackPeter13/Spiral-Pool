@@ -19308,7 +19308,7 @@ configure_stratum_multicoin() {
         dgb_rpc_pass=$(grep -E "^rpcpassword=" "$(get_blockchain_dir dgb)/digibyte.conf" 2>/dev/null | head -1 | cut -d= -f2)
         [[ -n "$dgb_rpc_pass" ]] && log "Read DGB RPC password from node config"
     fi
-    [[ -z "$dgb_rpc_pass" ]] && dgb_rpc_pass="$RPC_PASSWORD"
+    [[ -z "$dgb_rpc_pass" ]] && dgb_rpc_pass="${DGB_RPC_PASSWORD:-$RPC_PASSWORD}"
 
     if [[ -f "$(get_blockchain_dir btc)/bitcoin.conf" ]]; then
         btc_rpc_pass=$(grep -E "^rpcpassword=" "$(get_blockchain_dir btc)/bitcoin.conf" 2>/dev/null | head -1 | cut -d= -f2)
