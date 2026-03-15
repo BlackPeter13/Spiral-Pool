@@ -19292,40 +19292,41 @@ configure_stratum_multicoin() {
     local ltc_rpc_pass=""
     local doge_rpc_pass=""
 
-    # Read actual daemon config passwords - these are authoritative
-    # Uses head -1 to handle any edge cases with multiple matches
-    if [[ -f "$INSTALL_DIR/dgb/digibyte.conf" ]]; then
-        dgb_rpc_pass=$(grep -E "^rpcpassword=" "$INSTALL_DIR/dgb/digibyte.conf" 2>/dev/null | head -1 | cut -d= -f2)
+    # Read actual daemon config passwords — these are authoritative.
+    # Always use get_blockchain_dir so multi-disk installs (CHAIN_MOUNT_POINT)
+    # find the conf in the right place instead of hardcoded $INSTALL_DIR/coin.
+    if [[ -f "$(get_blockchain_dir dgb)/digibyte.conf" ]]; then
+        dgb_rpc_pass=$(grep -E "^rpcpassword=" "$(get_blockchain_dir dgb)/digibyte.conf" 2>/dev/null | head -1 | cut -d= -f2)
         [[ -n "$dgb_rpc_pass" ]] && log "Read DGB RPC password from node config"
     fi
     [[ -z "$dgb_rpc_pass" ]] && dgb_rpc_pass="$RPC_PASSWORD"
 
-    if [[ -f "$INSTALL_DIR/btc/bitcoin.conf" ]]; then
-        btc_rpc_pass=$(grep -E "^rpcpassword=" "$INSTALL_DIR/btc/bitcoin.conf" 2>/dev/null | head -1 | cut -d= -f2)
+    if [[ -f "$(get_blockchain_dir btc)/bitcoin.conf" ]]; then
+        btc_rpc_pass=$(grep -E "^rpcpassword=" "$(get_blockchain_dir btc)/bitcoin.conf" 2>/dev/null | head -1 | cut -d= -f2)
         [[ -n "$btc_rpc_pass" ]] && log "Read BTC RPC password from node config"
     fi
     [[ -z "$btc_rpc_pass" ]] && btc_rpc_pass="$BTC_RPC_PASSWORD"
 
-    if [[ -f "$INSTALL_DIR/bch/bitcoin.conf" ]]; then
-        bch_rpc_pass=$(grep -E "^rpcpassword=" "$INSTALL_DIR/bch/bitcoin.conf" 2>/dev/null | head -1 | cut -d= -f2)
+    if [[ -f "$(get_blockchain_dir bch)/bitcoin.conf" ]]; then
+        bch_rpc_pass=$(grep -E "^rpcpassword=" "$(get_blockchain_dir bch)/bitcoin.conf" 2>/dev/null | head -1 | cut -d= -f2)
         [[ -n "$bch_rpc_pass" ]] && log "Read BCH RPC password from node config"
     fi
     [[ -z "$bch_rpc_pass" ]] && bch_rpc_pass="$BCH_RPC_PASSWORD"
 
-    if [[ -f "$INSTALL_DIR/bc2/bitcoinii.conf" ]]; then
-        bc2_rpc_pass=$(grep -E "^rpcpassword=" "$INSTALL_DIR/bc2/bitcoinii.conf" 2>/dev/null | head -1 | cut -d= -f2)
+    if [[ -f "$(get_blockchain_dir bc2)/bitcoinii.conf" ]]; then
+        bc2_rpc_pass=$(grep -E "^rpcpassword=" "$(get_blockchain_dir bc2)/bitcoinii.conf" 2>/dev/null | head -1 | cut -d= -f2)
         [[ -n "$bc2_rpc_pass" ]] && log "Read BC2 RPC password from node config"
     fi
     [[ -z "$bc2_rpc_pass" ]] && bc2_rpc_pass="$BC2_RPC_PASSWORD"
 
-    if [[ -f "$INSTALL_DIR/ltc/litecoin.conf" ]]; then
-        ltc_rpc_pass=$(grep -E "^rpcpassword=" "$INSTALL_DIR/ltc/litecoin.conf" 2>/dev/null | head -1 | cut -d= -f2)
+    if [[ -f "$(get_blockchain_dir ltc)/litecoin.conf" ]]; then
+        ltc_rpc_pass=$(grep -E "^rpcpassword=" "$(get_blockchain_dir ltc)/litecoin.conf" 2>/dev/null | head -1 | cut -d= -f2)
         [[ -n "$ltc_rpc_pass" ]] && log "Read LTC RPC password from node config"
     fi
     [[ -z "$ltc_rpc_pass" ]] && ltc_rpc_pass="$LTC_RPC_PASSWORD"
 
-    if [[ -f "$INSTALL_DIR/doge/dogecoin.conf" ]]; then
-        doge_rpc_pass=$(grep -E "^rpcpassword=" "$INSTALL_DIR/doge/dogecoin.conf" 2>/dev/null | head -1 | cut -d= -f2)
+    if [[ -f "$(get_blockchain_dir doge)/dogecoin.conf" ]]; then
+        doge_rpc_pass=$(grep -E "^rpcpassword=" "$(get_blockchain_dir doge)/dogecoin.conf" 2>/dev/null | head -1 | cut -d= -f2)
         [[ -n "$doge_rpc_pass" ]] && log "Read DOGE RPC password from node config"
     fi
     [[ -z "$doge_rpc_pass" ]] && doge_rpc_pass="$DOGE_RPC_PASSWORD"
@@ -19336,26 +19337,26 @@ configure_stratum_multicoin() {
     local fbtc_rpc_pass=""
     local qbx_rpc_pass=""
 
-    if [[ -f "$INSTALL_DIR/nmc/namecoin.conf" ]]; then
-        nmc_rpc_pass=$(grep -E "^rpcpassword=" "$INSTALL_DIR/nmc/namecoin.conf" 2>/dev/null | head -1 | cut -d= -f2)
+    if [[ -f "$(get_blockchain_dir nmc)/namecoin.conf" ]]; then
+        nmc_rpc_pass=$(grep -E "^rpcpassword=" "$(get_blockchain_dir nmc)/namecoin.conf" 2>/dev/null | head -1 | cut -d= -f2)
         [[ -n "$nmc_rpc_pass" ]] && log "Read NMC RPC password from node config"
     fi
     [[ -z "$nmc_rpc_pass" ]] && nmc_rpc_pass="$NMC_RPC_PASSWORD"
 
-    if [[ -f "$INSTALL_DIR/sys/syscoin.conf" ]]; then
-        sys_rpc_pass=$(grep -E "^rpcpassword=" "$INSTALL_DIR/sys/syscoin.conf" 2>/dev/null | head -1 | cut -d= -f2)
+    if [[ -f "$(get_blockchain_dir sys)/syscoin.conf" ]]; then
+        sys_rpc_pass=$(grep -E "^rpcpassword=" "$(get_blockchain_dir sys)/syscoin.conf" 2>/dev/null | head -1 | cut -d= -f2)
         [[ -n "$sys_rpc_pass" ]] && log "Read SYS RPC password from node config"
     fi
     [[ -z "$sys_rpc_pass" ]] && sys_rpc_pass="$SYS_RPC_PASSWORD"
 
-    if [[ -f "$INSTALL_DIR/xmy/myriadcoin.conf" ]]; then
-        xmy_rpc_pass=$(grep -E "^rpcpassword=" "$INSTALL_DIR/xmy/myriadcoin.conf" 2>/dev/null | head -1 | cut -d= -f2)
+    if [[ -f "$(get_blockchain_dir xmy)/myriadcoin.conf" ]]; then
+        xmy_rpc_pass=$(grep -E "^rpcpassword=" "$(get_blockchain_dir xmy)/myriadcoin.conf" 2>/dev/null | head -1 | cut -d= -f2)
         [[ -n "$xmy_rpc_pass" ]] && log "Read XMY RPC password from node config"
     fi
     [[ -z "$xmy_rpc_pass" ]] && xmy_rpc_pass="$XMY_RPC_PASSWORD"
 
-    if [[ -f "$INSTALL_DIR/fbtc/fractal.conf" ]]; then
-        fbtc_rpc_pass=$(grep -E "^rpcpassword=" "$INSTALL_DIR/fbtc/fractal.conf" 2>/dev/null | head -1 | cut -d= -f2)
+    if [[ -f "$(get_blockchain_dir fbtc)/fractal.conf" ]]; then
+        fbtc_rpc_pass=$(grep -E "^rpcpassword=" "$(get_blockchain_dir fbtc)/fractal.conf" 2>/dev/null | head -1 | cut -d= -f2)
         [[ -n "$fbtc_rpc_pass" ]] && log "Read FBTC RPC password from node config"
     fi
     [[ -z "$fbtc_rpc_pass" ]] && fbtc_rpc_pass="$FBTC_RPC_PASSWORD"
@@ -21591,42 +21592,42 @@ is_daemon_synced() {
 # Check if any enabled blockchain is synced (for stratum readiness)
 is_blockchain_synced() {
     # Check each enabled blockchain daemon
-    if service_enabled "digibyted" && is_daemon_synced "digibyte-cli" "$INSTALL_DIR/dgb/digibyte.conf"; then
+    if service_enabled "digibyted" && is_daemon_synced "digibyte-cli" "$(get_blockchain_dir dgb)/digibyte.conf"; then
         return 0
     fi
-    if service_enabled "bitcoind" && is_daemon_synced "bitcoin-cli" "$INSTALL_DIR/btc/bitcoin.conf"; then
+    if service_enabled "bitcoind" && is_daemon_synced "bitcoin-cli" "$(get_blockchain_dir btc)/bitcoin.conf"; then
         return 0
     fi
-    if service_enabled "bitcoind-bch" && is_daemon_synced "bitcoin-cli-bch" "$INSTALL_DIR/bch/bitcoin.conf"; then
+    if service_enabled "bitcoind-bch" && is_daemon_synced "bitcoin-cli-bch" "$(get_blockchain_dir bch)/bitcoin.conf"; then
         return 0
     fi
     # Bitcoin II (BC2) - uses bitcoinii-cli
-    if service_enabled "bitcoiniid" && is_daemon_synced "bitcoinii-cli" "$INSTALL_DIR/bc2/bitcoinii.conf"; then
+    if service_enabled "bitcoiniid" && is_daemon_synced "bitcoinii-cli" "$(get_blockchain_dir bc2)/bitcoinii.conf"; then
         return 0
     fi
-    if service_enabled "litecoind" && is_daemon_synced "litecoin-cli" "$INSTALL_DIR/ltc/litecoin.conf"; then
+    if service_enabled "litecoind" && is_daemon_synced "litecoin-cli" "$(get_blockchain_dir ltc)/litecoin.conf"; then
         return 0
     fi
-    if service_enabled "dogecoind" && is_daemon_synced "dogecoin-cli" "$INSTALL_DIR/doge/dogecoin.conf"; then
+    if service_enabled "dogecoind" && is_daemon_synced "dogecoin-cli" "$(get_blockchain_dir doge)/dogecoin.conf"; then
         return 0
     fi
-    if service_enabled "pepecoind" && is_daemon_synced "pepecoin-cli" "$INSTALL_DIR/pep/pepecoin.conf"; then
+    if service_enabled "pepecoind" && is_daemon_synced "pepecoin-cli" "$(get_blockchain_dir pep)/pepecoin.conf"; then
         return 0
     fi
-    if service_enabled "catcoind" && is_daemon_synced "catcoin-cli" "$INSTALL_DIR/cat/catcoin.conf"; then
+    if service_enabled "catcoind" && is_daemon_synced "catcoin-cli" "$(get_blockchain_dir cat)/catcoin.conf"; then
         return 0
     fi
     # SHA-256d AuxPoW coins
-    if service_enabled "namecoind" && is_daemon_synced "namecoin-cli" "$INSTALL_DIR/nmc/namecoin.conf"; then
+    if service_enabled "namecoind" && is_daemon_synced "namecoin-cli" "$(get_blockchain_dir nmc)/namecoin.conf"; then
         return 0
     fi
-    if service_enabled "syscoind" && is_daemon_synced "syscoin-cli" "$INSTALL_DIR/sys/syscoin.conf"; then
+    if service_enabled "syscoind" && is_daemon_synced "syscoin-cli" "$(get_blockchain_dir sys)/syscoin.conf"; then
         return 0
     fi
-    if service_enabled "myriadcoind" && is_daemon_synced "myriadcoin-cli" "$INSTALL_DIR/xmy/myriadcoin.conf"; then
+    if service_enabled "myriadcoind" && is_daemon_synced "myriadcoin-cli" "$(get_blockchain_dir xmy)/myriadcoin.conf"; then
         return 0
     fi
-    if service_enabled "fractald" && is_daemon_synced "fractal-cli" "$INSTALL_DIR/fbtc/fractal.conf"; then
+    if service_enabled "fractald" && is_daemon_synced "fractal-cli" "$(get_blockchain_dir fbtc)/fractal.conf"; then
         return 0
     fi
     if service_enabled "qbitxd" && is_daemon_synced "qbitx-cli" "$(get_blockchain_dir qbx)/qbitx.conf"; then
@@ -21853,19 +21854,19 @@ check_blockchain_daemon_health() {
 
 # Check all enabled blockchain daemons
 check_blockchain_health() {
-    check_blockchain_daemon_health "digibyted" "digibyte-cli" "$INSTALL_DIR/dgb/digibyte.conf" "DigiByte"
-    check_blockchain_daemon_health "bitcoind" "bitcoin-cli" "$INSTALL_DIR/btc/bitcoin.conf" "Bitcoin"
-    check_blockchain_daemon_health "bitcoind-bch" "bitcoin-cli-bch" "$INSTALL_DIR/bch/bitcoin.conf" "Bitcoin Cash"
-    check_blockchain_daemon_health "bitcoiniid" "bitcoinii-cli" "$INSTALL_DIR/bc2/bitcoinii.conf" "Bitcoin II"
-    check_blockchain_daemon_health "litecoind" "litecoin-cli" "$INSTALL_DIR/ltc/litecoin.conf" "Litecoin"
-    check_blockchain_daemon_health "dogecoind" "dogecoin-cli" "$INSTALL_DIR/doge/dogecoin.conf" "Dogecoin"
-    check_blockchain_daemon_health "pepecoind" "pepecoin-cli" "$INSTALL_DIR/pep/pepecoin.conf" "PepeCoin"
-    check_blockchain_daemon_health "catcoind" "catcoin-cli" "$INSTALL_DIR/cat/catcoin.conf" "Catcoin"
+    check_blockchain_daemon_health "digibyted" "digibyte-cli" "$(get_blockchain_dir dgb)/digibyte.conf" "DigiByte"
+    check_blockchain_daemon_health "bitcoind" "bitcoin-cli" "$(get_blockchain_dir btc)/bitcoin.conf" "Bitcoin"
+    check_blockchain_daemon_health "bitcoind-bch" "bitcoin-cli-bch" "$(get_blockchain_dir bch)/bitcoin.conf" "Bitcoin Cash"
+    check_blockchain_daemon_health "bitcoiniid" "bitcoinii-cli" "$(get_blockchain_dir bc2)/bitcoinii.conf" "Bitcoin II"
+    check_blockchain_daemon_health "litecoind" "litecoin-cli" "$(get_blockchain_dir ltc)/litecoin.conf" "Litecoin"
+    check_blockchain_daemon_health "dogecoind" "dogecoin-cli" "$(get_blockchain_dir doge)/dogecoin.conf" "Dogecoin"
+    check_blockchain_daemon_health "pepecoind" "pepecoin-cli" "$(get_blockchain_dir pep)/pepecoin.conf" "PepeCoin"
+    check_blockchain_daemon_health "catcoind" "catcoin-cli" "$(get_blockchain_dir cat)/catcoin.conf" "Catcoin"
     # Aux chain daemons (merge mining)
-    check_blockchain_daemon_health "namecoind" "namecoin-cli" "$INSTALL_DIR/nmc/namecoin.conf" "Namecoin"
-    check_blockchain_daemon_health "syscoind" "syscoin-cli" "$INSTALL_DIR/sys/syscoin.conf" "Syscoin"
-    check_blockchain_daemon_health "myriadcoind" "myriadcoin-cli" "$INSTALL_DIR/xmy/myriadcoin.conf" "Myriadcoin"
-    check_blockchain_daemon_health "fractald" "fractal-cli" "$INSTALL_DIR/fbtc/fractal.conf" "Fractal Bitcoin"
+    check_blockchain_daemon_health "namecoind" "namecoin-cli" "$(get_blockchain_dir nmc)/namecoin.conf" "Namecoin"
+    check_blockchain_daemon_health "syscoind" "syscoin-cli" "$(get_blockchain_dir sys)/syscoin.conf" "Syscoin"
+    check_blockchain_daemon_health "myriadcoind" "myriadcoin-cli" "$(get_blockchain_dir xmy)/myriadcoin.conf" "Myriadcoin"
+    check_blockchain_daemon_health "fractald" "fractal-cli" "$(get_blockchain_dir fbtc)/fractal.conf" "Fractal Bitcoin"
     check_blockchain_daemon_health "qbitxd" "qbitx-cli" "$(get_blockchain_dir qbx)/qbitx.conf" "Q-BitX"
 }
 
@@ -24584,21 +24585,21 @@ done
 # ═══════════════════════════════════════════════════════════════════════════════
 INSTALLED_COINS=()
 # SHA-256d coins
-[[ -f "$INSTALL_DIR/dgb/digibyte.conf" ]] && INSTALLED_COINS+=("dgb")
-[[ -f "$INSTALL_DIR/btc/bitcoin.conf" ]] && INSTALLED_COINS+=("btc")
-[[ -f "$INSTALL_DIR/bch/bitcoin.conf" ]] && INSTALLED_COINS+=("bch")
-[[ -f "$INSTALL_DIR/bc2/bitcoinii.conf" ]] && INSTALLED_COINS+=("bc2")
+[[ -f "$(get_blockchain_dir dgb)/digibyte.conf" ]] && INSTALLED_COINS+=("dgb")
+[[ -f "$(get_blockchain_dir btc)/bitcoin.conf" ]] && INSTALLED_COINS+=("btc")
+[[ -f "$(get_blockchain_dir bch)/bitcoin.conf" ]] && INSTALLED_COINS+=("bch")
+[[ -f "$(get_blockchain_dir bc2)/bitcoinii.conf" ]] && INSTALLED_COINS+=("bc2")
 # SHA-256d AuxPoW coins (merge-mineable with Bitcoin)
-[[ -f "$INSTALL_DIR/nmc/namecoin.conf" ]] && INSTALLED_COINS+=("nmc")
-[[ -f "$INSTALL_DIR/sys/syscoin.conf" ]] && INSTALLED_COINS+=("sys")
-[[ -f "$INSTALL_DIR/xmy/myriadcoin.conf" ]] && INSTALLED_COINS+=("xmy")
-[[ -f "$INSTALL_DIR/fbtc/fractal.conf" ]] && INSTALLED_COINS+=("fbtc")
+[[ -f "$(get_blockchain_dir nmc)/namecoin.conf" ]] && INSTALLED_COINS+=("nmc")
+[[ -f "$(get_blockchain_dir sys)/syscoin.conf" ]] && INSTALLED_COINS+=("sys")
+[[ -f "$(get_blockchain_dir xmy)/myriadcoin.conf" ]] && INSTALLED_COINS+=("xmy")
+[[ -f "$(get_blockchain_dir fbtc)/fractal.conf" ]] && INSTALLED_COINS+=("fbtc")
 [[ -f "$(get_blockchain_dir qbx)/qbitx.conf" ]] && INSTALLED_COINS+=("qbx")
 # Scrypt coins
-[[ -f "$INSTALL_DIR/ltc/litecoin.conf" ]] && INSTALLED_COINS+=("ltc")
-[[ -f "$INSTALL_DIR/doge/dogecoin.conf" ]] && INSTALLED_COINS+=("doge")
-[[ -f "$INSTALL_DIR/pep/pepecoin.conf" ]] && INSTALLED_COINS+=("pep")
-[[ -f "$INSTALL_DIR/cat/catcoin.conf" ]] && INSTALLED_COINS+=("cat")
+[[ -f "$(get_blockchain_dir ltc)/litecoin.conf" ]] && INSTALLED_COINS+=("ltc")
+[[ -f "$(get_blockchain_dir doge)/dogecoin.conf" ]] && INSTALLED_COINS+=("doge")
+[[ -f "$(get_blockchain_dir pep)/pepecoin.conf" ]] && INSTALLED_COINS+=("pep")
+[[ -f "$(get_blockchain_dir cat)/catcoin.conf" ]] && INSTALLED_COINS+=("cat")
 
 if [[ ${#INSTALLED_COINS[@]} -eq 0 ]]; then
     echo "Error: No blockchain nodes found in $INSTALL_DIR"
