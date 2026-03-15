@@ -321,11 +321,11 @@ func TestBuildCoinbase_ScriptsigLength(t *testing.T) {
 	// Scriptsig length byte is at position 41
 	scriptsigLen := int(cb1[41])
 
-	// Expected: len(encodeHeight(100000)) + len("/SpiralPool/") + 8 (extranonce)
+	// Expected: len(encodeHeight(100000)) + len("/SpiralPool/") + 12 (extranonce1=4 + extranonce2=8)
 	heightBytes := encodeHeight(100000)
-	expectedLen := len(heightBytes) + len("/SpiralPool/") + 8
+	expectedLen := len(heightBytes) + len("/SpiralPool/") + 12
 	if scriptsigLen != expectedLen {
-		t.Errorf("scriptsig length = %d, want %d (height=%d + text=%d + extranonce=8)",
+		t.Errorf("scriptsig length = %d, want %d (height=%d + text=%d + extranonce=12)",
 			scriptsigLen, expectedLen, len(heightBytes), len("/SpiralPool/"))
 	}
 }

@@ -144,8 +144,12 @@ func TestVerifyDefaultProfilesValid(t *testing.T) {
 				t.Errorf("Class %s has MaxDiff>=1 trillion - REGRESSION: unexpected default value", class.String())
 			}
 
-			// MinDiff should equal InitialDiff (except lottery)
-			if class != MinerClassLottery && profile.MinDiff != profile.InitialDiff {
+			// MinDiff should equal InitialDiff (except lottery and farm_proxy).
+			// FarmProxy is intentionally different: InitialDiff is the optimistic starting point
+			// (500K, matching MinerClassPro ceiling so vardiff ramps immediately), while MinDiff
+			// is the floor that prevents vardiff dropping below a single-miner equivalent.
+			// This allows the proxy to self-correct if it carries fewer workers than expected.
+			if class != MinerClassLottery && class != MinerClassFarmProxy && profile.MinDiff != profile.InitialDiff {
 				t.Errorf("Class %s: MinDiff (%.6f) != InitialDiff (%.6f)",
 					class.String(), profile.MinDiff, profile.InitialDiff)
 			}
