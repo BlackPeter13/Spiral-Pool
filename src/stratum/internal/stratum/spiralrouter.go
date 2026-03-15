@@ -59,6 +59,14 @@ const (
 	MinerClassAvalonHigh       // Avalon A12, A13 series (~85-130 TH/s)
 	MinerClassAvalonPro        // Avalon A14, A15, Q series (~170-215 TH/s)
 	MinerClassAvalonHome       // Avalon Mini 3, Q home miners (~37-90 TH/s)
+
+	// Farm proxy / hashrate aggregator class.
+	// A single upstream connection from a proxy carries aggregated hashrate from
+	// many downstream miners (default aggregation = 50 workers per connection).
+	// At 50× S21 Pro (~200 TH/s each) = ~10 PH/s per connection — far above
+	// MinerClassPro's MaxDiff ceiling of 500,000 (~2.1 PH/s).
+	// Examples: Braiins Farm Proxy, any other stratum aggregation proxy.
+	MinerClassFarmProxy // Stratum aggregation proxy (~500 GH/s – 100+ PH/s per connection)
 )
 
 func (c MinerClass) String() string {
@@ -88,6 +96,8 @@ func (c MinerClass) String() string {
 		return "avalon_pro"
 	case MinerClassAvalonHome:
 		return "avalon_home"
+	case MinerClassFarmProxy:
+		return "farm_proxy"
 	default:
 		return "unknown"
 	}
@@ -100,6 +110,8 @@ func (c MinerClass) Vendor() string {
 	case MinerClassAvalonNano, MinerClassAvalonLegacyLow, MinerClassAvalonLegacyMid,
 		MinerClassAvalonMid, MinerClassAvalonHigh, MinerClassAvalonPro, MinerClassAvalonHome:
 		return "avalon"
+	case MinerClassFarmProxy:
+		return "proxy"
 	default:
 		return "generic"
 	}
@@ -289,6 +301,23 @@ var DefaultProfiles = map[MinerClass]MinerProfile{
 		MaxDiff:         30000,  // Cap: ~129 TH/s (overclocked Avalon Q)
 		TargetShareTime: 1,      // 1 share per second
 	},
+
+	// Farm Proxy / Stratum Aggregation Proxy
+	// A single upstream connection from a proxy carries aggregated hashrate from many
+	// downstream miners. Default aggregation for Braiins Farm Proxy = 50 workers per
+	// upstream connection. At 50× S21 Pro (~200 TH/s each) = ~10 PH/s per connection.
+	//
+	// InitialDiff: 500,000 — matches MinerClassPro ceiling; vardiff immediately ramps up
+	// MinDiff:      25,600  — prevents vardiff from dropping below S19-class single miner
+	// MaxDiff: 100,000,000  — ~429 PH/s ceiling (handles even the largest proxy aggregations)
+	// TargetShareTime: 1    — 1 share per second for fast vardiff convergence
+	MinerClassFarmProxy: {
+		Class:           MinerClassFarmProxy,
+		InitialDiff:     500000,      // Start at MinerClassPro ceiling; vardiff ramps instantly
+		MinDiff:         25600,       // S19-class floor — prevents oscilation on small proxy loads
+		MaxDiff:         100000000,   // ~429 PH/s ceiling — handles any realistic proxy aggregation
+		TargetShareTime: 1,           // 1 share per second for fast vardiff convergence
+	},
 }
 
 // ScryptProfiles returns recommended settings for Scrypt coins (LTC, DOGE).
@@ -351,6 +380,19 @@ var ScryptProfiles = map[MinerClass]MinerProfile{
 		InitialDiff:     290000,  // Antminer L7 (~9.5 GH/s)
 		MinDiff:         128000,  // L7 low-power mode (~4.2 GH/s)
 		MaxDiff:         2048000, // Future ASICs / multi-rig (~67 GH/s)
+		TargetShareTime: 2,
+	},
+
+	// Farm Proxy Scrypt: aggregated Scrypt hashrate from downstream proxy workers.
+	// Most farm proxies target SHA-256d, but included for completeness.
+	// D = hashrate × targetTime / 65536
+	// InitialDiff: 2,048,000 — matches MinerClassPro Scrypt MaxDiff; vardiff ramps up
+	// MaxDiff:   200,000,000  — ~6.7 TH/s Scrypt ceiling (handles any realistic proxy load)
+	MinerClassFarmProxy: {
+		Class:           MinerClassFarmProxy,
+		InitialDiff:     2048000,    // Start at MinerClassPro Scrypt ceiling
+		MinDiff:         128000,     // L7 low-power floor — prevents drop on small proxy loads
+		MaxDiff:         200000000,  // ~6.7 TH/s Scrypt ceiling
 		TargetShareTime: 2,
 	},
 }
@@ -863,6 +905,20 @@ func NewSpiralRouterWithBlockTime(blockTimeSec int) *SpiralRouter {
 		{`(?i)whatsminer.*m70`, MinerClassPro, "Whatsminer M70"},
 		{`(?i)whatsminer.*m[5-9]0`, MinerClassPro, "Whatsminer M50+"},
 		{`(?i)whatsminer.*m[3-4]0s`, MinerClassPro, "Whatsminer M30S+"},
+
+		// ----------------------------------------------------------------
+		// FARM PROXY / STRATUM AGGREGATION PROXIES
+		// MUST appear BEFORE the generic `(?i)braiins` catch-all below,
+		// so that "braiins-farm-proxy/1.0.0" matches FarmProxy (100M MaxDiff)
+		// rather than MinerClassPro (500K MaxDiff), which would immediately cap.
+		//
+		// Braiins Farm Proxy user-agent examples:
+		//   "braiins-farm-proxy/1.0.0", "farm-proxy/1.0", "farmproxy"
+		// ----------------------------------------------------------------
+		{`(?i)braiins.*farm[_-]?proxy`, MinerClassFarmProxy, "Braiins Farm Proxy"},
+		{`(?i)farm[_-]?proxy`, MinerClassFarmProxy, "Farm Proxy"},
+		{`(?i)farmproxy`, MinerClassFarmProxy, "Farm Proxy"},
+
 		{`(?i)braiins`, MinerClassPro, "Braiins"},
 		{`(?i)vnish`, MinerClassPro, "Vnish"},
 		{`(?i)luxos|luxminer`, MinerClassPro, "LuxOS"},
