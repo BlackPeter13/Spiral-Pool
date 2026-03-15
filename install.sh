@@ -926,6 +926,15 @@ cleanup_on_failure() {
 
     log "Starting cleanup..."
 
+    # Resolve chain data location — get_blockchain_dir may not be defined yet if
+    # failure happened early, so inline the multi-disk resolution here.
+    local _cmp
+    if [[ "$MULTI_DISK_CONFIGURED" == "true" && -n "$CHAIN_MOUNT_POINT" ]]; then
+        _cmp="$CHAIN_MOUNT_POINT"
+    else
+        _cmp="$INSTALL_DIR"
+    fi
+
     # SECURITY: Validate paths before any rm -rf operations
     if ! validate_safe_path "$INSTALL_DIR" "INSTALL_DIR"; then
         log_error "Aborting cleanup due to unsafe INSTALL_DIR"
@@ -1004,7 +1013,7 @@ cleanup_on_failure() {
         sudo systemctl stop digibyted 2>/dev/null || true
         sudo systemctl disable digibyted 2>/dev/null || true
         sudo rm -f /etc/systemd/system/digibyted.service 2>/dev/null || true
-        sudo rm -rf "$INSTALL_DIR/dgb" 2>/dev/null || true
+        sudo rm -rf "$_cmp/dgb" 2>/dev/null || true
         sudo rm -rf "/home/$POOL_USER/.digibyte" 2>/dev/null || true
     fi
 
@@ -1014,7 +1023,7 @@ cleanup_on_failure() {
         sudo systemctl stop bitcoind 2>/dev/null || true
         sudo systemctl disable bitcoind 2>/dev/null || true
         sudo rm -f /etc/systemd/system/bitcoind.service 2>/dev/null || true
-        sudo rm -rf "$INSTALL_DIR/btc" 2>/dev/null || true
+        sudo rm -rf "$_cmp/btc" 2>/dev/null || true
         sudo rm -rf "/home/$POOL_USER/.bitcoin" 2>/dev/null || true
     fi
 
@@ -1024,7 +1033,7 @@ cleanup_on_failure() {
         sudo systemctl stop bitcoind-bch 2>/dev/null || true
         sudo systemctl disable bitcoind-bch 2>/dev/null || true
         sudo rm -f /etc/systemd/system/bitcoind-bch.service 2>/dev/null || true
-        sudo rm -rf "$INSTALL_DIR/bch" 2>/dev/null || true
+        sudo rm -rf "$_cmp/bch" 2>/dev/null || true
         sudo rm -rf "/home/$POOL_USER/.bitcoin-cash" 2>/dev/null || true
     fi
 
@@ -1034,7 +1043,7 @@ cleanup_on_failure() {
         sudo systemctl stop litecoind 2>/dev/null || true
         sudo systemctl disable litecoind 2>/dev/null || true
         sudo rm -f /etc/systemd/system/litecoind.service 2>/dev/null || true
-        sudo rm -rf "$INSTALL_DIR/ltc" 2>/dev/null || true
+        sudo rm -rf "$_cmp/ltc" 2>/dev/null || true
         sudo rm -rf "/home/$POOL_USER/.litecoin" 2>/dev/null || true
     fi
 
@@ -1044,7 +1053,7 @@ cleanup_on_failure() {
         sudo systemctl stop dogecoind 2>/dev/null || true
         sudo systemctl disable dogecoind 2>/dev/null || true
         sudo rm -f /etc/systemd/system/dogecoind.service 2>/dev/null || true
-        sudo rm -rf "$INSTALL_DIR/doge" 2>/dev/null || true
+        sudo rm -rf "$_cmp/doge" 2>/dev/null || true
         sudo rm -rf "/home/$POOL_USER/.dogecoin" 2>/dev/null || true
     fi
 
@@ -1054,7 +1063,7 @@ cleanup_on_failure() {
         sudo systemctl stop bitcoiniid 2>/dev/null || true
         sudo systemctl disable bitcoiniid 2>/dev/null || true
         sudo rm -f /etc/systemd/system/bitcoiniid.service 2>/dev/null || true
-        sudo rm -rf "$INSTALL_DIR/bc2" 2>/dev/null || true
+        sudo rm -rf "$_cmp/bc2" 2>/dev/null || true
         sudo rm -rf "/home/$POOL_USER/.bitcoinii" 2>/dev/null || true
     fi
 
@@ -1064,7 +1073,7 @@ cleanup_on_failure() {
         sudo systemctl stop pepecoind 2>/dev/null || true
         sudo systemctl disable pepecoind 2>/dev/null || true
         sudo rm -f /etc/systemd/system/pepecoind.service 2>/dev/null || true
-        sudo rm -rf "$INSTALL_DIR/pep" 2>/dev/null || true
+        sudo rm -rf "$_cmp/pep" 2>/dev/null || true
         sudo rm -rf "/home/$POOL_USER/.pepecoin" 2>/dev/null || true
     fi
 
@@ -1074,7 +1083,7 @@ cleanup_on_failure() {
         sudo systemctl stop catcoind 2>/dev/null || true
         sudo systemctl disable catcoind 2>/dev/null || true
         sudo rm -f /etc/systemd/system/catcoind.service 2>/dev/null || true
-        sudo rm -rf "$INSTALL_DIR/cat" 2>/dev/null || true
+        sudo rm -rf "$_cmp/cat" 2>/dev/null || true
         sudo rm -rf "/home/$POOL_USER/.catcoin" 2>/dev/null || true
     fi
 
@@ -1084,7 +1093,7 @@ cleanup_on_failure() {
         sudo systemctl stop namecoind 2>/dev/null || true
         sudo systemctl disable namecoind 2>/dev/null || true
         sudo rm -f /etc/systemd/system/namecoind.service 2>/dev/null || true
-        sudo rm -rf "$INSTALL_DIR/nmc" 2>/dev/null || true
+        sudo rm -rf "$_cmp/nmc" 2>/dev/null || true
         sudo rm -rf "/home/$POOL_USER/.namecoin" 2>/dev/null || true
     fi
 
@@ -1094,7 +1103,7 @@ cleanup_on_failure() {
         sudo systemctl stop syscoind 2>/dev/null || true
         sudo systemctl disable syscoind 2>/dev/null || true
         sudo rm -f /etc/systemd/system/syscoind.service 2>/dev/null || true
-        sudo rm -rf "$INSTALL_DIR/sys" 2>/dev/null || true
+        sudo rm -rf "$_cmp/sys" 2>/dev/null || true
         sudo rm -rf "/home/$POOL_USER/.syscoin" 2>/dev/null || true
     fi
 
@@ -1104,7 +1113,7 @@ cleanup_on_failure() {
         sudo systemctl stop myriadcoind 2>/dev/null || true
         sudo systemctl disable myriadcoind 2>/dev/null || true
         sudo rm -f /etc/systemd/system/myriadcoind.service 2>/dev/null || true
-        sudo rm -rf "$INSTALL_DIR/xmy" 2>/dev/null || true
+        sudo rm -rf "$_cmp/xmy" 2>/dev/null || true
         sudo rm -rf "/home/$POOL_USER/.myriadcoin" 2>/dev/null || true
     fi
 
@@ -1114,7 +1123,7 @@ cleanup_on_failure() {
         sudo systemctl stop fractald 2>/dev/null || true
         sudo systemctl disable fractald 2>/dev/null || true
         sudo rm -f /etc/systemd/system/fractald.service 2>/dev/null || true
-        sudo rm -rf "$INSTALL_DIR/fbtc" 2>/dev/null || true
+        sudo rm -rf "$_cmp/fbtc" 2>/dev/null || true
         sudo rm -rf "/home/$POOL_USER/.fractal" 2>/dev/null || true
     fi
 
@@ -13016,7 +13025,7 @@ install_digibyte() {
     fi  # end dgb_download_needed
 
     # Configure DigiByte
-    sudo mkdir -p "$INSTALL_DIR/dgb"
+    sudo mkdir -p "$DGB_DIR"
 
     # Generate network-specific configuration based on Tor setting
     if [[ "$TOR_ENABLED" == "true" ]]; then
@@ -13080,7 +13089,7 @@ blocksonly=0
 nblocks=64"
     fi
 
-    sudo tee "$INSTALL_DIR/dgb/digibyte.conf" > /dev/null << EOF
+    sudo tee "$DGB_DIR/digibyte.conf" > /dev/null << EOF
 # DigiByte Core Configuration
 # Spiral Pool v3 - Solo Mining Pool
 # Network Mode: $(if [[ "$TOR_ENABLED" == "true" ]]; then echo "TOR (Privacy)"; else echo "CLEARNET (Fast Sync)"; fi)
@@ -13177,8 +13186,8 @@ dnsseed=seed.digibyte.link
 dnsseed=seed.quakeguy.com
 dnsseed=seed.aroundtheblock.app"; fi)
 EOF
-    sudo chmod 640 "$INSTALL_DIR/dgb/digibyte.conf"  # 640 allows group read for CLI tools
-    sudo chown -R "$POOL_USER:$POOL_USER" "$INSTALL_DIR/dgb"
+    sudo chmod 640 "$DGB_DIR/digibyte.conf"  # 640 allows group read for CLI tools
+    sudo chown -R "$POOL_USER:$POOL_USER" "$DGB_DIR"
 
     # Create service with memory and resource optimizations
     sudo tee /etc/systemd/system/digibyted.service > /dev/null << EOF
@@ -22537,9 +22546,9 @@ detect_pool_user() {
         fi
     done
 
-    # Method 2: Fallback to directory ownership
+    # Method 2: Fallback to directory ownership (use get_blockchain_dir for multi-disk support)
     if [[ -z "$pool_user" ]] || [[ "$pool_user" == "root" ]]; then
-        for dir in "$INSTALL_DIR/dgb" "$INSTALL_DIR/btc" "$INSTALL_DIR/bch" "$INSTALL_DIR/bc2" "$INSTALL_DIR/fbtc" "$INSTALL_DIR/qbx" "$INSTALL_DIR/nmc" "$INSTALL_DIR/sys" "$INSTALL_DIR/xmy" "$INSTALL_DIR/ltc" "$INSTALL_DIR/doge" "$INSTALL_DIR/pep" "$INSTALL_DIR/cat"; do
+        for dir in "$(get_blockchain_dir dgb)" "$(get_blockchain_dir btc)" "$(get_blockchain_dir bch)" "$(get_blockchain_dir bc2)" "$(get_blockchain_dir fbtc)" "$(get_blockchain_dir qbx)" "$(get_blockchain_dir nmc)" "$(get_blockchain_dir sys)" "$(get_blockchain_dir xmy)" "$(get_blockchain_dir ltc)" "$(get_blockchain_dir doge)" "$(get_blockchain_dir pep)" "$(get_blockchain_dir cat)"; do
             if [[ -d "$dir" ]]; then
                 pool_user=$(stat -c '%U' "$dir" 2>/dev/null)
                 [[ -n "$pool_user" ]] && [[ "$pool_user" != "root" ]] && break
@@ -32028,6 +32037,9 @@ SYNCEOF
     sudo tee "$INSTALL_DIR/config/coins.env" > /dev/null << EOF
 # Enabled coins configuration (auto-generated by installer)
 COIN_MODE=$COIN_MODE
+# Multi-disk storage configuration
+MULTI_DISK_CONFIGURED=$MULTI_DISK_CONFIGURED
+CHAIN_MOUNT_POINT=$CHAIN_MOUNT_POINT
 # SHA-256d coins
 ENABLE_DGB=$ENABLE_DGB
 ENABLE_BTC=$ENABLE_BTC
@@ -33459,7 +33471,7 @@ main() {
 
     # Verify blockchain nodes based on which coins are enabled
     if [[ "$ENABLE_DGB" == "true" ]]; then
-        if [[ ! -x "$INSTALL_DIR/dgb/bin/digibyted" ]]; then
+        if [[ ! -x "$(get_blockchain_dir dgb)/bin/digibyted" ]]; then
             log_error "DigiByte daemon not found"
             verify_errors=$((verify_errors + 1))
         else
@@ -33468,7 +33480,7 @@ main() {
     fi
 
     if [[ "$ENABLE_BTC" == "true" ]]; then
-        if [[ ! -x "$INSTALL_DIR/btc/bin/bitcoind" ]]; then
+        if [[ ! -x "$(get_blockchain_dir btc)/bin/bitcoind" ]]; then
             log_error "Bitcoin Knots daemon not found"
             verify_errors=$((verify_errors + 1))
         else
@@ -33477,7 +33489,7 @@ main() {
     fi
 
     if [[ "$ENABLE_BCH" == "true" ]]; then
-        if [[ ! -x "$INSTALL_DIR/bch/bin/bitcoind" ]]; then
+        if [[ ! -x "$(get_blockchain_dir bch)/bin/bitcoind" ]]; then
             log_error "Bitcoin Cash daemon not found"
             verify_errors=$((verify_errors + 1))
         else
@@ -33486,7 +33498,7 @@ main() {
     fi
 
     if [[ "$ENABLE_BC2" == "true" ]]; then
-        if [[ ! -x "$INSTALL_DIR/bc2/bin/bitcoinIId" ]]; then
+        if [[ ! -x "$(get_blockchain_dir bc2)/bin/bitcoinIId" ]]; then
             log_error "Bitcoin II daemon not found"
             verify_errors=$((verify_errors + 1))
         else
