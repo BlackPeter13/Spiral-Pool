@@ -196,7 +196,21 @@ get_rpc_creds() {
     local symbol="$1"
     local conf_file=""
     local user="" pass=""
+
+    # Resolve base_dir: multi-disk installs store chain data on a separate mount.
+    # Load MULTI_DISK_CONFIGURED and CHAIN_MOUNT_POINT from coins.env (same pattern
+    # used by all other standalone scripts). Fall back to /spiralpool on any error.
     local base_dir="/spiralpool"
+    local _env="/spiralpool/config/coins.env"
+    if [[ -f "$_env" ]] && [[ ! -L "$_env" ]]; then
+        local _multi
+        _multi=$(grep -oP '^MULTI_DISK_CONFIGURED=\K(true|false)$' "$_env" 2>/dev/null || echo "false")
+        if [[ "$_multi" == "true" ]]; then
+            local _cmp
+            _cmp=$(grep -oP '^CHAIN_MOUNT_POINT=\K\S+$' "$_env" 2>/dev/null || echo "")
+            [[ -n "$_cmp" && -d "$_cmp" ]] && base_dir="$_cmp"
+        fi
+    fi
 
     # Map symbol to directory and possible config file names
     # Tries multiple common config file naming conventions
