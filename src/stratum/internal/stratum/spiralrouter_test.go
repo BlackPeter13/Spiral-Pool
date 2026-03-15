@@ -492,26 +492,28 @@ func TestSpiralRouterDetection(t *testing.T) {
 		{"Doge Digger/1.0", MinerClassLow, "Doge Digger"},
 
 		// ========================================================================
-		// HASHRATE RENTAL SERVICES
+		// HASHRATE RENTAL / MARKETPLACE SERVICES
 		// ========================================================================
 		// USER-AGENT DETECTION TEST: Vendor names required for testing miner identification.
 		// These are technical identifiers from the miner's user-agent string, not endorsements.
 		// Users are solely responsible for any fees/costs with third-party services.
-		{"nicehash/1.0", MinerClassPro, "NiceHash"},
-		{"excavator/1.4.4a_nvidia", MinerClassPro, "NiceHash"},    // NiceHash GPU miner real UA
-		{"miningrigrentals/2.0", MinerClassPro, "MiningRigRentals"},
-		{"mrr/1.0", MinerClassPro, "MiningRigRentals"},
-		{"cudo/3.0", MinerClassPro, "Cudo Miner"},
-		{"zergpool/1.0", MinerClassPro, "Zergpool"},
-		{"prohashing/1.0", MinerClassPro, "Prohashing"},
-		{"miningdutch/1.0", MinerClassPro, "Mining Dutch"},
-		{"mining.dutch/2.0", MinerClassPro, "Mining Dutch"},           // Alternate form
-		{"zpool/1.0", MinerClassPro, "Zpool"},
-		{"woolypooly/1.0", MinerClassPro, "WoolyPooly"},
-		{"wooly/2.0", MinerClassPro, "WoolyPooly"},                   // Short form
-		{"herominers/1.0", MinerClassPro, "HeroMiners"},
-		{"hero/2.0", MinerClassPro, "HeroMiners"},                    // Short form
-		{"unmineable/1.0", MinerClassPro, "unMineable"},
+		// Class is MinerClassHashMarketplace (not Pro) — per-connection hashrate unknown,
+		// marketplace platforms may proxy multiple rigs through one upstream connection.
+		{"nicehash/1.0", MinerClassHashMarketplace, "NiceHash"},
+		{"excavator/1.4.4a_nvidia", MinerClassHashMarketplace, "NiceHash"},    // NiceHash GPU miner real UA
+		{"miningrigrentals/2.0", MinerClassHashMarketplace, "MiningRigRentals"},
+		{"mrr/1.0", MinerClassHashMarketplace, "MiningRigRentals"},
+		{"cudo/3.0", MinerClassHashMarketplace, "Cudo Miner"},
+		{"zergpool/1.0", MinerClassHashMarketplace, "Zergpool"},
+		{"prohashing/1.0", MinerClassHashMarketplace, "Prohashing"},
+		{"miningdutch/1.0", MinerClassHashMarketplace, "Mining Dutch"},
+		{"mining.dutch/2.0", MinerClassHashMarketplace, "Mining Dutch"},        // Alternate form
+		{"zpool/1.0", MinerClassHashMarketplace, "Zpool"},
+		{"woolypooly/1.0", MinerClassHashMarketplace, "WoolyPooly"},
+		{"wooly/2.0", MinerClassHashMarketplace, "WoolyPooly"},                 // Short form
+		{"herominers/1.0", MinerClassHashMarketplace, "HeroMiners"},
+		{"hero/2.0", MinerClassHashMarketplace, "HeroMiners"},                  // Short form
+		{"unmineable/1.0", MinerClassHashMarketplace, "unMineable"},
 
 		// ========================================================================
 		// CONFIRMED REAL-WORLD USER AGENTS (from firmware source code)
@@ -1599,8 +1601,8 @@ func TestScryptAlgorithmDifficulties(t *testing.T) {
 		{"bitdeer/1.0", 290000},
 		{"Teraflux AH3880/1.0", 290000},
 		{"auradine/1.0", 290000},
-		{"nicehash/1.0", 290000},
-		{"miningrigrentals/2.0", 290000},
+		{"nicehash/1.0", 128000},          // MinerClassHashMarketplace Scrypt InitialDiff
+		{"miningrigrentals/2.0", 128000},   // MinerClassHashMarketplace Scrypt InitialDiff
 	}
 
 	for _, tt := range tests {
