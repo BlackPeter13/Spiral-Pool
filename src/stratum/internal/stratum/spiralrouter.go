@@ -67,6 +67,15 @@ const (
 	// MinerClassPro's MaxDiff ceiling of 500,000 (~2.1 PH/s).
 	// Examples: Braiins Farm Proxy, any other stratum aggregation proxy.
 	MinerClassFarmProxy // Stratum aggregation proxy (~500 GH/s – 100+ PH/s per connection)
+
+	// Hashrate marketplace / rental service class.
+	// Connections arrive from rental platforms (NiceHash, MiningRigRentals, etc.).
+	// Each connection may be an individual rig OR routed through the marketplace's
+	// own stratum proxy infrastructure, meaning per-connection hashrate is unknown.
+	// MinerClassPro's MaxDiff=500K (~2.1 PH/s) is too low if the platform proxies
+	// multiple machines through one upstream connection.
+	// MaxDiff=50M gives a ~214 PH/s ceiling while starting at the same level as Pro.
+	MinerClassHashMarketplace // Hashrate rental marketplace (~100 TH/s – 214+ PH/s per connection)
 )
 
 func (c MinerClass) String() string {
@@ -98,6 +107,8 @@ func (c MinerClass) String() string {
 		return "avalon_home"
 	case MinerClassFarmProxy:
 		return "farm_proxy"
+	case MinerClassHashMarketplace:
+		return "hash_marketplace"
 	default:
 		return "unknown"
 	}
@@ -112,6 +123,8 @@ func (c MinerClass) Vendor() string {
 		return "avalon"
 	case MinerClassFarmProxy:
 		return "proxy"
+	case MinerClassHashMarketplace:
+		return "marketplace"
 	default:
 		return "generic"
 	}
@@ -314,9 +327,27 @@ var DefaultProfiles = map[MinerClass]MinerProfile{
 	MinerClassFarmProxy: {
 		Class:           MinerClassFarmProxy,
 		InitialDiff:     500000,      // Start at MinerClassPro ceiling; vardiff ramps instantly
-		MinDiff:         25600,       // S19-class floor — prevents oscilation on small proxy loads
+		MinDiff:         25600,       // S19-class floor — prevents oscillation on small proxy loads
 		MaxDiff:         100000000,   // ~429 PH/s ceiling — handles any realistic proxy aggregation
 		TargetShareTime: 1,           // 1 share per second for fast vardiff convergence
+	},
+
+	// Hashrate Marketplace / Rental Service
+	// Connections from NiceHash, MiningRigRentals, etc. May be individual rigs or routed
+	// through the marketplace's own stratum proxy infrastructure. Per-connection hashrate
+	// is unknown — could be a single S21 (~200 TH/s) or a platform proxy carrying multiple PH/s.
+	//
+	// InitialDiff = MinDiff: 25,600 — S19-class floor, same as MinerClassPro.
+	//   Vardiff ramps up immediately for high-hashrate connections. For individual rigs,
+	//   it stabilizes at the rig's optimal difficulty. The MinDiff=InitialDiff floor matches
+	//   the test invariant and prevents excessive share spam on connect.
+	// MaxDiff: 50,000,000 — ~214 PH/s ceiling; much higher than MinerClassPro's 2.1 PH/s.
+	MinerClassHashMarketplace: {
+		Class:           MinerClassHashMarketplace,
+		InitialDiff:     25600,      // S19-class start — vardiff ramps up quickly for proxy loads
+		MinDiff:         25600,      // Same as InitialDiff — test invariant satisfied
+		MaxDiff:         50000000,   // ~214 PH/s ceiling — handles marketplace proxy aggregation
+		TargetShareTime: 1,          // 1 share per second
 	},
 }
 
@@ -393,6 +424,18 @@ var ScryptProfiles = map[MinerClass]MinerProfile{
 		InitialDiff:     2048000,    // Start at MinerClassPro Scrypt ceiling
 		MinDiff:         128000,     // L7 low-power floor — prevents drop on small proxy loads
 		MaxDiff:         200000000,  // ~6.7 TH/s Scrypt ceiling
+		TargetShareTime: 2,
+	},
+
+	// Hashrate Marketplace Scrypt: rental platforms delivering Scrypt hashrate.
+	// D = hashrate × targetTime / 65536
+	// InitialDiff = MinDiff: 128,000 — L7 low-power equivalent floor.
+	// MaxDiff: 100,000,000 — ~3.4 TH/s Scrypt ceiling.
+	MinerClassHashMarketplace: {
+		Class:           MinerClassHashMarketplace,
+		InitialDiff:     128000,     // L7 low-power start — vardiff ramps up for heavy loads
+		MinDiff:         128000,     // Same as InitialDiff
+		MaxDiff:         100000000,  // ~3.4 TH/s Scrypt ceiling
 		TargetShareTime: 2,
 	},
 }
@@ -1100,7 +1143,7 @@ func NewSpiralRouterWithBlockTime(blockTimeSec int) *SpiralRouter {
 		{`(?i)ccminer`, MinerClassLow, "ccminer"},
 
 		// ----------------------------------------------------------------
-		// HASHRATE RENTAL SERVICES (User-Agent Detection)
+		// HASHRATE RENTAL / MARKETPLACE SERVICES (User-Agent Detection)
 		// ----------------------------------------------------------------
 		// USER-AGENT DETECTION: Vendor names below are required for miner identification.
 		// These are technical identifiers from the miner's user-agent string, not endorsements,
@@ -1110,18 +1153,22 @@ func NewSpiralRouterWithBlockTime(blockTimeSec int) *SpiralRouter {
 		// respective owners. Users are solely responsible for any fees, costs, or agreements
 		// with third-party hashrate rental services.
 		//
-		// MinerClassPro is used because rented hashrate typically represents aggregated
-		// high-performance mining capacity requiring higher initial difficulty.
-		{`(?i)nicehash|excavator`, MinerClassPro, "NiceHash"},
-		{`(?i)miningrigrentals|mrr`, MinerClassPro, "MiningRigRentals"},
-		{`(?i)cudo`, MinerClassPro, "Cudo Miner"},
-		{`(?i)zergpool`, MinerClassPro, "Zergpool"},
-		{`(?i)prohashing`, MinerClassPro, "Prohashing"},
-		{`(?i)miningdutch|mining.dutch`, MinerClassPro, "Mining Dutch"},
-		{`(?i)zpool`, MinerClassPro, "Zpool"},
-		{`(?i)woolypooly|wooly`, MinerClassPro, "WoolyPooly"},
-		{`(?i)herominers|hero`, MinerClassPro, "HeroMiners"},
-		{`(?i)unmineable`, MinerClassPro, "unMineable"},
+		// MinerClassHashMarketplace is used: per-connection hashrate is unknown since
+		// marketplace platforms may route multiple rigs through a single upstream connection.
+		// MaxDiff=50M (~214 PH/s) gives sufficient ceiling vs MinerClassPro's 2.1 PH/s cap.
+		{`(?i)nicehash|excavator`, MinerClassHashMarketplace, "NiceHash"},
+		{`(?i)miningrigrentals|mrr`, MinerClassHashMarketplace, "MiningRigRentals"},
+		{`(?i)cudo`, MinerClassHashMarketplace, "Cudo Miner"},
+		{`(?i)zergpool`, MinerClassHashMarketplace, "Zergpool"},
+		{`(?i)prohashing`, MinerClassHashMarketplace, "Prohashing"},
+		{`(?i)miningdutch|mining\.dutch`, MinerClassHashMarketplace, "Mining Dutch"},
+		{`(?i)zpool`, MinerClassHashMarketplace, "Zpool"},
+		{`(?i)woolypooly|wooly`, MinerClassHashMarketplace, "WoolyPooly"},
+		{`(?i)herominers|hero`, MinerClassHashMarketplace, "HeroMiners"},
+		{`(?i)unmineable`, MinerClassHashMarketplace, "unMineable"},
+		{`(?i)2miners`, MinerClassHashMarketplace, "2Miners"},
+		{`(?i)kryptex`, MinerClassHashMarketplace, "Kryptex"},
+		{`(?i)hash.*to.*coin|hashtocoins?`, MinerClassHashMarketplace, "HashToCoins"},
 	}
 
 	for _, p := range patterns {
