@@ -372,3 +372,7 @@ This project is licensed under BSD-3-Clause. See [LICENSE](LICENSE) and [THIRD_P
 ---
 
 *Spiral Pool &mdash; Black Ice 1.0 &mdash; Convergent difficulty. Minimal oscillation.*
+
+---
+
+**Contact:** spiralpool@proton.me
