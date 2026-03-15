@@ -13195,8 +13195,8 @@ StartLimitBurst=5
 Type=forking
 User=$POOL_USER
 Group=$POOL_USER
-ExecStart=$DGB_DIR/bin/digibyted -daemon -conf=$INSTALL_DIR/dgb/digibyte.conf -datadir=$INSTALL_DIR/dgb
-ExecStop=$DGB_DIR/bin/digibyte-cli -conf=$INSTALL_DIR/dgb/digibyte.conf -datadir=$INSTALL_DIR/dgb stop
+ExecStart=$DGB_DIR/bin/digibyted -daemon -conf=$(get_blockchain_dir dgb)/digibyte.conf -datadir=$(get_blockchain_dir dgb)
+ExecStop=$DGB_DIR/bin/digibyte-cli -conf=$(get_blockchain_dir dgb)/digibyte.conf -datadir=$(get_blockchain_dir dgb) stop
 
 # === SELF-HEALING / AUTO-RESTART ===
 # Restart=always ensures service restarts on any exit (crash, kill, clean exit)
@@ -17537,7 +17537,7 @@ append_merge_mining_to_config() {
             # Build aux chain YAML entries
             if [[ "$aux_chains" == *"NMC"* ]]; then
                 local nmc_pass="$NMC_RPC_PASSWORD"
-                local nmc_conf="$INSTALL_DIR/nmc/namecoin.conf"
+                local nmc_conf="$(get_blockchain_dir nmc)/namecoin.conf"
                 if [[ -f "$nmc_conf" ]]; then
                     local conf_pass
                     conf_pass=$(grep -E "^rpcpassword=" "$nmc_conf" 2>/dev/null | head -1 | cut -d= -f2)
@@ -17556,7 +17556,7 @@ append_merge_mining_to_config() {
 
             if [[ "$aux_chains" == *"SYS"* ]]; then
                 local sys_pass="$SYS_RPC_PASSWORD"
-                local sys_conf="$INSTALL_DIR/sys/syscoin.conf"
+                local sys_conf="$(get_blockchain_dir sys)/syscoin.conf"
                 if [[ -f "$sys_conf" ]]; then
                     local conf_pass
                     conf_pass=$(grep -E "^rpcpassword=" "$sys_conf" 2>/dev/null | head -1 | cut -d= -f2)
@@ -17575,7 +17575,7 @@ append_merge_mining_to_config() {
 
             if [[ "$aux_chains" == *"XMY"* ]]; then
                 local xmy_pass="$XMY_RPC_PASSWORD"
-                local xmy_conf="$INSTALL_DIR/xmy/myriadcoin.conf"
+                local xmy_conf="$(get_blockchain_dir xmy)/myriadcoin.conf"
                 if [[ -f "$xmy_conf" ]]; then
                     local conf_pass
                     conf_pass=$(grep -E "^rpcpassword=" "$xmy_conf" 2>/dev/null | head -1 | cut -d= -f2)
@@ -17594,7 +17594,7 @@ append_merge_mining_to_config() {
 
             if [[ "$aux_chains" == *"FBTC"* ]]; then
                 local fbtc_pass="$FBTC_RPC_PASSWORD"
-                local fbtc_conf="$INSTALL_DIR/fbtc/fractal.conf"
+                local fbtc_conf="$(get_blockchain_dir fbtc)/fractal.conf"
                 if [[ -f "$fbtc_conf" ]]; then
                     local conf_pass
                     conf_pass=$(grep -E "^rpcpassword=" "$fbtc_conf" 2>/dev/null | head -1 | cut -d= -f2)
@@ -17621,7 +17621,7 @@ append_merge_mining_to_config() {
 
             if [[ "$aux_chains" == *"DOGE"* ]]; then
                 local doge_pass="$DOGE_RPC_PASSWORD"
-                local doge_conf="$INSTALL_DIR/doge/dogecoin.conf"
+                local doge_conf="$(get_blockchain_dir doge)/dogecoin.conf"
                 if [[ -f "$doge_conf" ]]; then
                     local conf_pass
                     conf_pass=$(grep -E "^rpcpassword=" "$doge_conf" 2>/dev/null | head -1 | cut -d= -f2)
@@ -17640,7 +17640,7 @@ append_merge_mining_to_config() {
 
             if [[ "$aux_chains" == *"PEP"* ]]; then
                 local pep_pass="$PEP_RPC_PASSWORD"
-                local pep_conf="$INSTALL_DIR/pep/pepecoin.conf"
+                local pep_conf="$(get_blockchain_dir pep)/pepecoin.conf"
                 if [[ -f "$pep_conf" ]]; then
                     local conf_pass
                     conf_pass=$(grep -E "^rpcpassword=" "$pep_conf" 2>/dev/null | head -1 | cut -d= -f2)
@@ -18572,7 +18572,7 @@ configure_stratum_single() {
             rpc_user="$BC2_RPC_USER"
             # CRITICAL: Read password from daemon config to ensure consistency
             # This prevents password mismatch between node and stratum configs
-            local bc2_conf="$INSTALL_DIR/bc2/bitcoinii.conf"
+            local bc2_conf="$(get_blockchain_dir bc2)/bitcoinii.conf"
             if [[ -f "$bc2_conf" ]]; then
                 rpc_password=$(grep -E "^rpcpassword=" "$bc2_conf" 2>/dev/null | head -1 | cut -d= -f2)
                 if [[ -n "$rpc_password" ]]; then
@@ -18610,7 +18610,7 @@ configure_stratum_single() {
             zmq_port="28432"
             rpc_user="$BCH_RPC_USER"
             # CRITICAL: Read password from daemon config to ensure consistency
-            local bch_conf="$INSTALL_DIR/bch/bitcoin.conf"
+            local bch_conf="$(get_blockchain_dir bch)/bitcoin.conf"
             if [[ -f "$bch_conf" ]]; then
                 rpc_password=$(grep -E "^rpcpassword=" "$bch_conf" 2>/dev/null | head -1 | cut -d= -f2)
                 if [[ -n "$rpc_password" ]]; then
@@ -18649,7 +18649,7 @@ configure_stratum_single() {
             target_time="10"
             max_diff="100000000"
             # CRITICAL: Read password from daemon config to ensure consistency
-            local btc_conf="$INSTALL_DIR/btc/bitcoin.conf"
+            local btc_conf="$(get_blockchain_dir btc)/bitcoin.conf"
             if [[ -f "$btc_conf" ]]; then
                 rpc_password=$(grep -E "^rpcpassword=" "$btc_conf" 2>/dev/null | head -1 | cut -d= -f2)
                 if [[ -n "$rpc_password" ]]; then
@@ -18680,7 +18680,7 @@ configure_stratum_single() {
             zmq_port="28932"
             rpc_user="$CAT_RPC_USER"
             # CRITICAL: Read password from daemon config to ensure consistency
-            local cat_conf="$INSTALL_DIR/cat/catcoin.conf"
+            local cat_conf="$(get_blockchain_dir cat)/catcoin.conf"
             if [[ -f "$cat_conf" ]]; then
                 rpc_password=$(grep -E "^rpcpassword=" "$cat_conf" 2>/dev/null | head -1 | cut -d= -f2)
                 if [[ -n "$rpc_password" ]]; then
@@ -18715,7 +18715,7 @@ configure_stratum_single() {
             zmq_port="$ZMQ_PORT"
             rpc_user="$DGB_RPC_USER"
             # CRITICAL: Read password from daemon config to ensure consistency
-            local dgb_conf="$INSTALL_DIR/dgb/digibyte.conf"
+            local dgb_conf="$(get_blockchain_dir dgb)/digibyte.conf"
             if [[ -f "$dgb_conf" ]]; then
                 rpc_password=$(grep -E "^rpcpassword=" "$dgb_conf" 2>/dev/null | head -1 | cut -d= -f2)
                 if [[ -n "$rpc_password" ]]; then
@@ -18750,7 +18750,7 @@ configure_stratum_single() {
             zmq_port="$ZMQ_PORT"
             rpc_user="$DGB_RPC_USER"
             # CRITICAL: Read password from daemon config to ensure consistency (uses same daemon as DGB)
-            local dgbs_conf="$INSTALL_DIR/dgb/digibyte.conf"
+            local dgbs_conf="$(get_blockchain_dir dgb)/digibyte.conf"
             if [[ -f "$dgbs_conf" ]]; then
                 rpc_password=$(grep -E "^rpcpassword=" "$dgbs_conf" 2>/dev/null | head -1 | cut -d= -f2)
                 if [[ -n "$rpc_password" ]]; then
@@ -18785,7 +18785,7 @@ configure_stratum_single() {
             zmq_port="28555"
             rpc_user="$DOGE_RPC_USER"
             # CRITICAL: Read password from daemon config to ensure consistency
-            local doge_conf="$INSTALL_DIR/doge/dogecoin.conf"
+            local doge_conf="$(get_blockchain_dir doge)/dogecoin.conf"
             if [[ -f "$doge_conf" ]]; then
                 rpc_password=$(grep -E "^rpcpassword=" "$doge_conf" 2>/dev/null | head -1 | cut -d= -f2)
                 if [[ -n "$rpc_password" ]]; then
@@ -18820,7 +18820,7 @@ configure_stratum_single() {
             zmq_port="28933"
             rpc_user="$LTC_RPC_USER"
             # CRITICAL: Read password from daemon config to ensure consistency
-            local ltc_conf="$INSTALL_DIR/ltc/litecoin.conf"
+            local ltc_conf="$(get_blockchain_dir ltc)/litecoin.conf"
             if [[ -f "$ltc_conf" ]]; then
                 rpc_password=$(grep -E "^rpcpassword=" "$ltc_conf" 2>/dev/null | head -1 | cut -d= -f2)
                 if [[ -n "$rpc_password" ]]; then
@@ -18856,7 +18856,7 @@ configure_stratum_single() {
             zmq_enabled="false"  # PepeCoin v1.1.0 compiled without ZMQ support
             rpc_user="$PEP_RPC_USER"
             # CRITICAL: Read password from daemon config to ensure consistency
-            local pep_conf="$INSTALL_DIR/pep/pepecoin.conf"
+            local pep_conf="$(get_blockchain_dir pep)/pepecoin.conf"
             if [[ -f "$pep_conf" ]]; then
                 rpc_password=$(grep -E "^rpcpassword=" "$pep_conf" 2>/dev/null | head -1 | cut -d= -f2)
                 if [[ -n "$rpc_password" ]]; then
@@ -18891,7 +18891,7 @@ configure_stratum_single() {
             zmq_port="$FBTC_ZMQ_PORT"
             rpc_user="$FBTC_RPC_USER"
             # CRITICAL: Read password from daemon config to ensure consistency
-            local fbtc_conf="$INSTALL_DIR/fbtc/fractal.conf"
+            local fbtc_conf="$(get_blockchain_dir fbtc)/fractal.conf"
             if [[ -f "$fbtc_conf" ]]; then
                 rpc_password=$(grep -E "^rpcpassword=" "$fbtc_conf" 2>/dev/null | head -1 | cut -d= -f2)
                 if [[ -n "$rpc_password" ]]; then
@@ -18926,7 +18926,7 @@ configure_stratum_single() {
             zmq_port="$NMC_ZMQ_PORT"
             rpc_user="$NMC_RPC_USER"
             # CRITICAL: Read password from daemon config to ensure consistency
-            local nmc_conf="$INSTALL_DIR/nmc/namecoin.conf"
+            local nmc_conf="$(get_blockchain_dir nmc)/namecoin.conf"
             if [[ -f "$nmc_conf" ]]; then
                 rpc_password=$(grep -E "^rpcpassword=" "$nmc_conf" 2>/dev/null | head -1 | cut -d= -f2)
                 if [[ -n "$rpc_password" ]]; then
@@ -18961,7 +18961,7 @@ configure_stratum_single() {
             zmq_port="$SYS_ZMQ_PORT"
             rpc_user="$SYS_RPC_USER"
             # CRITICAL: Read password from daemon config to ensure consistency
-            local sys_conf="$INSTALL_DIR/sys/syscoin.conf"
+            local sys_conf="$(get_blockchain_dir sys)/syscoin.conf"
             if [[ -f "$sys_conf" ]]; then
                 rpc_password=$(grep -E "^rpcpassword=" "$sys_conf" 2>/dev/null | head -1 | cut -d= -f2)
                 if [[ -n "$rpc_password" ]]; then
@@ -18996,7 +18996,7 @@ configure_stratum_single() {
             zmq_port="$XMY_ZMQ_PORT"
             rpc_user="$XMY_RPC_USER"
             # CRITICAL: Read password from daemon config to ensure consistency
-            local xmy_conf="$INSTALL_DIR/xmy/myriadcoin.conf"
+            local xmy_conf="$(get_blockchain_dir xmy)/myriadcoin.conf"
             if [[ -f "$xmy_conf" ]]; then
                 rpc_password=$(grep -E "^rpcpassword=" "$xmy_conf" 2>/dev/null | head -1 | cut -d= -f2)
                 if [[ -n "$rpc_password" ]]; then
@@ -19946,7 +19946,7 @@ configure_stratum_multicoin() {
     if [[ "$ENABLE_PEP" == "true" ]]; then
         # Read PEP RPC password from daemon config if it exists
         local pep_rpc_pass="$PEP_RPC_PASSWORD"
-        local pep_conf="$INSTALL_DIR/pep/pepecoin.conf"
+        local pep_conf="$(get_blockchain_dir pep)/pepecoin.conf"
         if [[ -f "$pep_conf" ]]; then
             local conf_pass=$(grep -E "^rpcpassword=" "$pep_conf" 2>/dev/null | head -1 | cut -d= -f2)
             [[ -n "$conf_pass" ]] && pep_rpc_pass="$conf_pass"
@@ -19999,7 +19999,7 @@ configure_stratum_multicoin() {
     if [[ "$ENABLE_CAT" == "true" ]]; then
         # Read CAT RPC password from daemon config if it exists
         local cat_rpc_pass="$CAT_RPC_PASSWORD"
-        local cat_conf="$INSTALL_DIR/cat/catcoin.conf"
+        local cat_conf="$(get_blockchain_dir cat)/catcoin.conf"
         if [[ -f "$cat_conf" ]]; then
             local conf_pass=$(grep -E "^rpcpassword=" "$cat_conf" 2>/dev/null | head -1 | cut -d= -f2)
             [[ -n "$conf_pass" ]] && cat_rpc_pass="$conf_pass"
@@ -22391,68 +22391,68 @@ check_blockchain_sync() {
 SHOWED_BLOCKCHAIN=false
 
 if systemctl is-enabled --quiet digibyted 2>/dev/null; then
-    check_blockchain_sync "DigiByte" "digibyte-cli" "/spiralpool/dgb/digibyte.conf" "digibyted"
+    check_blockchain_sync "DigiByte" "digibyte-cli" "$(get_blockchain_dir dgb)/digibyte.conf" "digibyted"
     SHOWED_BLOCKCHAIN=true
 fi
 
 if systemctl is-enabled --quiet bitcoind 2>/dev/null; then
-    check_blockchain_sync "Bitcoin" "bitcoin-cli" "/spiralpool/btc/bitcoin.conf" "bitcoind"
+    check_blockchain_sync "Bitcoin" "bitcoin-cli" "$(get_blockchain_dir btc)/bitcoin.conf" "bitcoind"
     SHOWED_BLOCKCHAIN=true
 fi
 
 if systemctl is-enabled --quiet bitcoind-bch 2>/dev/null; then
-    check_blockchain_sync "Bitcoin Cash" "bitcoin-cli-bch" "/spiralpool/bch/bitcoin.conf" "bitcoind-bch"
+    check_blockchain_sync "Bitcoin Cash" "bitcoin-cli-bch" "$(get_blockchain_dir bch)/bitcoin.conf" "bitcoind-bch"
     SHOWED_BLOCKCHAIN=true
 fi
 
 if systemctl is-enabled --quiet bitcoiniid 2>/dev/null; then
-    check_blockchain_sync "Bitcoin II" "bitcoinii-cli" "/spiralpool/bc2/bitcoinii.conf" "bitcoiniid"
+    check_blockchain_sync "Bitcoin II" "bitcoinii-cli" "$(get_blockchain_dir bc2)/bitcoinii.conf" "bitcoiniid"
     SHOWED_BLOCKCHAIN=true
 fi
 
 # SHA-256d AuxPoW coins (merge-mineable with Bitcoin)
 if systemctl is-enabled --quiet namecoind 2>/dev/null; then
-    check_blockchain_sync "Namecoin" "namecoin-cli" "/spiralpool/nmc/namecoin.conf" "namecoind"
+    check_blockchain_sync "Namecoin" "namecoin-cli" "$(get_blockchain_dir nmc)/namecoin.conf" "namecoind"
     SHOWED_BLOCKCHAIN=true
 fi
 
 if systemctl is-enabled --quiet syscoind 2>/dev/null; then
-    check_blockchain_sync "Syscoin" "syscoin-cli" "/spiralpool/sys/syscoin.conf" "syscoind"
+    check_blockchain_sync "Syscoin" "syscoin-cli" "$(get_blockchain_dir sys)/syscoin.conf" "syscoind"
     SHOWED_BLOCKCHAIN=true
 fi
 
 if systemctl is-enabled --quiet myriadcoind 2>/dev/null; then
-    check_blockchain_sync "Myriad" "myriadcoin-cli" "/spiralpool/xmy/myriadcoin.conf" "myriadcoind"
+    check_blockchain_sync "Myriad" "myriadcoin-cli" "$(get_blockchain_dir xmy)/myriadcoin.conf" "myriadcoind"
     SHOWED_BLOCKCHAIN=true
 fi
 
 if systemctl is-enabled --quiet fractald 2>/dev/null; then
-    check_blockchain_sync "Fractal BTC" "fractal-cli" "/spiralpool/fbtc/fractal.conf" "fractald"
+    check_blockchain_sync "Fractal BTC" "fractal-cli" "$(get_blockchain_dir fbtc)/fractal.conf" "fractald"
     SHOWED_BLOCKCHAIN=true
 fi
 
 if systemctl is-enabled --quiet qbitxd 2>/dev/null; then
-    check_blockchain_sync "Q-BitX" "qbitx-cli" "/spiralpool/qbx/qbitx.conf" "qbitxd"
+    check_blockchain_sync "Q-BitX" "qbitx-cli" "$(get_blockchain_dir qbx)/qbitx.conf" "qbitxd"
     SHOWED_BLOCKCHAIN=true
 fi
 
 if systemctl is-enabled --quiet litecoind 2>/dev/null; then
-    check_blockchain_sync "Litecoin" "litecoin-cli" "/spiralpool/ltc/litecoin.conf" "litecoind"
+    check_blockchain_sync "Litecoin" "litecoin-cli" "$(get_blockchain_dir ltc)/litecoin.conf" "litecoind"
     SHOWED_BLOCKCHAIN=true
 fi
 
 if systemctl is-enabled --quiet dogecoind 2>/dev/null; then
-    check_blockchain_sync "Dogecoin" "dogecoin-cli" "/spiralpool/doge/dogecoin.conf" "dogecoind"
+    check_blockchain_sync "Dogecoin" "dogecoin-cli" "$(get_blockchain_dir doge)/dogecoin.conf" "dogecoind"
     SHOWED_BLOCKCHAIN=true
 fi
 
 if systemctl is-enabled --quiet pepecoind 2>/dev/null; then
-    check_blockchain_sync "PepeCoin" "pepecoin-cli" "/spiralpool/pep/pepecoin.conf" "pepecoind"
+    check_blockchain_sync "PepeCoin" "pepecoin-cli" "$(get_blockchain_dir pep)/pepecoin.conf" "pepecoind"
     SHOWED_BLOCKCHAIN=true
 fi
 
 if systemctl is-enabled --quiet catcoind 2>/dev/null; then
-    check_blockchain_sync "Catcoin" "catcoin-cli" "/spiralpool/cat/catcoin.conf" "catcoind"
+    check_blockchain_sync "Catcoin" "catcoin-cli" "$(get_blockchain_dir cat)/catcoin.conf" "catcoind"
     SHOWED_BLOCKCHAIN=true
 fi
 
@@ -22658,8 +22658,8 @@ setup_coin() {
             COIN_SYMBOL="DGB"
             COIN_EMOJI="💎"
             SERVICE_NAME="digibyted"
-            CONF="/spiralpool/dgb/digibyte.conf"
-            DATADIR="/spiralpool/dgb"
+            CONF="$(get_blockchain_dir dgb)/digibyte.conf"
+            DATADIR="$(get_blockchain_dir dgb)"
             CLI="digibyte-cli -conf=$CONF -datadir=$DATADIR"
             ;;
         btc|bitcoin)
@@ -22667,8 +22667,8 @@ setup_coin() {
             COIN_SYMBOL="BTC"
             COIN_EMOJI="₿"
             SERVICE_NAME="bitcoind"
-            CONF="/spiralpool/btc/bitcoin.conf"
-            DATADIR="/spiralpool/btc"
+            CONF="$(get_blockchain_dir btc)/bitcoin.conf"
+            DATADIR="$(get_blockchain_dir btc)"
             CLI="bitcoin-cli -conf=$CONF -datadir=$DATADIR"
             ;;
         bch|bitcoincash)
@@ -22676,8 +22676,8 @@ setup_coin() {
             COIN_SYMBOL="BCH"
             COIN_EMOJI="💚"
             SERVICE_NAME="bitcoind-bch"
-            CONF="/spiralpool/bch/bitcoin.conf"
-            DATADIR="/spiralpool/bch"
+            CONF="$(get_blockchain_dir bch)/bitcoin.conf"
+            DATADIR="$(get_blockchain_dir bch)"
             CLI="bitcoin-cli-bch -conf=$CONF -datadir=$DATADIR"
             ;;
         bc2|bitcoinii)
@@ -22685,8 +22685,8 @@ setup_coin() {
             COIN_SYMBOL="BC2"
             COIN_EMOJI="🔷"
             SERVICE_NAME="bitcoiniid"
-            CONF="/spiralpool/bc2/bitcoinii.conf"
-            DATADIR="/spiralpool/bc2"
+            CONF="$(get_blockchain_dir bc2)/bitcoinii.conf"
+            DATADIR="$(get_blockchain_dir bc2)"
             # Bitcoin II uses lowercase symlink bitcoinii-cli
             CLI="bitcoinii-cli -conf=$CONF -datadir=$DATADIR"
             ;;
@@ -22696,8 +22696,8 @@ setup_coin() {
             COIN_SYMBOL="LTC"
             COIN_EMOJI="🪙"
             SERVICE_NAME="litecoind"
-            CONF="/spiralpool/ltc/litecoin.conf"
-            DATADIR="/spiralpool/ltc"
+            CONF="$(get_blockchain_dir ltc)/litecoin.conf"
+            DATADIR="$(get_blockchain_dir ltc)"
             CLI="litecoin-cli -conf=$CONF -datadir=$DATADIR"
             ;;
         doge|dogecoin)
@@ -22705,8 +22705,8 @@ setup_coin() {
             COIN_SYMBOL="DOGE"
             COIN_EMOJI="🐕"
             SERVICE_NAME="dogecoind"
-            CONF="/spiralpool/doge/dogecoin.conf"
-            DATADIR="/spiralpool/doge"
+            CONF="$(get_blockchain_dir doge)/dogecoin.conf"
+            DATADIR="$(get_blockchain_dir doge)"
             CLI="dogecoin-cli -conf=$CONF -datadir=$DATADIR"
             ;;
         dgb_scrypt|dgb-scrypt)
@@ -22715,8 +22715,8 @@ setup_coin() {
             COIN_SYMBOL="DGB-SCRYPT"
             COIN_EMOJI="💎"
             SERVICE_NAME="digibyted"
-            CONF="/spiralpool/dgb/digibyte.conf"
-            DATADIR="/spiralpool/dgb"
+            CONF="$(get_blockchain_dir dgb)/digibyte.conf"
+            DATADIR="$(get_blockchain_dir dgb)"
             CLI="digibyte-cli -conf=$CONF -datadir=$DATADIR"
             ;;
         fbtc|fractalbtc|fractal)
@@ -22724,8 +22724,8 @@ setup_coin() {
             COIN_SYMBOL="FBTC"
             COIN_EMOJI="🔶"
             SERVICE_NAME="fractald"
-            CONF="/spiralpool/fbtc/fractal.conf"
-            DATADIR="/spiralpool/fbtc"
+            CONF="$(get_blockchain_dir fbtc)/fractal.conf"
+            DATADIR="$(get_blockchain_dir fbtc)"
             CLI="fractal-cli -conf=$CONF -datadir=$DATADIR"
             ;;
         qbx|qbitx)
@@ -22733,8 +22733,8 @@ setup_coin() {
             COIN_SYMBOL="QBX"
             COIN_EMOJI="⚛️"
             SERVICE_NAME="qbitxd"
-            CONF="/spiralpool/qbx/qbitx.conf"
-            DATADIR="/spiralpool/qbx"
+            CONF="$(get_blockchain_dir qbx)/qbitx.conf"
+            DATADIR="$(get_blockchain_dir qbx)"
             CLI="qbitx-cli -conf=$CONF -datadir=$DATADIR"
             ;;
         nmc|namecoin)
@@ -22742,8 +22742,8 @@ setup_coin() {
             COIN_SYMBOL="NMC"
             COIN_EMOJI="📛"
             SERVICE_NAME="namecoind"
-            CONF="/spiralpool/nmc/namecoin.conf"
-            DATADIR="/spiralpool/nmc"
+            CONF="$(get_blockchain_dir nmc)/namecoin.conf"
+            DATADIR="$(get_blockchain_dir nmc)"
             CLI="namecoin-cli -conf=$CONF -datadir=$DATADIR"
             ;;
         sys|syscoin)
@@ -22751,8 +22751,8 @@ setup_coin() {
             COIN_SYMBOL="SYS"
             COIN_EMOJI="⚙️"
             SERVICE_NAME="syscoind"
-            CONF="/spiralpool/sys/syscoin.conf"
-            DATADIR="/spiralpool/sys"
+            CONF="$(get_blockchain_dir sys)/syscoin.conf"
+            DATADIR="$(get_blockchain_dir sys)"
             CLI="syscoin-cli -conf=$CONF -datadir=$DATADIR"
             ;;
         xmy|myriad|myriadcoin)
@@ -22760,8 +22760,8 @@ setup_coin() {
             COIN_SYMBOL="XMY"
             COIN_EMOJI="🌀"
             SERVICE_NAME="myriadcoind"
-            CONF="/spiralpool/xmy/myriadcoin.conf"
-            DATADIR="/spiralpool/xmy"
+            CONF="$(get_blockchain_dir xmy)/myriadcoin.conf"
+            DATADIR="$(get_blockchain_dir xmy)"
             CLI="myriadcoin-cli -conf=$CONF -datadir=$DATADIR"
             ;;
         pep|pepecoin)
@@ -22769,8 +22769,8 @@ setup_coin() {
             COIN_SYMBOL="PEP"
             COIN_EMOJI="🐸"
             SERVICE_NAME="pepecoind"
-            CONF="/spiralpool/pep/pepecoin.conf"
-            DATADIR="/spiralpool/pep"
+            CONF="$(get_blockchain_dir pep)/pepecoin.conf"
+            DATADIR="$(get_blockchain_dir pep)"
             CLI="pepecoin-cli -conf=$CONF -datadir=$DATADIR"
             ;;
         cat|catcoin)
@@ -22778,8 +22778,8 @@ setup_coin() {
             COIN_SYMBOL="CAT"
             COIN_EMOJI="🐱"
             SERVICE_NAME="catcoind"
-            CONF="/spiralpool/cat/catcoin.conf"
-            DATADIR="/spiralpool/cat"
+            CONF="$(get_blockchain_dir cat)/catcoin.conf"
+            DATADIR="$(get_blockchain_dir cat)"
             CLI="catcoin-cli -conf=$CONF -datadir=$DATADIR"
             ;;
         *)
@@ -22881,19 +22881,19 @@ detect_coins() {
 
     # Method 4: Check for config files (last resort fallback)
     if [[ ${#coins[@]} -eq 0 ]]; then
-        [[ -f "/spiralpool/dgb/digibyte.conf" ]] && coins+=("dgb")
-        [[ -f "/spiralpool/btc/bitcoin.conf" ]] && coins+=("btc")
-        [[ -f "/spiralpool/bch/bitcoin.conf" ]] && coins+=("bch")
-        [[ -f "/spiralpool/bc2/bitcoinii.conf" ]] && coins+=("bc2")
-        [[ -f "/spiralpool/ltc/litecoin.conf" ]] && coins+=("ltc")
-        [[ -f "/spiralpool/doge/dogecoin.conf" ]] && coins+=("doge")
-        [[ -f "/spiralpool/fbtc/fractal.conf" ]] && coins+=("fbtc")
-        [[ -f "/spiralpool/qbx/qbitx.conf" ]] && coins+=("qbx")
-        [[ -f "/spiralpool/nmc/namecoin.conf" ]] && coins+=("nmc")
-        [[ -f "/spiralpool/sys/syscoin.conf" ]] && coins+=("sys")
-        [[ -f "/spiralpool/xmy/myriadcoin.conf" ]] && coins+=("xmy")
-        [[ -f "/spiralpool/pep/pepecoin.conf" ]] && coins+=("pep")
-        [[ -f "/spiralpool/cat/catcoin.conf" ]] && coins+=("cat")
+        [[ -f "$(get_blockchain_dir dgb)/digibyte.conf" ]] && coins+=("dgb")
+        [[ -f "$(get_blockchain_dir btc)/bitcoin.conf" ]] && coins+=("btc")
+        [[ -f "$(get_blockchain_dir bch)/bitcoin.conf" ]] && coins+=("bch")
+        [[ -f "$(get_blockchain_dir bc2)/bitcoinii.conf" ]] && coins+=("bc2")
+        [[ -f "$(get_blockchain_dir ltc)/litecoin.conf" ]] && coins+=("ltc")
+        [[ -f "$(get_blockchain_dir doge)/dogecoin.conf" ]] && coins+=("doge")
+        [[ -f "$(get_blockchain_dir fbtc)/fractal.conf" ]] && coins+=("fbtc")
+        [[ -f "$(get_blockchain_dir qbx)/qbitx.conf" ]] && coins+=("qbx")
+        [[ -f "$(get_blockchain_dir nmc)/namecoin.conf" ]] && coins+=("nmc")
+        [[ -f "$(get_blockchain_dir sys)/syscoin.conf" ]] && coins+=("sys")
+        [[ -f "$(get_blockchain_dir xmy)/myriadcoin.conf" ]] && coins+=("xmy")
+        [[ -f "$(get_blockchain_dir pep)/pepecoin.conf" ]] && coins+=("pep")
+        [[ -f "$(get_blockchain_dir cat)/catcoin.conf" ]] && coins+=("cat")
     fi
 
     echo "${coins[@]}"
@@ -24380,19 +24380,19 @@ run_test() {
     # Check each coin (SHA-256d and Scrypt)
     for coin_check in dgb btc bch bc2 nmc sys xmy fbtc qbx ltc doge pep cat; do
         case $coin_check in
-            dgb) conf_path="/spiralpool/dgb/digibyte.conf"; label="DGB" ;;
-            btc) conf_path="/spiralpool/btc/bitcoin.conf"; label="BTC" ;;
-            bch) conf_path="/spiralpool/bch/bitcoin.conf"; label="BCH" ;;
-            bc2) conf_path="/spiralpool/bc2/bitcoinii.conf"; label="BC2" ;;
-            nmc) conf_path="/spiralpool/nmc/namecoin.conf"; label="NMC" ;;
-            sys) conf_path="/spiralpool/sys/syscoin.conf"; label="SYS" ;;
-            xmy) conf_path="/spiralpool/xmy/myriadcoin.conf"; label="XMY" ;;
-            fbtc) conf_path="/spiralpool/fbtc/fractal.conf"; label="FBTC" ;;
-            qbx) conf_path="/spiralpool/qbx/qbitx.conf"; label="QBX" ;;
-            ltc) conf_path="/spiralpool/ltc/litecoin.conf"; label="LTC" ;;
-            doge) conf_path="/spiralpool/doge/dogecoin.conf"; label="DOGE" ;;
-            pep) conf_path="/spiralpool/pep/pepecoin.conf"; label="PEP" ;;
-            cat) conf_path="/spiralpool/cat/catcoin.conf"; label="CAT" ;;
+            dgb) conf_path="$(get_blockchain_dir dgb)/digibyte.conf"; label="DGB" ;;
+            btc) conf_path="$(get_blockchain_dir btc)/bitcoin.conf"; label="BTC" ;;
+            bch) conf_path="$(get_blockchain_dir bch)/bitcoin.conf"; label="BCH" ;;
+            bc2) conf_path="$(get_blockchain_dir bc2)/bitcoinii.conf"; label="BC2" ;;
+            nmc) conf_path="$(get_blockchain_dir nmc)/namecoin.conf"; label="NMC" ;;
+            sys) conf_path="$(get_blockchain_dir sys)/syscoin.conf"; label="SYS" ;;
+            xmy) conf_path="$(get_blockchain_dir xmy)/myriadcoin.conf"; label="XMY" ;;
+            fbtc) conf_path="$(get_blockchain_dir fbtc)/fractal.conf"; label="FBTC" ;;
+            qbx) conf_path="$(get_blockchain_dir qbx)/qbitx.conf"; label="QBX" ;;
+            ltc) conf_path="$(get_blockchain_dir ltc)/litecoin.conf"; label="LTC" ;;
+            doge) conf_path="$(get_blockchain_dir doge)/dogecoin.conf"; label="DOGE" ;;
+            pep) conf_path="$(get_blockchain_dir pep)/pepecoin.conf"; label="PEP" ;;
+            cat) conf_path="$(get_blockchain_dir cat)/catcoin.conf"; label="CAT" ;;
         esac
         echo -n "   ${YELLOW}$label:${NC} "
         if [[ -f "$conf_path" ]]; then
@@ -24831,61 +24831,61 @@ case "$COIN" in
         COIN_NAME="DigiByte"
         COIN_SYMBOL="DGB"
         COIN_EMOJI="💎"
-        CONF="$INSTALL_DIR/dgb/digibyte.conf"
+        CONF="$(get_blockchain_dir dgb)/digibyte.conf"
         CLI="digibyte-cli -conf=$CONF"
         SERVICE_NAME="digibyted"
         CONFIG_FILE="$INSTALL_DIR/config/config.yaml"
         ADDRESS_PREFIX="D or S"
         ADDRESS_TYPE="legacy"
-        WALLET_DIR="$INSTALL_DIR/dgb"
+        WALLET_DIR="$(get_blockchain_dir dgb)"
         ;;
     dgb-scrypt|digibyte-scrypt)
         COIN_NAME="DigiByte-Scrypt"
         COIN_SYMBOL="DGB"
         COIN_EMOJI="💎"
-        CONF="$INSTALL_DIR/dgb/digibyte.conf"
+        CONF="$(get_blockchain_dir dgb)/digibyte.conf"
         CLI="digibyte-cli -conf=$CONF"
         SERVICE_NAME="digibyted"
         CONFIG_FILE="$INSTALL_DIR/config/config.yaml"
         ADDRESS_PREFIX="D or S"
         ADDRESS_TYPE="legacy"
-        WALLET_DIR="$INSTALL_DIR/dgb"
+        WALLET_DIR="$(get_blockchain_dir dgb)"
         ;;
     btc|bitcoin)
         COIN_NAME="Bitcoin"
         COIN_SYMBOL="BTC"
         COIN_EMOJI="🟠"
-        CONF="$INSTALL_DIR/btc/bitcoin.conf"
+        CONF="$(get_blockchain_dir btc)/bitcoin.conf"
         CLI="bitcoin-cli -conf=$CONF"
         SERVICE_NAME="bitcoind"
         CONFIG_FILE="$INSTALL_DIR/config/config.yaml"
         ADDRESS_PREFIX="bc1q, 1, or 3"
         ADDRESS_TYPE="bech32"
-        WALLET_DIR="$INSTALL_DIR/btc"
+        WALLET_DIR="$(get_blockchain_dir btc)"
         ;;
     bch|bitcoincash)
         COIN_NAME="Bitcoin Cash"
         COIN_SYMBOL="BCH"
         COIN_EMOJI="🟢"
-        CONF="$INSTALL_DIR/bch/bitcoin.conf"
+        CONF="$(get_blockchain_dir bch)/bitcoin.conf"
         CLI="bitcoin-cli-bch -conf=$CONF -chain=main"
         SERVICE_NAME="bitcoind-bch"
         CONFIG_FILE="$INSTALL_DIR/config/config.yaml"
         ADDRESS_PREFIX="bitcoincash:q or 1"
         ADDRESS_TYPE=""
-        WALLET_DIR="$INSTALL_DIR/bch"
+        WALLET_DIR="$(get_blockchain_dir bch)"
         ;;
     bc2|bitcoinii|bitcoin2)
         COIN_NAME="Bitcoin II"
         COIN_SYMBOL="BC2"
         COIN_EMOJI="🔵"
-        CONF="$INSTALL_DIR/bc2/bitcoinii.conf"
+        CONF="$(get_blockchain_dir bc2)/bitcoinii.conf"
         CLI="bitcoinii-cli -conf=$CONF"
         SERVICE_NAME="bitcoiniid"
         CONFIG_FILE="$INSTALL_DIR/config/config.yaml"
         ADDRESS_PREFIX="bc1q, 1, or 3 (same as BTC)"
         ADDRESS_TYPE="bech32"
-        WALLET_DIR="$INSTALL_DIR/bc2"
+        WALLET_DIR="$(get_blockchain_dir bc2)"
         # Special warning for BC2
         BC2_ADDRESS_WARNING="true"
         ;;
@@ -24894,73 +24894,73 @@ case "$COIN" in
         COIN_NAME="Namecoin"
         COIN_SYMBOL="NMC"
         COIN_EMOJI="🔶"
-        CONF="$INSTALL_DIR/nmc/namecoin.conf"
+        CONF="$(get_blockchain_dir nmc)/namecoin.conf"
         CLI="namecoin-cli -conf=$CONF"
         SERVICE_NAME="namecoind"
         CONFIG_FILE="$INSTALL_DIR/config/config.yaml"
         ADDRESS_PREFIX="N or M"
         ADDRESS_TYPE="legacy"
-        WALLET_DIR="$INSTALL_DIR/nmc"
+        WALLET_DIR="$(get_blockchain_dir nmc)"
         ;;
     sys|syscoin)
         COIN_NAME="Syscoin"
         COIN_SYMBOL="SYS"
         COIN_EMOJI="🔷"
-        CONF="$INSTALL_DIR/sys/syscoin.conf"
+        CONF="$(get_blockchain_dir sys)/syscoin.conf"
         CLI="syscoin-cli -conf=$CONF"
         SERVICE_NAME="syscoind"
         CONFIG_FILE="$INSTALL_DIR/config/config.yaml"
         ADDRESS_PREFIX="sys1q or S"
         ADDRESS_TYPE="legacy"
-        WALLET_DIR="$INSTALL_DIR/sys"
+        WALLET_DIR="$(get_blockchain_dir sys)"
         ;;
     xmy|myriad|myriadcoin)
         COIN_NAME="Myriad"
         COIN_SYMBOL="XMY"
         COIN_EMOJI="🔴"
-        CONF="$INSTALL_DIR/xmy/myriadcoin.conf"
+        CONF="$(get_blockchain_dir xmy)/myriadcoin.conf"
         CLI="myriadcoin-cli -conf=$CONF"
         SERVICE_NAME="myriadcoind"
         CONFIG_FILE="$INSTALL_DIR/config/config.yaml"
         ADDRESS_PREFIX="M"
         ADDRESS_TYPE="legacy"
-        WALLET_DIR="$INSTALL_DIR/xmy"
+        WALLET_DIR="$(get_blockchain_dir xmy)"
         ;;
     ltc|litecoin)
         COIN_NAME="Litecoin"
         COIN_SYMBOL="LTC"
         COIN_EMOJI="⚪"
-        CONF="$INSTALL_DIR/ltc/litecoin.conf"
+        CONF="$(get_blockchain_dir ltc)/litecoin.conf"
         CLI="litecoin-cli -conf=$CONF"
         SERVICE_NAME="litecoind"
         CONFIG_FILE="$INSTALL_DIR/config/config.yaml"
         ADDRESS_PREFIX="ltc1q, L, or M"
         ADDRESS_TYPE="bech32"
-        WALLET_DIR="$INSTALL_DIR/ltc"
+        WALLET_DIR="$(get_blockchain_dir ltc)"
         ;;
     doge|dogecoin)
         COIN_NAME="Dogecoin"
         COIN_SYMBOL="DOGE"
         COIN_EMOJI="🐕"
-        CONF="$INSTALL_DIR/doge/dogecoin.conf"
+        CONF="$(get_blockchain_dir doge)/dogecoin.conf"
         CLI="dogecoin-cli -conf=$CONF"
         SERVICE_NAME="dogecoind"
         CONFIG_FILE="$INSTALL_DIR/config/config.yaml"
         ADDRESS_PREFIX="D"
         ADDRESS_TYPE="legacy"
-        WALLET_DIR="$INSTALL_DIR/doge"
+        WALLET_DIR="$(get_blockchain_dir doge)"
         ;;
     pep|pepecoin)
         COIN_NAME="PepeCoin"
         COIN_SYMBOL="PEP"
         COIN_EMOJI="🐸"
-        CONF="$INSTALL_DIR/pep/pepecoin.conf"
+        CONF="$(get_blockchain_dir pep)/pepecoin.conf"
         CLI="pepecoin-cli -conf=$CONF"
         SERVICE_NAME="pepecoind"
         CONFIG_FILE="$INSTALL_DIR/config/config.yaml"
         ADDRESS_PREFIX="P"
         ADDRESS_TYPE="legacy"
-        WALLET_DIR="$INSTALL_DIR/pep"
+        WALLET_DIR="$(get_blockchain_dir pep)"
         # Note: Wallet generation may not be fully supported
         WALLET_GEN_WARNING="true"
         ;;
@@ -24968,13 +24968,13 @@ case "$COIN" in
         COIN_NAME="Catcoin"
         COIN_SYMBOL="CAT"
         COIN_EMOJI="🐱"
-        CONF="$INSTALL_DIR/cat/catcoin.conf"
+        CONF="$(get_blockchain_dir cat)/catcoin.conf"
         CLI="catcoin-cli -conf=$CONF"
         SERVICE_NAME="catcoind"
         CONFIG_FILE="$INSTALL_DIR/config/config.yaml"
         ADDRESS_PREFIX="9"
         ADDRESS_TYPE="legacy"
-        WALLET_DIR="$INSTALL_DIR/cat"
+        WALLET_DIR="$(get_blockchain_dir cat)"
         # Note: Wallet generation may not be fully supported
         WALLET_GEN_WARNING="true"
         ;;
@@ -24982,13 +24982,13 @@ case "$COIN" in
         COIN_NAME="Fractal Bitcoin"
         COIN_SYMBOL="FBTC"
         COIN_EMOJI="🔶"
-        CONF="$INSTALL_DIR/fbtc/fractal.conf"
-        CLI="fractal-cli -conf=$CONF -datadir=$INSTALL_DIR/fbtc"
+        CONF="$(get_blockchain_dir fbtc)/fractal.conf"
+        CLI="fractal-cli -conf=$CONF -datadir=$(get_blockchain_dir fbtc)"
         SERVICE_NAME="fractald"
         CONFIG_FILE="$INSTALL_DIR/config/config.yaml"
         ADDRESS_PREFIX="bc1q or 1 (same as BTC)"
         ADDRESS_TYPE="bech32"
-        WALLET_DIR="$INSTALL_DIR/fbtc"
+        WALLET_DIR="$(get_blockchain_dir fbtc)"
         ;;
     qbx|qbitx)
         COIN_NAME="Q-BitX"
@@ -26271,173 +26271,173 @@ backup_wallet() {
     local found_wallet=false
 
     # Backup DigiByte wallet (named wallet path first, legacy fallback)
-    if [[ -f "${INSTALL_DIR}/dgb/wallets/pool-dgb/wallet.dat" ]]; then
-        digibyte-cli -conf="${INSTALL_DIR}/dgb/digibyte.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/dgb/wallets/pool-dgb/wallet.dat" "${TEMP_DIR}/wallets/digibyte-wallet.dat"
+    if [[ -f "$(get_blockchain_dir dgb)/wallets/pool-dgb/wallet.dat" ]]; then
+        digibyte-cli -conf="$(get_blockchain_dir dgb)/digibyte.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir dgb)/wallets/pool-dgb/wallet.dat" "${TEMP_DIR}/wallets/digibyte-wallet.dat"
         found_wallet=true
         log "  Backed up DigiByte wallet (named: pool-dgb)"
-    elif [[ -f "${INSTALL_DIR}/dgb/wallet.dat" ]]; then
-        digibyte-cli -conf="${INSTALL_DIR}/dgb/digibyte.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/dgb/wallet.dat" "${TEMP_DIR}/wallets/digibyte-wallet.dat"
+    elif [[ -f "$(get_blockchain_dir dgb)/wallet.dat" ]]; then
+        digibyte-cli -conf="$(get_blockchain_dir dgb)/digibyte.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir dgb)/wallet.dat" "${TEMP_DIR}/wallets/digibyte-wallet.dat"
         found_wallet=true
         log "  Backed up DigiByte wallet (legacy)"
     fi
-    if ls "${INSTALL_DIR}/dgb/wallet_backup_"* 1>/dev/null 2>&1; then
-        cp "${INSTALL_DIR}/dgb/wallet_backup_"* "${TEMP_DIR}/wallets/" 2>/dev/null || true
+    if ls "$(get_blockchain_dir dgb)/wallet_backup_"* 1>/dev/null 2>&1; then
+        cp "$(get_blockchain_dir dgb)/wallet_backup_"* "${TEMP_DIR}/wallets/" 2>/dev/null || true
     fi
 
     # Backup Bitcoin wallet (named wallet path first, legacy fallback)
-    if [[ -f "${INSTALL_DIR}/btc/wallets/pool-btc/wallet.dat" ]]; then
-        bitcoin-cli -conf="${INSTALL_DIR}/btc/bitcoin.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/btc/wallets/pool-btc/wallet.dat" "${TEMP_DIR}/wallets/bitcoin-wallet.dat"
+    if [[ -f "$(get_blockchain_dir btc)/wallets/pool-btc/wallet.dat" ]]; then
+        bitcoin-cli -conf="$(get_blockchain_dir btc)/bitcoin.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir btc)/wallets/pool-btc/wallet.dat" "${TEMP_DIR}/wallets/bitcoin-wallet.dat"
         found_wallet=true
         log "  Backed up Bitcoin wallet (named: pool-btc)"
-    elif [[ -f "${INSTALL_DIR}/btc/wallet.dat" ]]; then
-        bitcoin-cli -conf="${INSTALL_DIR}/btc/bitcoin.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/btc/wallet.dat" "${TEMP_DIR}/wallets/bitcoin-wallet.dat"
+    elif [[ -f "$(get_blockchain_dir btc)/wallet.dat" ]]; then
+        bitcoin-cli -conf="$(get_blockchain_dir btc)/bitcoin.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir btc)/wallet.dat" "${TEMP_DIR}/wallets/bitcoin-wallet.dat"
         found_wallet=true
         log "  Backed up Bitcoin wallet (legacy)"
     fi
 
     # Backup Bitcoin Cash wallet (named wallet path first, legacy fallback)
-    if [[ -f "${INSTALL_DIR}/bch/wallets/pool-bch/wallet.dat" ]]; then
-        bitcoin-cli-bch -conf="${INSTALL_DIR}/bch/bitcoin.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/bch/wallets/pool-bch/wallet.dat" "${TEMP_DIR}/wallets/bitcoincash-wallet.dat"
+    if [[ -f "$(get_blockchain_dir bch)/wallets/pool-bch/wallet.dat" ]]; then
+        bitcoin-cli-bch -conf="$(get_blockchain_dir bch)/bitcoin.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir bch)/wallets/pool-bch/wallet.dat" "${TEMP_DIR}/wallets/bitcoincash-wallet.dat"
         found_wallet=true
         log "  Backed up Bitcoin Cash wallet (named: pool-bch)"
-    elif [[ -f "${INSTALL_DIR}/bch/wallet.dat" ]]; then
-        bitcoin-cli-bch -conf="${INSTALL_DIR}/bch/bitcoin.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/bch/wallet.dat" "${TEMP_DIR}/wallets/bitcoincash-wallet.dat"
+    elif [[ -f "$(get_blockchain_dir bch)/wallet.dat" ]]; then
+        bitcoin-cli-bch -conf="$(get_blockchain_dir bch)/bitcoin.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir bch)/wallet.dat" "${TEMP_DIR}/wallets/bitcoincash-wallet.dat"
         found_wallet=true
         log "  Backed up Bitcoin Cash wallet (legacy)"
     fi
 
     # Backup Bitcoin II wallet (named wallet path first, legacy fallback)
-    if [[ -f "${INSTALL_DIR}/bc2/wallets/pool-bc2/wallet.dat" ]]; then
-        bitcoinii-cli -conf="${INSTALL_DIR}/bc2/bitcoinii.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/bc2/wallets/pool-bc2/wallet.dat" "${TEMP_DIR}/wallets/bitcoinii-wallet.dat"
+    if [[ -f "$(get_blockchain_dir bc2)/wallets/pool-bc2/wallet.dat" ]]; then
+        bitcoinii-cli -conf="$(get_blockchain_dir bc2)/bitcoinii.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir bc2)/wallets/pool-bc2/wallet.dat" "${TEMP_DIR}/wallets/bitcoinii-wallet.dat"
         found_wallet=true
         log "  Backed up Bitcoin II wallet (named: pool-bc2)"
-    elif [[ -f "${INSTALL_DIR}/bc2/wallet.dat" ]]; then
-        bitcoinii-cli -conf="${INSTALL_DIR}/bc2/bitcoinii.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/bc2/wallet.dat" "${TEMP_DIR}/wallets/bitcoinii-wallet.dat"
+    elif [[ -f "$(get_blockchain_dir bc2)/wallet.dat" ]]; then
+        bitcoinii-cli -conf="$(get_blockchain_dir bc2)/bitcoinii.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir bc2)/wallet.dat" "${TEMP_DIR}/wallets/bitcoinii-wallet.dat"
         found_wallet=true
         log "  Backed up Bitcoin II wallet (legacy)"
     fi
 
     # Backup Litecoin wallet (named wallet path first, legacy fallback)
-    if [[ -f "${INSTALL_DIR}/ltc/wallets/pool-ltc/wallet.dat" ]]; then
-        litecoin-cli -conf="${INSTALL_DIR}/ltc/litecoin.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/ltc/wallets/pool-ltc/wallet.dat" "${TEMP_DIR}/wallets/litecoin-wallet.dat"
+    if [[ -f "$(get_blockchain_dir ltc)/wallets/pool-ltc/wallet.dat" ]]; then
+        litecoin-cli -conf="$(get_blockchain_dir ltc)/litecoin.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir ltc)/wallets/pool-ltc/wallet.dat" "${TEMP_DIR}/wallets/litecoin-wallet.dat"
         found_wallet=true
         log "  Backed up Litecoin wallet (named: pool-ltc)"
-    elif [[ -f "${INSTALL_DIR}/ltc/wallet.dat" ]]; then
-        litecoin-cli -conf="${INSTALL_DIR}/ltc/litecoin.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/ltc/wallet.dat" "${TEMP_DIR}/wallets/litecoin-wallet.dat"
+    elif [[ -f "$(get_blockchain_dir ltc)/wallet.dat" ]]; then
+        litecoin-cli -conf="$(get_blockchain_dir ltc)/litecoin.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir ltc)/wallet.dat" "${TEMP_DIR}/wallets/litecoin-wallet.dat"
         found_wallet=true
         log "  Backed up Litecoin wallet (legacy)"
     fi
 
     # Backup Dogecoin wallet (named wallet path first, legacy fallback)
-    if [[ -f "${INSTALL_DIR}/doge/wallets/pool-doge/wallet.dat" ]]; then
-        dogecoin-cli -conf="${INSTALL_DIR}/doge/dogecoin.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/doge/wallets/pool-doge/wallet.dat" "${TEMP_DIR}/wallets/dogecoin-wallet.dat"
+    if [[ -f "$(get_blockchain_dir doge)/wallets/pool-doge/wallet.dat" ]]; then
+        dogecoin-cli -conf="$(get_blockchain_dir doge)/dogecoin.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir doge)/wallets/pool-doge/wallet.dat" "${TEMP_DIR}/wallets/dogecoin-wallet.dat"
         found_wallet=true
         log "  Backed up Dogecoin wallet (named: pool-doge)"
-    elif [[ -f "${INSTALL_DIR}/doge/wallet.dat" ]]; then
-        dogecoin-cli -conf="${INSTALL_DIR}/doge/dogecoin.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/doge/wallet.dat" "${TEMP_DIR}/wallets/dogecoin-wallet.dat"
+    elif [[ -f "$(get_blockchain_dir doge)/wallet.dat" ]]; then
+        dogecoin-cli -conf="$(get_blockchain_dir doge)/dogecoin.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir doge)/wallet.dat" "${TEMP_DIR}/wallets/dogecoin-wallet.dat"
         found_wallet=true
         log "  Backed up Dogecoin wallet (legacy)"
     fi
 
     # Backup PepeCoin wallet (named wallet path first, legacy fallback)
-    if [[ -f "${INSTALL_DIR}/pep/wallets/pool-pep/wallet.dat" ]]; then
-        pepecoin-cli -conf="${INSTALL_DIR}/pep/pepecoin.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/pep/wallets/pool-pep/wallet.dat" "${TEMP_DIR}/wallets/pepecoin-wallet.dat"
+    if [[ -f "$(get_blockchain_dir pep)/wallets/pool-pep/wallet.dat" ]]; then
+        pepecoin-cli -conf="$(get_blockchain_dir pep)/pepecoin.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir pep)/wallets/pool-pep/wallet.dat" "${TEMP_DIR}/wallets/pepecoin-wallet.dat"
         found_wallet=true
         log "  Backed up PepeCoin wallet (named: pool-pep)"
-    elif [[ -f "${INSTALL_DIR}/pep/wallet.dat" ]]; then
-        pepecoin-cli -conf="${INSTALL_DIR}/pep/pepecoin.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/pep/wallet.dat" "${TEMP_DIR}/wallets/pepecoin-wallet.dat"
+    elif [[ -f "$(get_blockchain_dir pep)/wallet.dat" ]]; then
+        pepecoin-cli -conf="$(get_blockchain_dir pep)/pepecoin.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir pep)/wallet.dat" "${TEMP_DIR}/wallets/pepecoin-wallet.dat"
         found_wallet=true
         log "  Backed up PepeCoin wallet (legacy)"
     fi
 
     # Backup Catcoin wallet (named wallet path first, legacy fallback)
-    if [[ -f "${INSTALL_DIR}/cat/wallets/pool-cat/wallet.dat" ]]; then
-        catcoin-cli -conf="${INSTALL_DIR}/cat/catcoin.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/cat/wallets/pool-cat/wallet.dat" "${TEMP_DIR}/wallets/catcoin-wallet.dat"
+    if [[ -f "$(get_blockchain_dir cat)/wallets/pool-cat/wallet.dat" ]]; then
+        catcoin-cli -conf="$(get_blockchain_dir cat)/catcoin.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir cat)/wallets/pool-cat/wallet.dat" "${TEMP_DIR}/wallets/catcoin-wallet.dat"
         found_wallet=true
         log "  Backed up Catcoin wallet (named: pool-cat)"
-    elif [[ -f "${INSTALL_DIR}/cat/wallet.dat" ]]; then
-        catcoin-cli -conf="${INSTALL_DIR}/cat/catcoin.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/cat/wallet.dat" "${TEMP_DIR}/wallets/catcoin-wallet.dat"
+    elif [[ -f "$(get_blockchain_dir cat)/wallet.dat" ]]; then
+        catcoin-cli -conf="$(get_blockchain_dir cat)/catcoin.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir cat)/wallet.dat" "${TEMP_DIR}/wallets/catcoin-wallet.dat"
         found_wallet=true
         log "  Backed up Catcoin wallet (legacy)"
     fi
 
     # Backup Namecoin wallet (named wallet path first, legacy fallback)
-    if [[ -f "${INSTALL_DIR}/nmc/wallets/pool-nmc/wallet.dat" ]]; then
-        namecoin-cli -conf="${INSTALL_DIR}/nmc/namecoin.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/nmc/wallets/pool-nmc/wallet.dat" "${TEMP_DIR}/wallets/namecoin-wallet.dat"
+    if [[ -f "$(get_blockchain_dir nmc)/wallets/pool-nmc/wallet.dat" ]]; then
+        namecoin-cli -conf="$(get_blockchain_dir nmc)/namecoin.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir nmc)/wallets/pool-nmc/wallet.dat" "${TEMP_DIR}/wallets/namecoin-wallet.dat"
         found_wallet=true
         log "  Backed up Namecoin wallet (named: pool-nmc)"
-    elif [[ -f "${INSTALL_DIR}/nmc/wallet.dat" ]]; then
-        namecoin-cli -conf="${INSTALL_DIR}/nmc/namecoin.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/nmc/wallet.dat" "${TEMP_DIR}/wallets/namecoin-wallet.dat"
+    elif [[ -f "$(get_blockchain_dir nmc)/wallet.dat" ]]; then
+        namecoin-cli -conf="$(get_blockchain_dir nmc)/namecoin.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir nmc)/wallet.dat" "${TEMP_DIR}/wallets/namecoin-wallet.dat"
         found_wallet=true
         log "  Backed up Namecoin wallet (legacy)"
     fi
 
     # Backup Syscoin wallet (named wallet path first, legacy fallback)
-    if [[ -f "${INSTALL_DIR}/sys/wallets/pool-sys/wallet.dat" ]]; then
-        syscoin-cli -conf="${INSTALL_DIR}/sys/syscoin.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/sys/wallets/pool-sys/wallet.dat" "${TEMP_DIR}/wallets/syscoin-wallet.dat"
+    if [[ -f "$(get_blockchain_dir sys)/wallets/pool-sys/wallet.dat" ]]; then
+        syscoin-cli -conf="$(get_blockchain_dir sys)/syscoin.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir sys)/wallets/pool-sys/wallet.dat" "${TEMP_DIR}/wallets/syscoin-wallet.dat"
         found_wallet=true
         log "  Backed up Syscoin wallet (named: pool-sys)"
-    elif [[ -f "${INSTALL_DIR}/sys/wallet.dat" ]]; then
-        syscoin-cli -conf="${INSTALL_DIR}/sys/syscoin.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/sys/wallet.dat" "${TEMP_DIR}/wallets/syscoin-wallet.dat"
+    elif [[ -f "$(get_blockchain_dir sys)/wallet.dat" ]]; then
+        syscoin-cli -conf="$(get_blockchain_dir sys)/syscoin.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir sys)/wallet.dat" "${TEMP_DIR}/wallets/syscoin-wallet.dat"
         found_wallet=true
         log "  Backed up Syscoin wallet (legacy)"
     fi
 
     # Backup Myriadcoin wallet (named wallet path first, legacy fallback)
-    if [[ -f "${INSTALL_DIR}/xmy/wallets/pool-xmy/wallet.dat" ]]; then
-        myriadcoin-cli -conf="${INSTALL_DIR}/xmy/myriadcoin.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/xmy/wallets/pool-xmy/wallet.dat" "${TEMP_DIR}/wallets/myriadcoin-wallet.dat"
+    if [[ -f "$(get_blockchain_dir xmy)/wallets/pool-xmy/wallet.dat" ]]; then
+        myriadcoin-cli -conf="$(get_blockchain_dir xmy)/myriadcoin.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir xmy)/wallets/pool-xmy/wallet.dat" "${TEMP_DIR}/wallets/myriadcoin-wallet.dat"
         found_wallet=true
         log "  Backed up Myriadcoin wallet (named: pool-xmy)"
-    elif [[ -f "${INSTALL_DIR}/xmy/wallet.dat" ]]; then
-        myriadcoin-cli -conf="${INSTALL_DIR}/xmy/myriadcoin.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/xmy/wallet.dat" "${TEMP_DIR}/wallets/myriadcoin-wallet.dat"
+    elif [[ -f "$(get_blockchain_dir xmy)/wallet.dat" ]]; then
+        myriadcoin-cli -conf="$(get_blockchain_dir xmy)/myriadcoin.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir xmy)/wallet.dat" "${TEMP_DIR}/wallets/myriadcoin-wallet.dat"
         found_wallet=true
         log "  Backed up Myriadcoin wallet (legacy)"
     fi
 
     # Backup Fractal Bitcoin wallet (named wallet path first, legacy fallback)
-    if [[ -f "${INSTALL_DIR}/fbtc/wallets/pool-fbtc/wallet.dat" ]]; then
-        fractal-cli -conf="${INSTALL_DIR}/fbtc/fractal.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/fbtc/wallets/pool-fbtc/wallet.dat" "${TEMP_DIR}/wallets/fractal-wallet.dat"
+    if [[ -f "$(get_blockchain_dir fbtc)/wallets/pool-fbtc/wallet.dat" ]]; then
+        fractal-cli -conf="$(get_blockchain_dir fbtc)/fractal.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir fbtc)/wallets/pool-fbtc/wallet.dat" "${TEMP_DIR}/wallets/fractal-wallet.dat"
         found_wallet=true
         log "  Backed up Fractal Bitcoin wallet (named: pool-fbtc)"
-    elif [[ -f "${INSTALL_DIR}/fbtc/wallet.dat" ]]; then
-        fractal-cli -conf="${INSTALL_DIR}/fbtc/fractal.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/fbtc/wallet.dat" "${TEMP_DIR}/wallets/fractal-wallet.dat"
+    elif [[ -f "$(get_blockchain_dir fbtc)/wallet.dat" ]]; then
+        fractal-cli -conf="$(get_blockchain_dir fbtc)/fractal.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir fbtc)/wallet.dat" "${TEMP_DIR}/wallets/fractal-wallet.dat"
         found_wallet=true
         log "  Backed up Fractal Bitcoin wallet (legacy)"
     fi
 
     # Backup Q-BitX wallet (named wallet path first, legacy fallback)
-    if [[ -f "${INSTALL_DIR}/qbx/wallets/pool-qbx/wallet.dat" ]]; then
-        qbitx-cli -conf="${INSTALL_DIR}/qbx/qbitx.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/qbx/wallets/pool-qbx/wallet.dat" "${TEMP_DIR}/wallets/qbitx-wallet.dat"
+    if [[ -f "$(get_blockchain_dir qbx)/wallets/pool-qbx/wallet.dat" ]]; then
+        qbitx-cli -conf="$(get_blockchain_dir qbx)/qbitx.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir qbx)/wallets/pool-qbx/wallet.dat" "${TEMP_DIR}/wallets/qbitx-wallet.dat"
         found_wallet=true
         log "  Backed up Q-BitX wallet (named: pool-qbx)"
-    elif [[ -f "${INSTALL_DIR}/qbx/wallet.dat" ]]; then
-        qbitx-cli -conf="${INSTALL_DIR}/qbx/qbitx.conf" walletlock 2>/dev/null || true
-        cp "${INSTALL_DIR}/qbx/wallet.dat" "${TEMP_DIR}/wallets/qbitx-wallet.dat"
+    elif [[ -f "$(get_blockchain_dir qbx)/wallet.dat" ]]; then
+        qbitx-cli -conf="$(get_blockchain_dir qbx)/qbitx.conf" walletlock 2>/dev/null || true
+        cp "$(get_blockchain_dir qbx)/wallet.dat" "${TEMP_DIR}/wallets/qbitx-wallet.dat"
         found_wallet=true
         log "  Backed up Q-BitX wallet (legacy)"
     fi
@@ -26483,57 +26483,57 @@ backup_config() {
     fi
 
     # Backup blockchain configs (mask passwords)
-    if [[ -f "${INSTALL_DIR}/dgb/digibyte.conf" ]]; then
+    if [[ -f "$(get_blockchain_dir dgb)/digibyte.conf" ]]; then
         sed 's/rpcpassword=.*/rpcpassword=REDACTED/' \
-            "${INSTALL_DIR}/dgb/digibyte.conf" > "${TEMP_DIR}/config/digibyte.conf"
+            "$(get_blockchain_dir dgb)/digibyte.conf" > "${TEMP_DIR}/config/digibyte.conf"
     fi
-    if [[ -f "${INSTALL_DIR}/btc/bitcoin.conf" ]]; then
+    if [[ -f "$(get_blockchain_dir btc)/bitcoin.conf" ]]; then
         sed 's/rpcpassword=.*/rpcpassword=REDACTED/' \
-            "${INSTALL_DIR}/btc/bitcoin.conf" > "${TEMP_DIR}/config/bitcoin.conf"
+            "$(get_blockchain_dir btc)/bitcoin.conf" > "${TEMP_DIR}/config/bitcoin.conf"
     fi
-    if [[ -f "${INSTALL_DIR}/bch/bitcoin.conf" ]]; then
+    if [[ -f "$(get_blockchain_dir bch)/bitcoin.conf" ]]; then
         sed 's/rpcpassword=.*/rpcpassword=REDACTED/' \
-            "${INSTALL_DIR}/bch/bitcoin.conf" > "${TEMP_DIR}/config/bitcoin-cash.conf"
+            "$(get_blockchain_dir bch)/bitcoin.conf" > "${TEMP_DIR}/config/bitcoin-cash.conf"
     fi
-    if [[ -f "${INSTALL_DIR}/bc2/bitcoinii.conf" ]]; then
+    if [[ -f "$(get_blockchain_dir bc2)/bitcoinii.conf" ]]; then
         sed 's/rpcpassword=.*/rpcpassword=REDACTED/' \
-            "${INSTALL_DIR}/bc2/bitcoinii.conf" > "${TEMP_DIR}/config/bitcoinii.conf"
+            "$(get_blockchain_dir bc2)/bitcoinii.conf" > "${TEMP_DIR}/config/bitcoinii.conf"
     fi
-    if [[ -f "${INSTALL_DIR}/ltc/litecoin.conf" ]]; then
+    if [[ -f "$(get_blockchain_dir ltc)/litecoin.conf" ]]; then
         sed 's/rpcpassword=.*/rpcpassword=REDACTED/' \
-            "${INSTALL_DIR}/ltc/litecoin.conf" > "${TEMP_DIR}/config/litecoin.conf"
+            "$(get_blockchain_dir ltc)/litecoin.conf" > "${TEMP_DIR}/config/litecoin.conf"
     fi
-    if [[ -f "${INSTALL_DIR}/doge/dogecoin.conf" ]]; then
+    if [[ -f "$(get_blockchain_dir doge)/dogecoin.conf" ]]; then
         sed 's/rpcpassword=.*/rpcpassword=REDACTED/' \
-            "${INSTALL_DIR}/doge/dogecoin.conf" > "${TEMP_DIR}/config/dogecoin.conf"
+            "$(get_blockchain_dir doge)/dogecoin.conf" > "${TEMP_DIR}/config/dogecoin.conf"
     fi
-    if [[ -f "${INSTALL_DIR}/pep/pepecoin.conf" ]]; then
+    if [[ -f "$(get_blockchain_dir pep)/pepecoin.conf" ]]; then
         sed 's/rpcpassword=.*/rpcpassword=REDACTED/' \
-            "${INSTALL_DIR}/pep/pepecoin.conf" > "${TEMP_DIR}/config/pepecoin.conf"
+            "$(get_blockchain_dir pep)/pepecoin.conf" > "${TEMP_DIR}/config/pepecoin.conf"
     fi
-    if [[ -f "${INSTALL_DIR}/cat/catcoin.conf" ]]; then
+    if [[ -f "$(get_blockchain_dir cat)/catcoin.conf" ]]; then
         sed 's/rpcpassword=.*/rpcpassword=REDACTED/' \
-            "${INSTALL_DIR}/cat/catcoin.conf" > "${TEMP_DIR}/config/catcoin.conf"
+            "$(get_blockchain_dir cat)/catcoin.conf" > "${TEMP_DIR}/config/catcoin.conf"
     fi
-    if [[ -f "${INSTALL_DIR}/nmc/namecoin.conf" ]]; then
+    if [[ -f "$(get_blockchain_dir nmc)/namecoin.conf" ]]; then
         sed 's/rpcpassword=.*/rpcpassword=REDACTED/' \
-            "${INSTALL_DIR}/nmc/namecoin.conf" > "${TEMP_DIR}/config/namecoin.conf"
+            "$(get_blockchain_dir nmc)/namecoin.conf" > "${TEMP_DIR}/config/namecoin.conf"
     fi
-    if [[ -f "${INSTALL_DIR}/sys/syscoin.conf" ]]; then
+    if [[ -f "$(get_blockchain_dir sys)/syscoin.conf" ]]; then
         sed 's/rpcpassword=.*/rpcpassword=REDACTED/' \
-            "${INSTALL_DIR}/sys/syscoin.conf" > "${TEMP_DIR}/config/syscoin.conf"
+            "$(get_blockchain_dir sys)/syscoin.conf" > "${TEMP_DIR}/config/syscoin.conf"
     fi
-    if [[ -f "${INSTALL_DIR}/xmy/myriadcoin.conf" ]]; then
+    if [[ -f "$(get_blockchain_dir xmy)/myriadcoin.conf" ]]; then
         sed 's/rpcpassword=.*/rpcpassword=REDACTED/' \
-            "${INSTALL_DIR}/xmy/myriadcoin.conf" > "${TEMP_DIR}/config/myriadcoin.conf"
+            "$(get_blockchain_dir xmy)/myriadcoin.conf" > "${TEMP_DIR}/config/myriadcoin.conf"
     fi
-    if [[ -f "${INSTALL_DIR}/fbtc/fractal.conf" ]]; then
+    if [[ -f "$(get_blockchain_dir fbtc)/fractal.conf" ]]; then
         sed 's/rpcpassword=.*/rpcpassword=REDACTED/' \
-            "${INSTALL_DIR}/fbtc/fractal.conf" > "${TEMP_DIR}/config/fractal.conf"
+            "$(get_blockchain_dir fbtc)/fractal.conf" > "${TEMP_DIR}/config/fractal.conf"
     fi
-    if [[ -f "${INSTALL_DIR}/qbx/qbitx.conf" ]]; then
+    if [[ -f "$(get_blockchain_dir qbx)/qbitx.conf" ]]; then
         sed 's/rpcpassword=.*/rpcpassword=REDACTED/' \
-            "${INSTALL_DIR}/qbx/qbitx.conf" > "${TEMP_DIR}/config/qbitx.conf"
+            "$(get_blockchain_dir qbx)/qbitx.conf" > "${TEMP_DIR}/config/qbitx.conf"
     fi
 
     # Backup systemd service files
@@ -26576,15 +26576,15 @@ create_manifest() {
     local blockchain_version="unknown"
     local block_height=0
 
-    if systemctl is-enabled --quiet digibyted 2>/dev/null && [[ -f "${INSTALL_DIR}/dgb/digibyte.conf" ]]; then
-        blockchain_version=$(digibyte-cli -conf="${INSTALL_DIR}/dgb/digibyte.conf" getnetworkinfo 2>/dev/null | grep -o '"subversion"[^,]*' | cut -d'"' -f4 || echo "unknown")
-        block_height=$(digibyte-cli -conf="${INSTALL_DIR}/dgb/digibyte.conf" getblockcount 2>/dev/null || echo "0")
-    elif systemctl is-enabled --quiet bitcoind 2>/dev/null && [[ -f "${INSTALL_DIR}/btc/bitcoin.conf" ]]; then
-        blockchain_version=$(bitcoin-cli -conf="${INSTALL_DIR}/btc/bitcoin.conf" getnetworkinfo 2>/dev/null | grep -o '"subversion"[^,]*' | cut -d'"' -f4 || echo "unknown")
-        block_height=$(bitcoin-cli -conf="${INSTALL_DIR}/btc/bitcoin.conf" getblockcount 2>/dev/null || echo "0")
-    elif systemctl is-enabled --quiet bitcoind-bch 2>/dev/null && [[ -f "${INSTALL_DIR}/bch/bitcoin.conf" ]]; then
-        blockchain_version=$(bitcoin-cli-bch -conf="${INSTALL_DIR}/bch/bitcoin.conf" getnetworkinfo 2>/dev/null | grep -o '"subversion"[^,]*' | cut -d'"' -f4 || echo "unknown")
-        block_height=$(bitcoin-cli-bch -conf="${INSTALL_DIR}/bch/bitcoin.conf" getblockcount 2>/dev/null || echo "0")
+    if systemctl is-enabled --quiet digibyted 2>/dev/null && [[ -f "$(get_blockchain_dir dgb)/digibyte.conf" ]]; then
+        blockchain_version=$(digibyte-cli -conf="$(get_blockchain_dir dgb)/digibyte.conf" getnetworkinfo 2>/dev/null | grep -o '"subversion"[^,]*' | cut -d'"' -f4 || echo "unknown")
+        block_height=$(digibyte-cli -conf="$(get_blockchain_dir dgb)/digibyte.conf" getblockcount 2>/dev/null || echo "0")
+    elif systemctl is-enabled --quiet bitcoind 2>/dev/null && [[ -f "$(get_blockchain_dir btc)/bitcoin.conf" ]]; then
+        blockchain_version=$(bitcoin-cli -conf="$(get_blockchain_dir btc)/bitcoin.conf" getnetworkinfo 2>/dev/null | grep -o '"subversion"[^,]*' | cut -d'"' -f4 || echo "unknown")
+        block_height=$(bitcoin-cli -conf="$(get_blockchain_dir btc)/bitcoin.conf" getblockcount 2>/dev/null || echo "0")
+    elif systemctl is-enabled --quiet bitcoind-bch 2>/dev/null && [[ -f "$(get_blockchain_dir bch)/bitcoin.conf" ]]; then
+        blockchain_version=$(bitcoin-cli-bch -conf="$(get_blockchain_dir bch)/bitcoin.conf" getnetworkinfo 2>/dev/null | grep -o '"subversion"[^,]*' | cut -d'"' -f4 || echo "unknown")
+        block_height=$(bitcoin-cli-bch -conf="$(get_blockchain_dir bch)/bitcoin.conf" getblockcount 2>/dev/null || echo "0")
     fi
 
     cat > "${TEMP_DIR}/manifest.json" << MANIFEST
@@ -27094,60 +27094,60 @@ restore_wallet() {
     # Check for new multi-wallet backup format
     if [[ -d "${TEMP_DIR}/wallets" ]]; then
         if [[ -f "${TEMP_DIR}/wallets/digibyte-wallet.dat" ]]; then
-            restore_single_wallet "DigiByte" "digibyted" "${INSTALL_DIR}/dgb" "${TEMP_DIR}/wallets/digibyte-wallet.dat"
+            restore_single_wallet "DigiByte" "digibyted" "$(get_blockchain_dir dgb)" "${TEMP_DIR}/wallets/digibyte-wallet.dat"
             found_wallet=true
         fi
         if [[ -f "${TEMP_DIR}/wallets/bitcoin-wallet.dat" ]]; then
-            restore_single_wallet "Bitcoin" "bitcoind" "${INSTALL_DIR}/btc" "${TEMP_DIR}/wallets/bitcoin-wallet.dat"
+            restore_single_wallet "Bitcoin" "bitcoind" "$(get_blockchain_dir btc)" "${TEMP_DIR}/wallets/bitcoin-wallet.dat"
             found_wallet=true
         fi
         if [[ -f "${TEMP_DIR}/wallets/bitcoincash-wallet.dat" ]]; then
-            restore_single_wallet "Bitcoin Cash" "bitcoind-bch" "${INSTALL_DIR}/bch" "${TEMP_DIR}/wallets/bitcoincash-wallet.dat"
+            restore_single_wallet "Bitcoin Cash" "bitcoind-bch" "$(get_blockchain_dir bch)" "${TEMP_DIR}/wallets/bitcoincash-wallet.dat"
             found_wallet=true
         fi
         if [[ -f "${TEMP_DIR}/wallets/bitcoinii-wallet.dat" ]]; then
-            restore_single_wallet "Bitcoin II" "bitcoiniid" "${INSTALL_DIR}/bc2" "${TEMP_DIR}/wallets/bitcoinii-wallet.dat"
+            restore_single_wallet "Bitcoin II" "bitcoiniid" "$(get_blockchain_dir bc2)" "${TEMP_DIR}/wallets/bitcoinii-wallet.dat"
             found_wallet=true
         fi
         if [[ -f "${TEMP_DIR}/wallets/litecoin-wallet.dat" ]]; then
-            restore_single_wallet "Litecoin" "litecoind" "${INSTALL_DIR}/ltc" "${TEMP_DIR}/wallets/litecoin-wallet.dat"
+            restore_single_wallet "Litecoin" "litecoind" "$(get_blockchain_dir ltc)" "${TEMP_DIR}/wallets/litecoin-wallet.dat"
             found_wallet=true
         fi
         if [[ -f "${TEMP_DIR}/wallets/dogecoin-wallet.dat" ]]; then
-            restore_single_wallet "Dogecoin" "dogecoind" "${INSTALL_DIR}/doge" "${TEMP_DIR}/wallets/dogecoin-wallet.dat"
+            restore_single_wallet "Dogecoin" "dogecoind" "$(get_blockchain_dir doge)" "${TEMP_DIR}/wallets/dogecoin-wallet.dat"
             found_wallet=true
         fi
         if [[ -f "${TEMP_DIR}/wallets/pepecoin-wallet.dat" ]]; then
-            restore_single_wallet "PepeCoin" "pepecoind" "${INSTALL_DIR}/pep" "${TEMP_DIR}/wallets/pepecoin-wallet.dat"
+            restore_single_wallet "PepeCoin" "pepecoind" "$(get_blockchain_dir pep)" "${TEMP_DIR}/wallets/pepecoin-wallet.dat"
             found_wallet=true
         fi
         if [[ -f "${TEMP_DIR}/wallets/catcoin-wallet.dat" ]]; then
-            restore_single_wallet "Catcoin" "catcoind" "${INSTALL_DIR}/cat" "${TEMP_DIR}/wallets/catcoin-wallet.dat"
+            restore_single_wallet "Catcoin" "catcoind" "$(get_blockchain_dir cat)" "${TEMP_DIR}/wallets/catcoin-wallet.dat"
             found_wallet=true
         fi
         if [[ -f "${TEMP_DIR}/wallets/namecoin-wallet.dat" ]]; then
-            restore_single_wallet "Namecoin" "namecoind" "${INSTALL_DIR}/nmc" "${TEMP_DIR}/wallets/namecoin-wallet.dat"
+            restore_single_wallet "Namecoin" "namecoind" "$(get_blockchain_dir nmc)" "${TEMP_DIR}/wallets/namecoin-wallet.dat"
             found_wallet=true
         fi
         if [[ -f "${TEMP_DIR}/wallets/syscoin-wallet.dat" ]]; then
-            restore_single_wallet "Syscoin" "syscoind" "${INSTALL_DIR}/sys" "${TEMP_DIR}/wallets/syscoin-wallet.dat"
+            restore_single_wallet "Syscoin" "syscoind" "$(get_blockchain_dir sys)" "${TEMP_DIR}/wallets/syscoin-wallet.dat"
             found_wallet=true
         fi
         if [[ -f "${TEMP_DIR}/wallets/myriadcoin-wallet.dat" ]]; then
-            restore_single_wallet "Myriadcoin" "myriadcoind" "${INSTALL_DIR}/xmy" "${TEMP_DIR}/wallets/myriadcoin-wallet.dat"
+            restore_single_wallet "Myriadcoin" "myriadcoind" "$(get_blockchain_dir xmy)" "${TEMP_DIR}/wallets/myriadcoin-wallet.dat"
             found_wallet=true
         fi
         if [[ -f "${TEMP_DIR}/wallets/fractal-wallet.dat" ]]; then
-            restore_single_wallet "Fractal Bitcoin" "fractald" "${INSTALL_DIR}/fbtc" "${TEMP_DIR}/wallets/fractal-wallet.dat"
+            restore_single_wallet "Fractal Bitcoin" "fractald" "$(get_blockchain_dir fbtc)" "${TEMP_DIR}/wallets/fractal-wallet.dat"
             found_wallet=true
         fi
         if [[ -f "${TEMP_DIR}/wallets/qbitx-wallet.dat" ]]; then
-            restore_single_wallet "Q-BitX" "qbitxd" "${INSTALL_DIR}/qbx" "${TEMP_DIR}/wallets/qbitx-wallet.dat"
+            restore_single_wallet "Q-BitX" "qbitxd" "$(get_blockchain_dir qbx)" "${TEMP_DIR}/wallets/qbitx-wallet.dat"
             found_wallet=true
         fi
     # Legacy single wallet.dat format (assume DGB)
     elif [[ -f "${TEMP_DIR}/wallet.dat" ]]; then
-        restore_single_wallet "DigiByte" "digibyted" "${INSTALL_DIR}/dgb" "${TEMP_DIR}/wallet.dat"
+        restore_single_wallet "DigiByte" "digibyted" "$(get_blockchain_dir dgb)" "${TEMP_DIR}/wallet.dat"
         found_wallet=true
     fi
 
@@ -27984,43 +27984,43 @@ check_blockchain_rpc() {
 }
 
 # Check DigiByte
-check_blockchain_rpc "DigiByte" "digibyte-cli" "/spiralpool/dgb/digibyte.conf"
+check_blockchain_rpc "DigiByte" "digibyte-cli" "$(get_blockchain_dir dgb)/digibyte.conf"
 
 # Check Bitcoin
-check_blockchain_rpc "Bitcoin" "bitcoin-cli" "/spiralpool/btc/bitcoin.conf"
+check_blockchain_rpc "Bitcoin" "bitcoin-cli" "$(get_blockchain_dir btc)/bitcoin.conf"
 
 # Check Bitcoin Cash
-check_blockchain_rpc "Bitcoin Cash" "bitcoin-cli-bch" "/spiralpool/bch/bitcoin.conf"
+check_blockchain_rpc "Bitcoin Cash" "bitcoin-cli-bch" "$(get_blockchain_dir bch)/bitcoin.conf"
 
 # Check Bitcoin II
-check_blockchain_rpc "Bitcoin II" "bitcoinii-cli" "/spiralpool/bc2/bitcoinii.conf"
+check_blockchain_rpc "Bitcoin II" "bitcoinii-cli" "$(get_blockchain_dir bc2)/bitcoinii.conf"
 
 # Check Litecoin
-check_blockchain_rpc "Litecoin" "litecoin-cli" "/spiralpool/ltc/litecoin.conf"
+check_blockchain_rpc "Litecoin" "litecoin-cli" "$(get_blockchain_dir ltc)/litecoin.conf"
 
 # Check Dogecoin
-check_blockchain_rpc "Dogecoin" "dogecoin-cli" "/spiralpool/doge/dogecoin.conf"
+check_blockchain_rpc "Dogecoin" "dogecoin-cli" "$(get_blockchain_dir doge)/dogecoin.conf"
 
 # Check PepeCoin
-check_blockchain_rpc "PepeCoin" "pepecoin-cli" "/spiralpool/pep/pepecoin.conf"
+check_blockchain_rpc "PepeCoin" "pepecoin-cli" "$(get_blockchain_dir pep)/pepecoin.conf"
 
 # Check Catcoin
-check_blockchain_rpc "Catcoin" "catcoin-cli" "/spiralpool/cat/catcoin.conf"
+check_blockchain_rpc "Catcoin" "catcoin-cli" "$(get_blockchain_dir cat)/catcoin.conf"
 
 # Check Namecoin
-check_blockchain_rpc "Namecoin" "namecoin-cli" "/spiralpool/nmc/namecoin.conf"
+check_blockchain_rpc "Namecoin" "namecoin-cli" "$(get_blockchain_dir nmc)/namecoin.conf"
 
 # Check Syscoin
-check_blockchain_rpc "Syscoin" "syscoin-cli" "/spiralpool/sys/syscoin.conf"
+check_blockchain_rpc "Syscoin" "syscoin-cli" "$(get_blockchain_dir sys)/syscoin.conf"
 
 # Check Myriadcoin
-check_blockchain_rpc "Myriadcoin" "myriadcoin-cli" "/spiralpool/xmy/myriadcoin.conf"
+check_blockchain_rpc "Myriadcoin" "myriadcoin-cli" "$(get_blockchain_dir xmy)/myriadcoin.conf"
 
 # Check Fractal Bitcoin
-check_blockchain_rpc "Fractal Bitcoin" "fractal-cli" "/spiralpool/fbtc/fractal.conf"
+check_blockchain_rpc "Fractal Bitcoin" "fractal-cli" "$(get_blockchain_dir fbtc)/fractal.conf"
 
 # Check Q-BitX
-check_blockchain_rpc "Q-BitX" "qbitx-cli" "/spiralpool/qbx/qbitx.conf"
+check_blockchain_rpc "Q-BitX" "qbitx-cli" "$(get_blockchain_dir qbx)/qbitx.conf"
 
 # === DATABASE ===
 echo -e "${WHITE}PostgreSQL Database:${NC}"
@@ -31148,45 +31148,45 @@ get_coin_cli_info() {
     local coin="$1"
     case "$coin" in
         DGB|dgb|digibyte)
-            echo "digibyte-cli|$INSTALL_DIR/dgb/digibyte.conf"
+            echo "digibyte-cli|$(get_blockchain_dir dgb)/digibyte.conf"
             ;;
         BTC|btc|bitcoin)
-            echo "bitcoin-cli|$INSTALL_DIR/btc/bitcoin.conf"
+            echo "bitcoin-cli|$(get_blockchain_dir btc)/bitcoin.conf"
             ;;
         BCH|bch|bitcoincash)
-            echo "bitcoin-cli-bch|$INSTALL_DIR/bch/bitcoin.conf"
+            echo "bitcoin-cli-bch|$(get_blockchain_dir bch)/bitcoin.conf"
             ;;
         BC2|bc2|bitcoinii)
             # Bitcoin II uses capital "II" in binary names, but we created lowercase symlinks
-            echo "bitcoinii-cli|$INSTALL_DIR/bc2/bitcoinii.conf"
+            echo "bitcoinii-cli|$(get_blockchain_dir bc2)/bitcoinii.conf"
             ;;
         LTC|ltc|litecoin)
-            echo "litecoin-cli|$INSTALL_DIR/ltc/litecoin.conf"
+            echo "litecoin-cli|$(get_blockchain_dir ltc)/litecoin.conf"
             ;;
         DOGE|doge|dogecoin)
-            echo "dogecoin-cli|$INSTALL_DIR/doge/dogecoin.conf"
+            echo "dogecoin-cli|$(get_blockchain_dir doge)/dogecoin.conf"
             ;;
         DGB_SCRYPT|dgb_scrypt)
             # DGB-Scrypt uses the same daemon as DGB SHA-256d
-            echo "digibyte-cli|$INSTALL_DIR/dgb/digibyte.conf"
+            echo "digibyte-cli|$(get_blockchain_dir dgb)/digibyte.conf"
             ;;
         PEP|pep|pepecoin)
-            echo "pepecoin-cli|$INSTALL_DIR/pep/pepecoin.conf"
+            echo "pepecoin-cli|$(get_blockchain_dir pep)/pepecoin.conf"
             ;;
         CAT|cat|catcoin)
-            echo "catcoin-cli|$INSTALL_DIR/cat/catcoin.conf"
+            echo "catcoin-cli|$(get_blockchain_dir cat)/catcoin.conf"
             ;;
         NMC|nmc|namecoin)
-            echo "namecoin-cli|$INSTALL_DIR/nmc/namecoin.conf"
+            echo "namecoin-cli|$(get_blockchain_dir nmc)/namecoin.conf"
             ;;
         SYS|sys|syscoin)
-            echo "syscoin-cli|$INSTALL_DIR/sys/syscoin.conf"
+            echo "syscoin-cli|$(get_blockchain_dir sys)/syscoin.conf"
             ;;
         XMY|xmy|myriadcoin)
-            echo "myriadcoin-cli|$INSTALL_DIR/xmy/myriadcoin.conf"
+            echo "myriadcoin-cli|$(get_blockchain_dir xmy)/myriadcoin.conf"
             ;;
         FBTC|fbtc|fractal)
-            echo "fractal-cli|$INSTALL_DIR/fbtc/fractal.conf"
+            echo "fractal-cli|$(get_blockchain_dir fbtc)/fractal.conf"
             ;;
         QBX|qbx|qbitx)
             echo "qbitx-cli|$(get_blockchain_dir qbx)/qbitx.conf"
@@ -31642,22 +31642,22 @@ get_cli_cmd() {
     local coin="$1"
     case "$coin" in
         # SHA-256d coins
-        DGB) echo "digibyte-cli -conf=$INSTALL_DIR/dgb/digibyte.conf" ;;
-        BTC) echo "bitcoin-cli -conf=$INSTALL_DIR/btc/bitcoin.conf" ;;
-        BCH) echo "bitcoin-cli-bch -conf=$INSTALL_DIR/bch/bitcoin.conf" ;;
-        BC2) echo "bitcoinii-cli -conf=$INSTALL_DIR/bc2/bitcoinii.conf" ;;
+        DGB) echo "digibyte-cli -conf=$(get_blockchain_dir dgb)/digibyte.conf" ;;
+        BTC) echo "bitcoin-cli -conf=$(get_blockchain_dir btc)/bitcoin.conf" ;;
+        BCH) echo "bitcoin-cli-bch -conf=$(get_blockchain_dir bch)/bitcoin.conf" ;;
+        BC2) echo "bitcoinii-cli -conf=$(get_blockchain_dir bc2)/bitcoinii.conf" ;;
         # SHA-256d AuxPoW coins (merge-mineable with Bitcoin)
-        NMC) echo "namecoin-cli -conf=$INSTALL_DIR/nmc/namecoin.conf" ;;
-        SYS) echo "syscoin-cli -conf=$INSTALL_DIR/sys/syscoin.conf" ;;
-        XMY) echo "myriadcoin-cli -conf=$INSTALL_DIR/xmy/myriadcoin.conf" ;;
-        FBTC) echo "fractal-cli -conf=$INSTALL_DIR/fbtc/fractal.conf" ;;
+        NMC) echo "namecoin-cli -conf=$(get_blockchain_dir nmc)/namecoin.conf" ;;
+        SYS) echo "syscoin-cli -conf=$(get_blockchain_dir sys)/syscoin.conf" ;;
+        XMY) echo "myriadcoin-cli -conf=$(get_blockchain_dir xmy)/myriadcoin.conf" ;;
+        FBTC) echo "fractal-cli -conf=$(get_blockchain_dir fbtc)/fractal.conf" ;;
         QBX) echo "qbitx-cli -conf=$(get_blockchain_dir qbx)/qbitx.conf" ;;
         # Scrypt coins
-        LTC) echo "litecoin-cli -conf=$INSTALL_DIR/ltc/litecoin.conf" ;;
-        DOGE) echo "dogecoin-cli -conf=$INSTALL_DIR/doge/dogecoin.conf" ;;
-        PEP) echo "pepecoin-cli -conf=$INSTALL_DIR/pep/pepecoin.conf" ;;
-        CAT) echo "catcoin-cli -conf=$INSTALL_DIR/cat/catcoin.conf" ;;
-        DGB_SCRYPT) echo "digibyte-cli -conf=$INSTALL_DIR/dgb/digibyte.conf" ;;
+        LTC) echo "litecoin-cli -conf=$(get_blockchain_dir ltc)/litecoin.conf" ;;
+        DOGE) echo "dogecoin-cli -conf=$(get_blockchain_dir doge)/dogecoin.conf" ;;
+        PEP) echo "pepecoin-cli -conf=$(get_blockchain_dir pep)/pepecoin.conf" ;;
+        CAT) echo "catcoin-cli -conf=$(get_blockchain_dir cat)/catcoin.conf" ;;
+        DGB_SCRYPT) echo "digibyte-cli -conf=$(get_blockchain_dir dgb)/digibyte.conf" ;;
     esac
 }
 
@@ -32461,19 +32461,19 @@ print_completion() {
             # Determine if we need multi-coin mode (count enabled coins)
             local sync_flags="--watch"
             local coin_count=0
-            [[ -f "/spiralpool/dgb/digibyte.conf" ]] && coin_count=$((coin_count + 1))
-            [[ -f "/spiralpool/btc/bitcoin.conf" ]] && coin_count=$((coin_count + 1))
-            [[ -f "/spiralpool/bch/bitcoin.conf" ]] && coin_count=$((coin_count + 1))
-            [[ -f "/spiralpool/bc2/bitcoinii.conf" ]] && coin_count=$((coin_count + 1))
-            [[ -f "/spiralpool/ltc/litecoin.conf" ]] && coin_count=$((coin_count + 1))
-            [[ -f "/spiralpool/doge/dogecoin.conf" ]] && coin_count=$((coin_count + 1))
-            [[ -f "/spiralpool/nmc/namecoin.conf" ]] && coin_count=$((coin_count + 1))
-            [[ -f "/spiralpool/sys/syscoin.conf" ]] && coin_count=$((coin_count + 1))
-            [[ -f "/spiralpool/xmy/myriadcoin.conf" ]] && coin_count=$((coin_count + 1))
-            [[ -f "/spiralpool/fbtc/fractal.conf" ]] && coin_count=$((coin_count + 1))
-            [[ -f "/spiralpool/qbx/qbitx.conf" ]] && coin_count=$((coin_count + 1))
-            [[ -f "/spiralpool/pep/pepecoin.conf" ]] && coin_count=$((coin_count + 1))
-            [[ -f "/spiralpool/cat/catcoin.conf" ]] && coin_count=$((coin_count + 1))
+            [[ -f "$(get_blockchain_dir dgb)/digibyte.conf" ]] && coin_count=$((coin_count + 1))
+            [[ -f "$(get_blockchain_dir btc)/bitcoin.conf" ]] && coin_count=$((coin_count + 1))
+            [[ -f "$(get_blockchain_dir bch)/bitcoin.conf" ]] && coin_count=$((coin_count + 1))
+            [[ -f "$(get_blockchain_dir bc2)/bitcoinii.conf" ]] && coin_count=$((coin_count + 1))
+            [[ -f "$(get_blockchain_dir ltc)/litecoin.conf" ]] && coin_count=$((coin_count + 1))
+            [[ -f "$(get_blockchain_dir doge)/dogecoin.conf" ]] && coin_count=$((coin_count + 1))
+            [[ -f "$(get_blockchain_dir nmc)/namecoin.conf" ]] && coin_count=$((coin_count + 1))
+            [[ -f "$(get_blockchain_dir sys)/syscoin.conf" ]] && coin_count=$((coin_count + 1))
+            [[ -f "$(get_blockchain_dir xmy)/myriadcoin.conf" ]] && coin_count=$((coin_count + 1))
+            [[ -f "$(get_blockchain_dir fbtc)/fractal.conf" ]] && coin_count=$((coin_count + 1))
+            [[ -f "$(get_blockchain_dir qbx)/qbitx.conf" ]] && coin_count=$((coin_count + 1))
+            [[ -f "$(get_blockchain_dir pep)/pepecoin.conf" ]] && coin_count=$((coin_count + 1))
+            [[ -f "$(get_blockchain_dir cat)/catcoin.conf" ]] && coin_count=$((coin_count + 1))
 
             if [[ $coin_count -gt 1 ]]; then
                 sync_flags="--watch --multi"
