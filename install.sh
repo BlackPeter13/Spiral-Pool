@@ -12282,7 +12282,7 @@ filter      = spiralpool-dashboard
 journalmatch = _SYSTEMD_UNIT=spiraldash.service
 maxretry    = 5
 findtime    = 600
-bantime     = 3600
+bantime     = 259200
 port        = $DASHBOARD_PORT
 
 # ── API: admin API key brute-force protection ─────────────────────────────────
@@ -12292,7 +12292,7 @@ filter      = spiralpool-api
 journalmatch = _SYSTEMD_UNIT=spiralstratum.service
 maxretry    = 10
 findtime    = 300
-bantime     = 1800
+bantime     = 259200
 port        = $API_PORT
 
 # ── Stratum: elevate app-level bans to UFW-level blocks ──────────────────────
@@ -12305,7 +12305,7 @@ filter      = spiralpool-stratum
 journalmatch = _SYSTEMD_UNIT=spiralstratum.service
 maxretry    = 1
 findtime    = 60
-bantime     = 1800
+bantime     = 259200
 port        = 0:65535
 JAILEOF
 
