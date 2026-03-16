@@ -113,6 +113,9 @@ ADMIN_USER=""
 SERVER_IP=""
 POOL_ADDRESS=""
 BTC_ADDRESS=""  # Bitcoin address for multi-coin mode
+SIMPLESWAP_ENABLED="false"    # SimpleSwap.io auto-conversion (optional)
+SIMPLESWAP_API_KEY=""          # SimpleSwap API key (stored in /etc/spiralpool/simpleswap.conf)
+SIMPLESWAP_BTC_ADDRESS=""      # BTC destination wallet for converted funds
 BCH_ADDRESS=""  # Bitcoin Cash address for multi-coin mode
 BC2_ADDRESS=""  # Bitcoin II address for multi-coin mode
 LTC_ADDRESS=""  # Litecoin address for multi-coin mode
@@ -2928,21 +2931,21 @@ select_deploy_method() {
         esac
     fi
 
-    # --- Cloud provider detection (hard block) ---
+    # --- Cloud provider detection (warning + acknowledgement) ---
     # This runs independently of systemd-detect-virt because many cloud VMs
     # report generic hypervisor types (e.g., "kvm"). DMI strings reliably
     # identify the actual cloud provider.
     local cloud_provider=""
     cloud_provider=$(detect_cloud_provider) && {
         echo ""
-        echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo -e "${RED}  CLOUD DEPLOYMENT DETECTED: ${cloud_provider}${NC}"
-        echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${YELLOW}  WARNING: CLOUD DEPLOYMENT DETECTED — ${cloud_provider}${NC}"
+        echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo ""
-        echo -e "  Spiral Pool is ${RED}NOT${NC} designed for cloud-based instances and cloud"
-        echo -e "  deployments are ${RED}NOT supported${NC}."
+        echo -e "  Spiral Pool is ${YELLOW}NOT${NC} designed or tested for cloud-based instances."
+        echo -e "  Cloud deployments are ${YELLOW}NOT supported${NC} and receive no official support."
         echo ""
-        echo -e "  ${WHITE}Why cloud deployment is blocked:${NC}"
+        echo -e "  ${WHITE}Security risks of cloud deployment:${NC}"
         echo ""
         echo -e "    ${YELLOW}1.${NC} You do not own the physical hardware or hypervisor layer"
         echo -e "    ${YELLOW}2.${NC} The cloud provider has unrestricted access to your server's"
@@ -2954,22 +2957,46 @@ select_deploy_method() {
         echo -e "    ${YELLOW}5.${NC} Shared infrastructure exposes you to side-channel attacks"
         echo -e "       and noisy-neighbor resource contention"
         echo ""
-        echo -e "  ${WHITE}Supported deployment targets:${NC}"
+        echo -e "  ${WHITE}Strongly recommended before continuing:${NC}"
+        echo ""
+        echo -e "    ${CYAN}LOCK DOWN SSH TO YOUR IP ADDRESS ONLY${NC}"
+        echo ""
+        echo -e "    On a cloud VPS, your SSH port is exposed to the entire internet."
+        echo -e "    Find your real public IP (NOT a 10.x, 172.x, or 192.168.x address):"
+        echo ""
+        echo -e "      ${WHITE}curl -4 https://ifconfig.me${NC}    or"
+        echo -e "      ${WHITE}curl -4 https://icanhazip.com${NC}"
+        echo ""
+        echo -e "    Then restrict SSH to only that IP in UFW:"
+        echo ""
+        echo -e "      ${WHITE}sudo ufw allow from <YOUR_PUBLIC_IP> to any port 22 proto tcp${NC}"
+        echo -e "      ${WHITE}sudo ufw delete allow 22${NC}          # remove the open-to-all rule"
+        echo -e "      ${WHITE}sudo ufw reload${NC}"
+        echo ""
+        echo -e "    ${RED}Do this BEFORE proceeding.${NC} A publicly exposed SSH port on a"
+        echo -e "    pool server holding wallet keys is an immediate compromise risk."
+        echo ""
+        echo -e "  ${WHITE}Recommended deployment targets:${NC}"
         echo ""
         echo -e "    - Bare metal servers under your physical control"
         echo -e "    - Virtual machines on hypervisors YOU own and operate"
         echo ""
-        echo -e "  Cloud deployments receive ${RED}NO SUPPORT${NC}. Issues arising from"
-        echo -e "  cloud-hosted installations will not be investigated."
-        echo ""
+        echo -e "  Issues from cloud-hosted installations will not be investigated."
         echo -e "  See WARNINGS.md for complete details."
         echo ""
-        echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo ""
-        log_error "Cloud deployment detected (${cloud_provider}). Installation aborted."
-        log_error "Spiral Pool requires operator-controlled infrastructure."
-        log_error "See WARNINGS.md and README.md for supported deployment targets."
-        exit 1
+        log_warn "Cloud deployment detected (${cloud_provider}). Proceeding with no-support warning."
+        echo ""
+        local cloud_ack
+        read -rp "  Type YES to acknowledge the risks and continue: " cloud_ack
+        echo ""
+        if [[ "$cloud_ack" != "YES" ]]; then
+            log_error "Cloud deployment not acknowledged. Installation aborted."
+            exit 1
+        fi
+        log_warn "Cloud deployment acknowledged by operator. Continuing without support."
+        echo ""
     }
 
     # --- ARM architecture detection (warning, not a hard block) ---
@@ -12405,6 +12432,17 @@ setup_system() {
         echo -e "${CYAN}${BOLD}Set a password for the ${POOL_USER} user${NC}"
         echo -e "${DIM}This is needed for HA cluster SSH, interactive logins, and admin tasks.${NC}"
         echo ""
+        echo -e "  ${WHITE}Password recommendations (NIST SP 800-63B):${NC}"
+        echo ""
+        echo -e "    ${YELLOW}•${NC} Use at least ${WHITE}15 characters${NC} — length is the strongest defense"
+        echo -e "    ${YELLOW}•${NC} A passphrase of ${WHITE}4–6 random words${NC} is ideal (e.g. correct-horse-battery-staple)"
+        echo -e "    ${YELLOW}•${NC} Or use a ${WHITE}password manager${NC} to generate and store a long random string"
+        echo -e "    ${YELLOW}•${NC} Avoid: dictionary words alone, names, dates, keyboard walks (qwerty123)"
+        echo -e "    ${YELLOW}•${NC} Avoid: reusing passwords from other accounts"
+        echo -e "    ${YELLOW}•${NC} All printable characters are allowed — spaces, symbols, Unicode"
+        echo -e "    ${DIM}NIST no longer recommends forced complexity rules (mixing chars/symbols)."
+        echo -e "    Length and uniqueness matter far more than mandatory special characters.${NC}"
+        echo ""
         local pass_set=false
         for attempt in 1 2 3; do
             local pool_pass pool_pass_confirm
@@ -12414,6 +12452,8 @@ setup_system() {
             echo ""
             if [[ -z "$pool_pass" ]]; then
                 log_warn "Password cannot be empty."
+            elif [[ ${#pool_pass} -lt 15 ]]; then
+                log_warn "Password is too short. NIST recommends at least 15 characters for privileged accounts."
             elif [[ "$pool_pass" != "$pool_pass_confirm" ]]; then
                 log_warn "Passwords do not match."
             else
