@@ -4365,6 +4365,137 @@ with open(sys.argv[1], 'w') as f:
 }
 
 #===============================================================================
+# FAIL2BAN COMMAND
+#===============================================================================
+
+cmd_fail2ban() {
+    local action="${1:-status}"
+    shift || true
+
+    local JAIL_CONF="/etc/fail2ban/jail.d/spiralpool.conf"
+
+    case "$action" in
+        status)
+            echo ""
+            echo "fail2ban jail status:"
+            echo ""
+            if ! command -v fail2ban-client &>/dev/null; then
+                log_error "fail2ban is not installed"
+                exit 1
+            fi
+            for jail in spiralpool-dashboard spiralpool-api spiralpool-stratum; do
+                echo "  ── $jail ──────────────────────────────────────────"
+                sudo fail2ban-client status "$jail" 2>/dev/null || echo "  (jail not loaded)"
+                echo ""
+            done
+            ;;
+
+        banned)
+            # Show currently banned IPs across all Spiral Pool jails
+            if ! command -v fail2ban-client &>/dev/null; then
+                log_error "fail2ban is not installed"
+                exit 1
+            fi
+            echo ""
+            echo "Currently banned IPs:"
+            echo ""
+            local found=false
+            for jail in spiralpool-dashboard spiralpool-api spiralpool-stratum; do
+                local banned
+                banned=$(sudo fail2ban-client status "$jail" 2>/dev/null \
+                    | grep "Banned IP list:" | sed 's/.*Banned IP list://' | xargs)
+                if [[ -n "$banned" ]]; then
+                    echo "  [$jail]  $banned"
+                    found=true
+                fi
+            done
+            $found || echo "  (none)"
+            echo ""
+            ;;
+
+        unban)
+            # Usage: spiralctl fail2ban unban <IP>
+            local ip="${1:-}"
+            if [[ -z "$ip" ]]; then
+                log_error "Usage: spiralctl fail2ban unban <IP>"
+                exit 1
+            fi
+            echo "Unbanning $ip from all Spiral Pool jails..."
+            for jail in spiralpool-dashboard spiralpool-api spiralpool-stratum; do
+                sudo fail2ban-client set "$jail" unbanip "$ip" 2>/dev/null && \
+                    echo "  ✓ $jail" || true
+            done
+            echo ""
+            ;;
+
+        whitelist-add)
+            # Usage: spiralctl fail2ban whitelist-add <CIDR> [comment]
+            # Adds a CIDR to the [DEFAULT] ignoreip in the jail config so that
+            # IP range is never banned.  Useful for hashrate marketplace CIDRs.
+            local cidr="${1:-}"
+            local comment="${2:-}"
+            if [[ -z "$cidr" ]]; then
+                log_error "Usage: spiralctl fail2ban whitelist-add <CIDR> [comment]"
+                log_error "Example: spiralctl fail2ban whitelist-add 5.9.0.0/16 'NiceHash'"
+                exit 1
+            fi
+            if [[ ! -f "$JAIL_CONF" ]]; then
+                log_error "Jail config not found: $JAIL_CONF"
+                exit 1
+            fi
+            # Append CIDR to the ignoreip line
+            local comment_str=""
+            [[ -n "$comment" ]] && comment_str=" # $comment"
+            sudo sed -i "s|^ignoreip\s*=.*|& $cidr|" "$JAIL_CONF"
+            echo "# whitelisted by spiralctl$([ -n "$comment_str" ] && echo ":$comment_str")" | \
+                sudo tee -a "$JAIL_CONF" > /dev/null
+            sudo systemctl reload fail2ban 2>/dev/null || sudo systemctl restart fail2ban 2>/dev/null
+            echo "  ✓ $cidr added to whitelist and fail2ban reloaded"
+            ;;
+
+        whitelist-show)
+            # Show current ignoreip list
+            if [[ ! -f "$JAIL_CONF" ]]; then
+                log_error "Jail config not found: $JAIL_CONF"
+                exit 1
+            fi
+            echo ""
+            echo "Current fail2ban whitelist (ignoreip):"
+            grep "^ignoreip" "$JAIL_CONF" | sed 's/ignoreip\s*=\s*/  /' | tr ' ' '\n' | grep -v '^\s*$'
+            echo ""
+            ;;
+
+        reload)
+            sudo systemctl reload fail2ban 2>/dev/null || sudo systemctl restart fail2ban 2>/dev/null
+            echo "  ✓ fail2ban reloaded"
+            ;;
+
+        logs)
+            sudo journalctl -u fail2ban -n 100 --no-pager
+            ;;
+
+        *)
+            echo "Usage: spiralctl fail2ban <action>"
+            echo ""
+            echo "Actions:"
+            echo "  status                       Show ban counts for all Spiral Pool jails"
+            echo "  banned                       List currently banned IPs"
+            echo "  unban <IP>                   Remove a ban across all jails"
+            echo "  whitelist-add <CIDR> [note]  Add CIDR to never-ban list (e.g. marketplace IPs)"
+            echo "  whitelist-show               Show current whitelist"
+            echo "  reload                       Reload fail2ban after manual config changes"
+            echo "  logs                         Show recent fail2ban log entries"
+            echo ""
+            echo "Examples:"
+            echo "  spiralctl fail2ban status"
+            echo "  spiralctl fail2ban unban 1.2.3.4"
+            echo "  spiralctl fail2ban whitelist-add 5.9.0.0/16 'NiceHash'"
+            echo "  spiralctl fail2ban whitelist-add 192.168.100.0/24 'internal miners'"
+            ;;
+    esac
+}
+
+#===============================================================================
 # WEBHOOK COMMAND
 #===============================================================================
 
@@ -5397,6 +5528,7 @@ main() {
         # Configuration & notifications
         config)     cmd_config "$@" ;;
         webhook)    cmd_webhook "$@" ;;
+        fail2ban)   cmd_fail2ban "$@" ;;
 
         # Go binary commands (pool-level)
         mining|pool|external|gdpr-delete)
