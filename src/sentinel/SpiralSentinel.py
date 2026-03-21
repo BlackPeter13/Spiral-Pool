@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 Spiral Pool Contributors
 """
 ╔═════════════════════════════════════════════════════════════════════════════╗
-║  Spiral Sentinel v1.1.0 - PHI FORGE EDITION                                 ║
+║  Spiral Sentinel v1.1.1 - PHI FORGE EDITION                                 ║
 ║  Autonomous SHA-256 Solo Mining Monitor (DGB/BTC/BCH/BC2)                   ║
 ║  Self-Healing + Share Monitoring (No Pool Software Dependency)              ║
 ╠═════════════════════════════════════════════════════════════════════════════╣
@@ -28,7 +28,7 @@
 ║  • Whatsminer API: whatsminer.com                                           ║
 ╚═════════════════════════════════════════════════════════════════════════════╝
 """
-__version__ = "1.1.0-PHI_FORGE"
+__version__ = "1.1.1-PHI_FORGE"
 __codename__ = "PHI_FORGE"
 
 import copy, json, socket, sys, time, os, urllib.request, urllib.error, ssl, random, ipaddress, re, threading, http.server
@@ -718,7 +718,7 @@ def create_ha_status_embed():
 
         return _embed(
             theme("ha.status.title"),
-            theme("ha.status.body", node=get_node_uuid()[:8], role=status.local_role),
+            theme("ha.status.body", node=_SENTINEL_HOSTNAME or get_node_uuid()[:8], role=status.local_role),
             state_color,
             fields,
             footer=theme("ha.status.footer", vip=status.vip or "N/A")
@@ -4403,8 +4403,34 @@ ALERT_THEMES = {
         "quarterly.body": "*Quarter ending {date}*",
         # Special Date
         "special.title": "{emoji} {name} MINING REPORT",
-        "special.solstice_msg": "☀️ Longest/shortest day of the year. Keep those rigs burning bright, choom!",
-        "special.equinox_msg": "⚖️ Day and night balanced on a knife's edge. May your blocks be plentiful!",
+        "special.spring_equinox": "🌸 New season, same grind. The chain doesn't care about daylight — neither do we, choom.",
+        "special.summer_solstice": "☀️ Peak sunlight, peak solar hash potential. Longest day of the year — make every watt count.",
+        "special.autumn_equinox": "🍂 Summer's over but the rigs don't hibernate. Cooler air means better thermals — overclock season.",
+        "special.winter_solstice": "❄️ Shortest day, longest night. Your rigs are space heaters now — free warmth and free sats.",
+        "special.new_years": "🎆 New year, new blocks. The chain rolled over midnight without missing a beat — and so did your rigs.",
+        "special.christmas": "🎄 Best gift? A solved block under the tree. Keep the rigs humming while everyone else sleeps.",
+        "special.easter": "🐣 New blocks hatching. The mempool doesn't take holidays — stay stacking, choom.",
+        "special.good_friday": "✝️ A day of rest for some. The blockchain rests for no one — keep those shares flowing.",
+        "special.canada_day": "🍁 Happy Canada Day! Cheap hydro power + cold winters = built for mining. True North strong and hashing.",
+        "special.victoria_day": "👑 Long weekend, long hashes. Enjoy the fireworks — your rigs are already making sparks.",
+        "special.civic_holiday": "🏖️ August long weekend. Perfect time to check those thermal pads while the pool runs itself.",
+        "special.labour_day": "⚒️ Your rigs don't get the day off. That's the beauty of proof-of-work — it works while you rest.",
+        "special.thanksgiving_ca": "🦃 Grateful for low difficulty and high uptime. May your turkey be as golden as your block rewards.",
+        "special.remembrance_day": "🌺 Lest we forget. Mining runs 24/7/365 — even on days that matter most.",
+        "special.boxing_day": "🎁 Best deal of the year? A solo block. No coupon needed — just hashpower and patience.",
+        "special.family_day": "👨‍👩‍👧‍👦 Spend the day with family. Your rigs will hold the line — that's what automation is for.",
+        "special.indigenous_day": "🪶 Honouring Indigenous peoples and their enduring connection to this land. The network runs on shared ground.",
+        "special.truth_reconciliation": "🧡 A day to remember and reflect. The work of reconciliation continues — one step at a time.",
+        "special.independence_day": "🦅 Freedom to mine, freedom to self-custody. Decentralization is independence — happy 4th, choom.",
+        "special.mlk_day": "✊ Proof-of-work doesn't discriminate. Every valid hash counts equally. Keep building.",
+        "special.presidents_day": "🏛️ No executive order can stop the blockchain. Permissionless by design — keep hashing.",
+        "special.memorial_day": "🎖️ Honoring those who served. Your rigs serve the network — block by block, share by share.",
+        "special.labor_day": "⚒️ Your rigs don't get the day off. That's the beauty of proof-of-work — it works while you rest.",
+        "special.columbus_day": "🚢 Exploring new blocks, one hash at a time. Fortune favors the persistent miner.",
+        "special.thanksgiving_us": "🦃 Grateful for low difficulty and high uptime. May your block rewards be as generous as the feast.",
+        "special.juneteenth": "✊🏿 Freedom isn't free — and neither is decentralization. Celebrating liberation and self-sovereignty.",
+        "special.veterans_day": "🎖️ Saluting those who served. The network stands strong because miners stand watch — 24/7.",
+        "special.fallback": "🌟 Special day, same mission. The blockchain never stops — and neither does your pool.",
         # Consolidated Report
         "consolidated.title_suffix": "INTEL REPORT",
         # Trend Analysis
@@ -4734,8 +4760,34 @@ ALERT_THEMES = {
         "quarterly.body": "*Quarter ending {date}*",
         # Special Date
         "special.title": "{emoji} {name} MINING REPORT",
-        "special.solstice_msg": "☀️ Longest/shortest day of the year. May your hashrate be as persistent as the sun!",
-        "special.equinox_msg": "⚖️ Day and night in perfect balance. May your blocks be plentiful!",
+        "special.spring_equinox": "🌸 A new season begins. The network mines on — consistent, indifferent to the calendar.",
+        "special.summer_solstice": "☀️ The longest day of the year. Peak solar generation for those supplementing with renewables.",
+        "special.autumn_equinox": "🍂 Cooling temperatures ahead — favorable conditions for mining hardware efficiency.",
+        "special.winter_solstice": "❄️ The shortest day of the year. Cold ambient air improves cooling — optimal mining conditions.",
+        "special.new_years": "🎆 A new year of mining begins. The blockchain continues its unbroken sequence — block after block.",
+        "special.christmas": "🎄 Happy holidays. Mining operations continue uninterrupted — consistency is the foundation of solo mining.",
+        "special.easter": "🐣 Wishing you a restful holiday. The pool continues mining — no intervention required.",
+        "special.good_friday": "✝️ A day of observance. Pool operations remain fully automated and operational.",
+        "special.canada_day": "🍁 Happy Canada Day. Canadian hydroelectric power remains among the most cost-effective for mining globally.",
+        "special.victoria_day": "👑 Happy Victoria Day. A good opportunity for scheduled maintenance during the long weekend.",
+        "special.civic_holiday": "🏖️ Civic Holiday. Consider scheduling thermal paste replacement or fan cleaning during downtime.",
+        "special.labour_day": "⚒️ Happy Labour Day. Automated mining — reliable returns without manual intervention.",
+        "special.thanksgiving_ca": "🦃 Happy Thanksgiving. Consistent uptime and low difficulty are worth being grateful for.",
+        "special.remembrance_day": "🌺 Lest we forget. Mining operations continue — the network never pauses.",
+        "special.boxing_day": "🎁 Happy Boxing Day. A good time to review hardware deals for fleet expansion.",
+        "special.family_day": "👨‍👩‍👧‍👦 Happy Family Day. Pool automation ensures operations continue while you enjoy the holiday.",
+        "special.indigenous_day": "🪶 National Indigenous Peoples Day. Honouring the heritage, cultures, and contributions of Indigenous peoples.",
+        "special.truth_reconciliation": "🧡 National Day for Truth and Reconciliation. A day to remember, reflect, and acknowledge the path forward.",
+        "special.independence_day": "🦅 Happy Independence Day. Decentralized mining embodies the principle of financial self-sovereignty.",
+        "special.mlk_day": "✊ Honoring Dr. King's legacy. Proof-of-work is permissionless — open to all participants equally.",
+        "special.presidents_day": "🏛️ Happy Presidents' Day. The blockchain operates beyond any single authority — by design.",
+        "special.memorial_day": "🎖️ Honoring those who served. Your mining fleet serves the network with the same steadfast reliability.",
+        "special.labor_day": "⚒️ Happy Labor Day. Automated mining — reliable returns without manual intervention.",
+        "special.columbus_day": "🚢 Happy Columbus Day. Consistent exploration of the hash space yields results over time.",
+        "special.thanksgiving_us": "🦃 Happy Thanksgiving. Consistent uptime and favorable network conditions are worth appreciating.",
+        "special.juneteenth": "✊🏿 Juneteenth. Celebrating freedom and the ongoing pursuit of equality. The blockchain is permissionless by design.",
+        "special.veterans_day": "🎖️ Honoring those who served. The network's security depends on miners who show up — every day.",
+        "special.fallback": "🌟 Wishing you a good holiday. Mining operations continue as scheduled.",
         # Consolidated Report
         "consolidated.title_suffix": "INTEL REPORT",
         # Trend Analysis
@@ -5322,7 +5374,7 @@ def reload_miners():
                 "old_count": old_count,
                 "new_count": new_count,
                 "success": True,
-                "sentinel_version": "V1.1.0-PHI_FORGE"
+                "sentinel_version": "V1.1.1-PHI_FORGE"
             }
             _atomic_json_save(MINER_RELOAD_ACK, ack_data)
             logger.debug(f"Wrote reload ACK: {MINER_RELOAD_ACK}")
@@ -5341,7 +5393,7 @@ def reload_miners():
                 "timestamp_iso": datetime.now(timezone.utc).isoformat(),
                 "success": False,
                 "error": "Failed to reload miner configuration",
-                "sentinel_version": "V1.1.0-PHI_FORGE"
+                "sentinel_version": "V1.1.1-PHI_FORGE"
             }
             _atomic_json_save(MINER_RELOAD_ACK, ack_data)
         except (PermissionError, OSError):
@@ -9862,77 +9914,139 @@ def _get_nth_weekday_of_month(year, month, weekday, n):
     return day
 
 
+def _compute_equinoxes_solstices(year):
+    """Compute equinox/solstice dates for a given year using the Meeus algorithm.
+    Returns dict of (month, day) -> event info. Accurate to within ~1 day for 2000-2100."""
+    import math
+    # Julian Ephemeris Day approximations (Meeus, Astronomical Algorithms ch. 27)
+    # Y = (year - 2000) / 1000
+    y = (year - 2000) / 1000.0
+    # JDE0 for March equinox, June solstice, September equinox, December solstice
+    jde_march    = 2451623.80984 + 365242.37404 * y + 0.05169 * y**2 - 0.00411 * y**3 - 0.00057 * y**4
+    jde_june     = 2451716.56767 + 365241.62603 * y + 0.00325 * y**2 + 0.00888 * y**3 - 0.00030 * y**4
+    jde_sept     = 2451810.21715 + 365242.01767 * y - 0.11575 * y**2 + 0.00337 * y**3 + 0.00078 * y**4
+    jde_dec      = 2451900.05952 + 365242.74049 * y - 0.06223 * y**2 - 0.00823 * y**3 + 0.00032 * y**4
+
+    def _jde_to_date(jde):
+        """Convert Julian Ephemeris Day to (month, day) in UTC."""
+        # Standard Julian Day to calendar date conversion
+        jd = jde + 0.5
+        z = int(jd)
+        f = jd - z
+        if z < 2299161:
+            a = z
+        else:
+            alpha = int((z - 1867216.25) / 36524.25)
+            a = z + 1 + alpha - int(alpha / 4)
+        b = a + 1524
+        c = int((b - 122.1) / 365.25)
+        d = int(365.25 * c)
+        e = int((b - d) / 30.6001)
+        day = b - d - int(30.6001 * e)
+        month = e - 1 if e < 14 else e - 13
+        return (month, day)
+
+    events = [
+        (jde_march, {"name": "Spring Equinox", "emoji": "\U0001f338", "type": "equinox"}),
+        (jde_june,  {"name": "Summer Solstice", "emoji": "\u2600\ufe0f", "type": "solstice"}),
+        (jde_sept,  {"name": "Autumn Equinox", "emoji": "\U0001f342", "type": "equinox"}),
+        (jde_dec,   {"name": "Winter Solstice", "emoji": "\u2744\ufe0f", "type": "solstice"}),
+    ]
+    result = {}
+    for jde, info in events:
+        md = _jde_to_date(jde)
+        result[md] = info
+    return result
+
+
+def _compute_easter(year):
+    """Compute Easter Sunday date using the Anonymous Gregorian algorithm (Meeus).
+    Returns (month, day)."""
+    a = year % 19
+    b = year // 100
+    c = year % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    day = ((h + l - 7 * m + 114) % 31) + 1
+    return (month, day)
+
+
 def get_special_date_info():
     """Check if today is a special date for reports.
     Holidays are based on POWER_CURRENCY: CAD=Canadian, USD=American.
+    Equinoxes/solstices and Easter are computed astronomically — not hardcoded.
     """
     now = local_now()
     year, month, day = now.year, now.month, now.day
 
-    # === UNIVERSAL DATES (Equinoxes, Solstices) ===
+    # === UNIVERSAL DATES ===
     special_dates = {
-        (3, 20): {"name": "Spring Equinox", "emoji": "🌸", "type": "equinox"},
-        (3, 21): {"name": "Spring Equinox", "emoji": "🌸", "type": "equinox"},
-        (6, 20): {"name": "Summer Solstice", "emoji": "☀️", "type": "solstice"},
-        (6, 21): {"name": "Summer Solstice", "emoji": "☀️", "type": "solstice"},
-        (9, 22): {"name": "Autumn Equinox", "emoji": "🍂", "type": "equinox"},
-        (9, 23): {"name": "Autumn Equinox", "emoji": "🍂", "type": "equinox"},
-        (12, 21): {"name": "Winter Solstice", "emoji": "❄️", "type": "solstice"},
-        (12, 22): {"name": "Winter Solstice", "emoji": "❄️", "type": "solstice"},
-        # New Year's Day (both countries)
-        (1, 1): {"name": "New Year's Day", "emoji": "🎆", "type": "holiday"},
+        (1, 1): {"name": "New Year's Day", "emoji": "🎆", "type": "holiday", "theme_key": "new_years"},
+        (12, 25): {"name": "Christmas", "emoji": "🎄", "type": "holiday", "theme_key": "christmas"},
     }
+
+    # Equinoxes and solstices — astronomically computed per year
+    for md, info in _compute_equinoxes_solstices(year).items():
+        # Derive theme_key from name: "Spring Equinox" -> "spring_equinox"
+        info["theme_key"] = info["name"].lower().replace(" ", "_")
+        special_dates[md] = info
+
+    # Easter and Good Friday — computed per year
+    easter_month, easter_day = _compute_easter(year)
+    easter_date = datetime(year, easter_month, easter_day)
+    good_friday = easter_date - timedelta(days=2)
+    special_dates[(easter_month, easter_day)] = {"name": "Easter", "emoji": "🐣", "type": "holiday", "theme_key": "easter"}
+    special_dates[(good_friday.month, good_friday.day)] = {"name": "Good Friday", "emoji": "✝️", "type": "holiday", "theme_key": "good_friday"}
 
     # === CANADIAN HOLIDAYS (power_currency = CAD) ===
     if POWER_CURRENCY == "CAD":
-        # Canada Day - July 1
-        special_dates[(7, 1)] = {"name": "Canada Day", "emoji": "🍁", "type": "holiday"}
+        special_dates[(7, 1)] = {"name": "Canada Day", "emoji": "🍁", "type": "holiday", "theme_key": "canada_day"}
         # Victoria Day - last Monday on or before May 24
         if month == 5:
             victoria_day = 24 - datetime(year, 5, 24).weekday()
             if day == victoria_day:
-                return {"name": "Victoria Day", "emoji": "👑", "type": "holiday"}
-        # Civic Holiday (August Long Weekend) - 1st Monday of August
+                return {"name": "Victoria Day", "emoji": "👑", "type": "holiday", "theme_key": "victoria_day"}
         if month == 8 and day == _get_nth_weekday_of_month(year, 8, 0, 1):
-            return {"name": "Civic Holiday", "emoji": "🏖️", "type": "holiday"}
-        # Labour Day - 1st Monday of September
+            return {"name": "Civic Holiday", "emoji": "🏖️", "type": "holiday", "theme_key": "civic_holiday"}
         if month == 9 and day == _get_nth_weekday_of_month(year, 9, 0, 1):
-            return {"name": "Labour Day", "emoji": "⚒️", "type": "holiday"}
-        # Thanksgiving - 2nd Monday of October
+            return {"name": "Labour Day", "emoji": "⚒️", "type": "holiday", "theme_key": "labour_day"}
         if month == 10 and day == _get_nth_weekday_of_month(year, 10, 0, 2):
-            return {"name": "Thanksgiving", "emoji": "🦃", "type": "holiday"}
-        # Remembrance Day - November 11
-        special_dates[(11, 11)] = {"name": "Remembrance Day", "emoji": "🌺", "type": "holiday"}
-        # Boxing Day - December 26
-        special_dates[(12, 26)] = {"name": "Boxing Day", "emoji": "🎁", "type": "holiday"}
-        # Family Day - 3rd Monday of February (most provinces)
+            return {"name": "Thanksgiving", "emoji": "🦃", "type": "holiday", "theme_key": "thanksgiving_ca"}
+        # National Indigenous Peoples Day - June 21 (may overlap Summer Solstice — holiday takes priority)
+        special_dates[(6, 21)] = {"name": "National Indigenous Peoples Day", "emoji": "🪶", "type": "holiday", "theme_key": "indigenous_day"}
+        # Truth and Reconciliation Day - September 30 (federal stat since 2021)
+        special_dates[(9, 30)] = {"name": "Truth & Reconciliation Day", "emoji": "🧡", "type": "holiday", "theme_key": "truth_reconciliation"}
+        special_dates[(11, 11)] = {"name": "Remembrance Day", "emoji": "🌺", "type": "holiday", "theme_key": "remembrance_day"}
+        special_dates[(12, 26)] = {"name": "Boxing Day", "emoji": "🎁", "type": "holiday", "theme_key": "boxing_day"}
         if month == 2 and day == _get_nth_weekday_of_month(year, 2, 0, 3):
-            return {"name": "Family Day", "emoji": "👨‍👩‍👧‍👦", "type": "holiday"}
+            return {"name": "Family Day", "emoji": "👨‍👩‍👧‍👦", "type": "holiday", "theme_key": "family_day"}
 
     # === AMERICAN HOLIDAYS (power_currency = USD) ===
     elif POWER_CURRENCY == "USD":
-        # Independence Day - July 4
-        special_dates[(7, 4)] = {"name": "Independence Day", "emoji": "🦅", "type": "holiday"}
-        # MLK Day - 3rd Monday of January
+        special_dates[(7, 4)] = {"name": "Independence Day", "emoji": "🦅", "type": "holiday", "theme_key": "independence_day"}
+        # Juneteenth - June 19 (federal holiday since 2021)
+        special_dates[(6, 19)] = {"name": "Juneteenth", "emoji": "✊🏿", "type": "holiday", "theme_key": "juneteenth"}
         if month == 1 and day == _get_nth_weekday_of_month(year, 1, 0, 3):
-            return {"name": "MLK Day", "emoji": "✊", "type": "holiday"}
-        # Presidents' Day - 3rd Monday of February
+            return {"name": "MLK Day", "emoji": "✊", "type": "holiday", "theme_key": "mlk_day"}
         if month == 2 and day == _get_nth_weekday_of_month(year, 2, 0, 3):
-            return {"name": "Presidents' Day", "emoji": "🏛️", "type": "holiday"}
-        # Memorial Day - Last Monday of May
+            return {"name": "Presidents' Day", "emoji": "🏛️", "type": "holiday", "theme_key": "presidents_day"}
         if month == 5 and day == _get_nth_weekday_of_month(year, 5, 0, -1):
-            return {"name": "Memorial Day", "emoji": "🎖️", "type": "holiday"}
-        # Labor Day - 1st Monday of September
+            return {"name": "Memorial Day", "emoji": "🎖️", "type": "holiday", "theme_key": "memorial_day"}
         if month == 9 and day == _get_nth_weekday_of_month(year, 9, 0, 1):
-            return {"name": "Labor Day", "emoji": "⚒️", "type": "holiday"}
-        # Columbus Day - 2nd Monday of October
+            return {"name": "Labor Day", "emoji": "⚒️", "type": "holiday", "theme_key": "labor_day"}
         if month == 10 and day == _get_nth_weekday_of_month(year, 10, 0, 2):
-            return {"name": "Columbus Day", "emoji": "🚢", "type": "holiday"}
-        # Thanksgiving - 4th Thursday of November
+            return {"name": "Columbus Day", "emoji": "🚢", "type": "holiday", "theme_key": "columbus_day"}
         if month == 11 and day == _get_nth_weekday_of_month(year, 11, 3, 4):
-            return {"name": "Thanksgiving", "emoji": "🦃", "type": "holiday"}
-        # Veterans Day - November 11
-        special_dates[(11, 11)] = {"name": "Veterans Day", "emoji": "🎖️", "type": "holiday"}
+            return {"name": "Thanksgiving", "emoji": "🦃", "type": "holiday", "theme_key": "thanksgiving_us"}
+        special_dates[(11, 11)] = {"name": "Veterans Day", "emoji": "🎖️", "type": "holiday", "theme_key": "veterans_day"}
 
     return special_dates.get((month, day))
 
@@ -9996,6 +10110,167 @@ def calc_odds(net_phs, fleet_ths, coin=None):
     weekly = 1 - ((1 - clamped/100) ** (blocks_per_day * 7))
     dpb = 1 / (blocks_per_day * clamped / 100) if clamped > 0 else float('inf')
     return {"share_pct": share, "daily_odds_pct": daily * 100, "weekly_odds_pct": weekly * 100, "days_per_block": dpb}
+
+# === PROFITABILITY TRACKER (v1.1.1 — NOT ACTIVE) ===
+# This module computes per-coin profitability rankings within each algorithm family.
+# It is NOT wired to any API endpoint or report loop yet. To activate in a future
+# release, expose compute_profitability_rankings() via a /api/profitability route.
+#
+# Data sources (all existing):
+#   - Prices:           fetch_all_prices() (CoinGecko, 2min cache)
+#   - Network stats:    fetch_network_stats(coin) (difficulty, hashrate)
+#   - Block rewards:    DEFAULT_BLOCK_REWARDS (fallback) + live from pool API
+#   - Blocks per day:   COIN_BLOCKS_PER_DAY (derived from block time)
+#   - Algorithm family: COIN_ALGORITHM_FAMILY
+
+COIN_BLOCKS_PER_DAY = {
+    # SHA-256d
+    "DGB": 1152, "BTC": 144, "BCH": 144, "BC2": 144,
+    "NMC": 144, "SYS": 1440, "XMY": 1440, "FBTC": 2880, "QBX": 576,
+    # Scrypt
+    "LTC": 576, "DOGE": 1440, "DGB-SCRYPT": 1152, "PEP": 1440, "CAT": 144,
+}
+
+COIN_ALGORITHM_FAMILY = {
+    "DGB": "sha256d", "BTC": "sha256d", "BCH": "sha256d", "BC2": "sha256d",
+    "NMC": "sha256d", "SYS": "sha256d", "XMY": "sha256d", "FBTC": "sha256d", "QBX": "sha256d",
+    "LTC": "scrypt", "DOGE": "scrypt", "DGB-SCRYPT": "scrypt", "PEP": "scrypt", "CAT": "scrypt",
+}
+
+# Price key mapping: coin symbol -> key prefix in fetch_all_prices() result
+_PRICE_KEY_MAP = {
+    "DGB": "dgb", "BTC": "btc", "BCH": "bch", "BC2": "bc2", "QBX": "qbx",
+    "NMC": "nmc", "SYS": "sys", "XMY": "xmy", "FBTC": "fbtc",
+    "LTC": "ltc", "DOGE": "doge", "DGB-SCRYPT": "dgb-scrypt", "PEP": "pep", "CAT": "cat",
+}
+
+
+def compute_coin_profitability(coin, prices, currency_code, hashrate_ths=1.0):
+    """Compute estimated daily revenue for a single coin at a given hashrate.
+
+    Args:
+        coin:           Coin symbol (e.g. "BTC", "DGB", "LTC")
+        prices:         Dict from fetch_all_prices()
+        currency_code:  Lowercase currency code (e.g. "cad", "usd")
+        hashrate_ths:   Hashrate to calculate for, in TH/s (default 1.0)
+
+    Returns:
+        dict with profitability data, or None if data unavailable
+    """
+    coin = coin.upper()
+    if coin not in COIN_BLOCKS_PER_DAY:
+        return None
+
+    # Get network stats (difficulty + hashrate)
+    net_stats = fetch_network_stats(coin)
+    if not net_stats or net_stats.get("network_phs", 0) <= 0:
+        return None
+
+    net_phs = net_stats["network_phs"]
+    difficulty = net_stats.get("difficulty", 0)
+
+    # Block reward — try live from pool API, fall back to default
+    block_reward = DEFAULT_BLOCK_REWARDS.get(coin, 0)
+    pool_stats = fetch_pool_stats_by_symbol(coin)
+    if pool_stats:
+        live_reward = pool_stats.get("poolStats", {}).get("blockReward", 0)
+        if live_reward > 0:
+            block_reward = live_reward
+
+    if block_reward <= 0:
+        return None
+
+    # Coin price in user's currency
+    price_key = f"{_PRICE_KEY_MAP.get(coin, coin.lower())}_{currency_code}"
+    coin_price = prices.get(price_key, 0) if prices else 0
+
+    # Core calculation: expected coins per day at given hashrate
+    # share_of_network = hashrate_ths / (net_phs * 1000)  [convert PH/s to TH/s]
+    # daily_coins = block_reward * blocks_per_day * share_of_network
+    blocks_per_day = COIN_BLOCKS_PER_DAY[coin]
+    net_ths = net_phs * 1000.0
+    share_pct = (hashrate_ths / net_ths * 100) if net_ths > 0 else 0
+    daily_coins = block_reward * blocks_per_day * (hashrate_ths / net_ths) if net_ths > 0 else 0
+    daily_fiat = daily_coins * coin_price
+
+    # Sats value (how many sats per day — useful for cross-coin comparison)
+    sats_key = f"{_PRICE_KEY_MAP.get(coin, coin.lower())}_sats"
+    coin_sats = prices.get(sats_key, 0) if prices else 0
+
+    return {
+        "coin": coin,
+        "algorithm": COIN_ALGORITHM_FAMILY.get(coin, "unknown"),
+        "block_reward": block_reward,
+        "blocks_per_day": blocks_per_day,
+        "network_phs": net_phs,
+        "difficulty": difficulty,
+        "hashrate_ths": hashrate_ths,
+        "share_pct": share_pct,
+        "daily_coins": daily_coins,
+        "coin_price_fiat": coin_price,
+        "daily_fiat": daily_fiat,
+        "daily_sats": daily_coins * coin_sats if coin != "BTC" else int(daily_coins * 1e8),
+        "currency": currency_code.upper(),
+    }
+
+
+def compute_profitability_rankings(hashrate_ths=1.0):
+    """Compute profitability rankings for all coins, grouped by algorithm family.
+
+    Ranks coins within each algorithm family (sha256d, scrypt) by estimated daily
+    fiat revenue at the given hashrate. Coins with no price or network data are
+    excluded rather than ranked at zero.
+
+    Args:
+        hashrate_ths: Hashrate to calculate for, in TH/s (default 1.0)
+
+    Returns:
+        dict with structure:
+        {
+            "hashrate_ths": 1.0,
+            "currency": "CAD",
+            "timestamp": "2026-03-21T06:00:00",
+            "sha256d": [
+                {"rank": 1, "coin": "FBTC", "daily_fiat": 12.34, ...},
+                {"rank": 2, "coin": "DGB", "daily_fiat": 8.56, ...},
+                ...
+            ],
+            "scrypt": [
+                {"rank": 1, "coin": "DOGE", "daily_fiat": 5.67, ...},
+                ...
+            ]
+        }
+    """
+    prices = fetch_all_prices()
+    cur = get_currency_meta()
+    currency_code = cur.get("code", "usd")
+
+    families = {"sha256d": [], "scrypt": []}
+
+    for coin in COIN_BLOCKS_PER_DAY:
+        result = compute_coin_profitability(coin, prices, currency_code, hashrate_ths)
+        if result is None:
+            continue
+        family = result["algorithm"]
+        if family in families:
+            families[family].append(result)
+
+    # Sort each family by daily_fiat descending (most profitable first)
+    for family in families:
+        families[family].sort(key=lambda x: x["daily_fiat"], reverse=True)
+        for i, entry in enumerate(families[family]):
+            entry["rank"] = i + 1
+
+    return {
+        "hashrate_ths": hashrate_ths,
+        "currency": currency_code.upper(),
+        "currency_symbol": cur.get("symbol", "$"),
+        "timestamp": local_now().isoformat(),
+        "sha256d": families["sha256d"],
+        "scrypt": families["scrypt"],
+    }
+# === END PROFITABILITY TRACKER ===
+
 
 def get_status_level(net_phs, coin=None):
     """Get status level based on network hashrate for a specific coin."""
@@ -12011,16 +12286,26 @@ def create_report_embed(net_phs, fleet_ths, odds, md, diff=None, temps=None, pri
                     age_str = f"{int(age_secs // 3600)}h ago"
                 else:
                     age_str = f"{age_secs / 86400:.1f}d ago"
-                # Try to get backup size (sum top-level dir entries)
+                # Get backup size and count (spiralpool group must have read access)
+                size_str = "?"
+                backup_count = 0
                 try:
                     import subprocess as _sp
                     _du = _sp.run(["du", "-sh", "/spiralpool/backups"], capture_output=True, text=True, timeout=5)
-                    size_str = _du.stdout.split()[0] if _du.returncode == 0 and _du.stdout else "?"
+                    if _du.returncode == 0 and _du.stdout.strip():
+                        size_str = _du.stdout.split()[0]
+                    elif _du.stderr and "Permission denied" in _du.stderr:
+                        size_str = "no access"
                 except Exception:
-                    size_str = "?"
+                    pass
+                try:
+                    backup_count = len([d for d in os.listdir("/spiralpool/backups")
+                                        if d.startswith("daily-") and os.path.isdir(f"/spiralpool/backups/{d}")])
+                except Exception:
+                    pass
                 status_em = "🟢" if age_secs < 86400 * CONFIG.get("backup_stale_days", 2) else "🔴"
                 bv_lines.append(f"{status_em} Last: `{last_str}` ({age_str})")
-                bv_lines.append(f"💾 Size: `{size_str}`")
+                bv_lines.append(f"💾 Size: `{size_str}` ({backup_count} snapshots)")
             else:
                 bv_lines.append("🔴 No backups found")
             # Next scheduled run from cron expression
@@ -14134,11 +14419,11 @@ def create_special_date_embed(special_info, stats, trends):
             tv += f"Change: {trend_30d.get('pct_change', 0):+.2f}%"
             fields.append({"name": "📊 Monthly Trend", "value": tv, "inline": True})
 
-    # Thematic message based on type
-    if date_type == "solstice":
-        msg = theme("special.solstice_msg")
-    else:
-        msg = theme("special.equinox_msg")
+    # Thematic message based on specific holiday/event
+    theme_key = special_info.get("theme_key", "fallback")
+    msg = theme(f"special.{theme_key}")
+    if msg.startswith("special."):
+        msg = theme("special.fallback")
     fields.append({"name": "🌟 Mining Wisdom", "value": msg, "inline": False})
 
     return _embed(theme("special.title", emoji=emoji, name=name), f"*{local_now().strftime('%Y-%m-%d')}*", COLORS["purple"], fields)
@@ -14418,11 +14703,10 @@ def create_consolidated_report_embed(report_types, data):
     # === SPECIAL DATE SECTION (if special date) ===
     if "special" in report_types:
         special_info = data.get("special_info", {})
-        date_type = special_info.get("type", "special")
-        if date_type == "solstice":
-            msg = theme("special.solstice_msg")
-        else:
-            msg = theme("special.equinox_msg")
+        theme_key = special_info.get("theme_key", "fallback")
+        msg = theme(f"special.{theme_key}")
+        if msg.startswith("special."):
+            msg = theme("special.fallback")
         fields.append({"name": f"{special_info.get('emoji', '🌟')} MINING WISDOM", "value": msg, "inline": False})
 
     # === DAILY EARNINGS ESTIMATE ===

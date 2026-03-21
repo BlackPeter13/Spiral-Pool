@@ -45,7 +45,7 @@ SYSCOIN_VERSION="5.0.5"
 MYRIAD_VERSION="0.18.1.0"
 FBTC_VERSION="0.3.0"
 QBX_VERSION="0.2.0"
-GO_VERSION="1.25.6"
+GO_VERSION="1.26.1"
 POSTGRES_VERSION="18"
 
 # Ports - No defaults for coin-specific ports (user must configure)

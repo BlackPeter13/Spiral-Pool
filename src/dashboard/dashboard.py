@@ -19,7 +19,7 @@ ASIC Miner API Protocol References (protocol documentation, not derived code):
 See LICENSE file for full BSD-3-Clause license terms.
 """
 
-__version__ = "1.1.0-PHI_FORGE"
+__version__ = "1.1.1-PHI_FORGE"
 
 import os
 import json
@@ -3685,6 +3685,17 @@ def get_sha256_difficulty(symbol):
     return 0
 
 
+def _get_cached_coin_version(symbol):
+    """Read version from coin-versions cache (fallback for daemons with broken --version/subversion)."""
+    try:
+        ver_file = Path(os.environ.get("SPIRALPOOL_INSTALL_DIR", "/spiralpool")) / "config" / "coin-versions" / f"{symbol.upper()}.ver"
+        if ver_file.is_file():
+            return ver_file.read_text().strip()
+    except OSError:
+        pass
+    return ""
+
+
 def coin_rpc(symbol, method, params=None):
     """Make an RPC call to a specific coin's node"""
     symbol = symbol.upper()
@@ -3790,6 +3801,12 @@ def fetch_coin_node_health(symbol):
         if net_info:
             health["version"] = net_info.get("subversion", "")
             health["connections"] = net_info.get("connections", 0)
+
+        # Override with version cache if available — some daemons (e.g. QBX)
+        # report incorrect version in their subversion string
+        cached_ver = _get_cached_coin_version(symbol)
+        if cached_ver:
+            health["version"] = cached_ver
 
         # Get mempool info
         mempool_info = coin_rpc(symbol, "getmempoolinfo")
@@ -4031,6 +4048,12 @@ def fetch_health_data():
             node_health["connections_out"] = net_info.get("connections_out", 0)
             node_health["relay_fee"] = net_info.get("relayfee", 0)
             node_health["warnings"] = net_info.get("warnings", "")
+
+        # Override with version cache if available — some daemons (e.g. QBX)
+        # report incorrect version in their subversion string
+        cached_ver = _get_cached_coin_version(primary_coin)
+        if cached_ver:
+            node_health["version"] = cached_ver
 
         # Get mempool info
         mempool = coin_rpc(primary_coin, "getmempoolinfo")
@@ -12390,7 +12413,7 @@ def test_discord_webhook(url: str, test_message: str = None) -> dict:
         "title": "🧪 Spiral Pool Test Notification",
         "description": test_message or "This is a test message from Spiral Dashboard. If you see this, your webhook is configured correctly!",
         "color": 0x00d4ff,  # Cyan color
-        "footer": {"text": f"Spiral Pool v1.1.0 PHI FORGE"},
+        "footer": {"text": f"Spiral Pool v1.1.1 PHI FORGE"},
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
@@ -16456,6 +16479,8 @@ def get_estimated_time_to_block():
         time_formatted = "∞ (need more hashrate)"
     elif estimated_seconds < 300:
         time_formatted = f"{estimated_seconds/60:.1f} minutes (check data!)"
+    elif estimated_seconds < 3600:
+        time_formatted = f"{estimated_seconds/60:.0f} minutes"
     elif estimated_seconds < 86400:
         time_formatted = f"{estimated_seconds/3600:.1f} hours"
     elif estimated_seconds < 604800:
