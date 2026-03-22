@@ -12286,7 +12286,7 @@ def create_report_embed(net_phs, fleet_ths, odds, md, diff=None, temps=None, pri
                     age_str = f"{int(age_secs // 3600)}h ago"
                 else:
                     age_str = f"{age_secs / 86400:.1f}d ago"
-                # Get backup size and count (spiralpool group must have read access)
+                # Get backup size and count
                 size_str = "?"
                 backup_count = 0
                 try:
@@ -12295,7 +12295,7 @@ def create_report_embed(net_phs, fleet_ths, odds, md, diff=None, temps=None, pri
                     if _du.returncode == 0 and _du.stdout.strip():
                         size_str = _du.stdout.split()[0]
                     elif _du.stderr and "Permission denied" in _du.stderr:
-                        size_str = "no access"
+                        size_str = "no access (run: sudo setfacl -R -m u:spiralpool:rx /spiralpool/backups)"
                 except Exception:
                     pass
                 try:
@@ -12369,7 +12369,7 @@ def create_report_embed(net_phs, fleet_ths, odds, md, diff=None, temps=None, pri
 
     return _embed(title, desc, color, fields, footer=theme("report.footer", version=__version__, next_report=_next_report_label()))
 
-def create_block_embed(block_num, prices=None, bri=None, found_by=None, miner_details=None, pool_block_num=None, coin_symbol=None, time_since_last=None, effort_pct=None, block_hash=None):
+def create_block_embed(block_num, prices=None, bri=None, found_by=None, miner_details=None, pool_block_num=None, coin_symbol=None, time_since_last=None, effort_pct=None, block_hash=None, network_hashrate=None, difficulty=None, observed_hashrate_hs=None):
     """Cyberpunk block capture celebration with miner details - MAXIMUM HYPE EDITION!
 
     Supports multi-coin with appropriate emojis and formatting:
@@ -12453,6 +12453,14 @@ def create_block_embed(block_num, prices=None, bri=None, found_by=None, miner_de
         else:
             luck_label = "Overdue"
         block_info_lines.append(f"**Effort:** `{effort_pct:.1f}%` ({luck_label})")
+
+    # Network stats at time of block find
+    if network_hashrate and network_hashrate > 0:
+        block_info_lines.append(f"**Network Hashrate:** `{format_hashrate(network_hashrate * 1e15, coin)}`")
+    if difficulty and difficulty > 0:
+        block_info_lines.append(f"**Difficulty:** `{format_difficulty(difficulty)}`")
+    if observed_hashrate_hs and observed_hashrate_hs > 0:
+        block_info_lines.append(f"**Observed Hashrate:** `{format_hashrate(observed_hashrate_hs, coin)}`")
 
     fields.append({
         "name": f"{coin_emoji} Block Reward",
@@ -17769,7 +17777,9 @@ def monitor_loop(state):
                     miner_details=miner_details,
                     pool_block_num=state.pool_blocks_found,
                     coin_symbol=block.get("coin", primary_coin),
-                    block_hash=block.get("hash")
+                    block_hash=block.get("hash"),
+                    network_hashrate=net_phs_startup,
+                    difficulty=net.get("difficulty") if net else None,
                 ), state)
                 trigger_block_celebration(miner_details)
                 logger.info(f"BLOCK RECOVERED #{state.pool_blocks_found} by {sanitize_log_input(worker)} (height {block['height']}) — locked in!")
@@ -17806,12 +17816,16 @@ def monitor_loop(state):
                             "power": power.get(mname, 0),
                             "found_block": mname == worker
                         }
+                    # Fetch aux chain network stats for the embed
+                    _aux_net = fetch_network_stats(aux_coin)
                     send_alert("block_found", create_block_embed(
                         block["height"], aux_prices, aux_bri, worker,
                         miner_details=miner_details,
                         pool_block_num=state.pool_blocks_found,
                         coin_symbol=aux_coin,
-                        block_hash=block.get("hash")
+                        block_hash=block.get("hash"),
+                        network_hashrate=_aux_net.get("network_phs") if _aux_net else None,
+                        difficulty=_aux_net.get("difficulty") if _aux_net else None,
                     ), state)
                     trigger_block_celebration(miner_details)
                     logger.info(f"AUX BLOCK RECOVERED #{state.pool_blocks_found} ({aux_coin}) by {sanitize_log_input(worker)} (height {block['height']}) — locked in!")
@@ -18624,7 +18638,10 @@ def monitor_loop(state):
                         coin_symbol=primary_coin,
                         time_since_last=_time_since,
                         effort_pct=_effort,
-                        block_hash=f.get("hash")
+                        block_hash=f.get("hash"),
+                        network_hashrate=net_phs,
+                        difficulty=diff,
+                        observed_hashrate_hs=fleet_ths * 1e12,
                     ), state)
                     trigger_block_celebration(miner_details)
                     logger.info(f"BLOCK #{state.pool_blocks_found} by {sanitize_log_input(f['miner'])}!")
@@ -18665,7 +18682,10 @@ def monitor_loop(state):
                     miner_details=miner_details,
                     pool_block_num=state.pool_blocks_found,
                     coin_symbol=block.get("coin", primary_coin),
-                    block_hash=block.get("hash")
+                    block_hash=block.get("hash"),
+                    network_hashrate=net_phs,
+                    difficulty=diff,
+                    observed_hashrate_hs=fleet_ths * 1e12,
                 ), state)
                 trigger_block_celebration(miner_details)
                 logger.info(f"POOL BLOCK #{state.pool_blocks_found} by {sanitize_log_input(worker)} (height {block['height']})!")
@@ -18724,12 +18744,16 @@ def monitor_loop(state):
                                 "power": power.get(mname, 0),
                                 "found_block": mname == worker
                             }
+                        # Fetch aux chain network stats for the embed
+                        _aux_net = fetch_network_stats(aux_coin)
                         send_alert("block_found", create_block_embed(
                             block["height"], aux_prices, aux_bri, worker,
                             miner_details=miner_details,
                             pool_block_num=state.pool_blocks_found,
                             coin_symbol=aux_coin,
-                            block_hash=block.get("hash")
+                            block_hash=block.get("hash"),
+                            network_hashrate=_aux_net.get("network_phs") if _aux_net else None,
+                            difficulty=_aux_net.get("difficulty") if _aux_net else None,
                         ), state)
                         trigger_block_celebration(miner_details)
                         logger.info(

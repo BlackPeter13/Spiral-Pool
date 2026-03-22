@@ -14175,7 +14175,7 @@ Match User ${POOL_USER}
         netcat-openbsd dnsutils \
         rsync openssh-client \
         net-tools lsof \
-        cron \
+        cron acl \
         xz-utils || { log_error "Failed to install prerequisite packages"; return 1; }
 
     # Deferred sshd reload — sshd -t may have failed earlier if host keys weren't
@@ -32932,6 +32932,11 @@ EXPORTEOF
     sudo mkdir -p /spiralpool/backups
     sudo chown "$POOL_USER:$POOL_USER" /spiralpool/backups 2>/dev/null || true
     sudo chmod 775 /spiralpool/backups
+    # Ensure sentinel (spiralpool user) can read backup sizes even if
+    # ownership drifts (e.g. backup cron runs as a different user)
+    if command -v setfacl &>/dev/null; then
+        sudo setfacl -R -m u:"$POOL_USER":rx /spiralpool/backups 2>/dev/null || true
+    fi
 
     # Determine scripts source directory (scripts/ or scripts/linux/)
     local SCRIPTS_SRC="${SCRIPT_DIR}/scripts/linux"

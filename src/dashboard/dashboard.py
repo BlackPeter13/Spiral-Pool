@@ -4062,9 +4062,23 @@ def fetch_health_data():
             node_health["mempool_bytes"] = mempool.get("bytes", 0)
 
         # Get mining info for network hashrate
+        # Use difficulty-based formula (diff * 2^32 / block_time) rather than
+        # getmininginfo.networkhashps — the RPC estimate can be inflated on
+        # small networks (e.g. QBX reports ~400 TH/s when explorer shows ~140 TH/s).
         mining = coin_rpc(primary_coin, "getmininginfo")
-        if mining:
-            node_health["network_hashrate"] = mining.get("networkhashps", 0)
+        if mining and not node_health.get("network_hashrate"):
+            diff_val = node_health.get("difficulty", 0) or float(mining.get("difficulty", 0))
+            if diff_val > 0:
+                coin_block_times = {
+                    "DGB": 15, "BTC": 600, "BCH": 600, "BC2": 600,
+                    "LTC": 150, "DOGE": 60, "DGB-SCRYPT": 15,
+                    "PEP": 60, "CAT": 600,
+                    "NMC": 600, "SYS": 60, "XMY": 60, "FBTC": 30, "QBX": 150
+                }
+                bt = coin_block_times.get(primary_coin, 600)
+                node_health["network_hashrate"] = diff_val * (2**32) / bt
+            else:
+                node_health["network_hashrate"] = mining.get("networkhashps", 0)
 
         # Get network traffic stats via getnettotals
         net_totals = coin_rpc(primary_coin, "getnettotals")
@@ -13365,10 +13379,12 @@ def get_block_leaderboard():
 
         pool_blocks = resp.json()
 
-        # Count blocks per worker/miner
+        # Count blocks per worker (source field = worker name from stratum auth)
         leaderboard = {}
         for block in pool_blocks:
-            worker = block.get("worker", "") or block.get("miner", "unknown")
+            worker = block.get("source", "") or block.get("worker", "") or ""
+            if not worker:
+                continue
             if worker not in leaderboard:
                 miner_info = get_miner_info_by_worker(worker)
                 leaderboard[worker] = {
