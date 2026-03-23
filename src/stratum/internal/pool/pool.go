@@ -1127,9 +1127,40 @@ func (p *Pool) setupCallbacks() {
 	// This provides per-session TargetShareTime, MinDiff, MaxDiff based on miner class
 	// An ESP32 miner (lottery) gets 60s target, while S21 (pro) gets 2s target
 	p.stratumServer.SetMinerClassifiedHandler(func(sessionID uint64, profile stratum.MinerProfile) {
+		initialDiff := profile.InitialDiff
+		minDiff := profile.MinDiff
+		maxDiff := profile.MaxDiff
+		targetShareTime := float64(profile.TargetShareTime)
+
+		// When the Spiral Router cannot identify the miner (empty or unrecognized
+		// user-agent), fall back to the operator's YAML/env config values instead
+		// of overriding with the restrictive "unknown" profile (500/500/50000).
+		// This ensures ASICs that don't send a user-agent (e.g. some Antminer S19
+		// stock firmware) still get proper difficulty from the operator's config.
+		if profile.Class == stratum.MinerClassUnknown {
+			cfgDiff := p.cfg.Stratum.Difficulty
+			if cfgDiff.Initial > 0 {
+				initialDiff = cfgDiff.Initial
+			}
+			if cfgDiff.VarDiff.MinDiff > 0 {
+				minDiff = cfgDiff.VarDiff.MinDiff
+			}
+			if cfgDiff.VarDiff.MaxDiff > 0 {
+				maxDiff = cfgDiff.VarDiff.MaxDiff
+			}
+			if cfgDiff.VarDiff.TargetTime > 0 {
+				targetShareTime = cfgDiff.VarDiff.TargetTime
+			}
+			p.logger.Warnw("Miner class unknown — using operator config for vardiff (user-agent may be empty)",
+				"sessionId", sessionID,
+				"configInitialDiff", initialDiff,
+				"configMinDiff", minDiff,
+				"configMaxDiff", maxDiff,
+			)
+		}
+
 		// DEFENSIVE: Ensure MaxDiff is valid - if 0, something is wrong with profile lookup
 		// This prevents falling back to engine default (1 trillion) which causes runaway difficulty
-		maxDiff := profile.MaxDiff
 		if maxDiff <= 0 {
 			p.logger.Errorw("SAFEGUARD: Profile MaxDiff is zero or negative, using class default",
 				"sessionId", sessionID,
@@ -1171,19 +1202,19 @@ func (p *Pool) setupCallbacks() {
 
 		// Create new vardiff state with miner-specific settings
 		state := p.vardiffEngine.NewSessionStateWithProfile(
-			profile.InitialDiff,
-			profile.MinDiff,
+			initialDiff,
+			minDiff,
 			maxDiff,
-			float64(profile.TargetShareTime), // Convert int seconds to float64
+			targetShareTime,
 		)
 		p.sessionStates.Store(sessionID, state)
 		p.logger.Infow("VARDIFF configured with miner profile",
 			"sessionId", sessionID,
 			"class", profile.Class.String(),
-			"initialDiff", profile.InitialDiff,
-			"minDiff", profile.MinDiff,
+			"initialDiff", initialDiff,
+			"minDiff", minDiff,
 			"maxDiff", maxDiff,
-			"targetShareTime", profile.TargetShareTime,
+			"targetShareTime", targetShareTime,
 		)
 		// Update metrics for worker connection (miner is now fully authorized and classified)
 		if p.metricsServer != nil {

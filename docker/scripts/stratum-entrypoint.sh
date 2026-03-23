@@ -38,6 +38,16 @@ export REDIS_DEDUP_ADDR="${REDIS_DEDUP_ADDR:-}"
 export REDIS_DEDUP_PASSWORD="${REDIS_DEDUP_PASSWORD:-}"
 export DAEMON_ZMQ_ENABLED="${DAEMON_ZMQ_ENABLED:-true}"
 
+# Stratum difficulty defaults (overridable via .env)
+export STRATUM_DIFF_INITIAL="${STRATUM_DIFF_INITIAL:-5000}"
+export STRATUM_DIFF_MIN="${STRATUM_DIFF_MIN:-0.001}"
+export STRATUM_DIFF_MAX="${STRATUM_DIFF_MAX:-1000000000000}"
+export STRATUM_VARDIFF_TARGET_TIME="${STRATUM_VARDIFF_TARGET_TIME:-4}"
+
+# AsicBoost / Version Rolling (required for S19/Vnish firmware)
+export STRATUM_VERSION_ROLLING="${STRATUM_VERSION_ROLLING:-true}"
+export STRATUM_VERSION_ROLLING_MASK="${STRATUM_VERSION_ROLLING_MASK:-536862720}"
+
 # Validate required environment variables
 if [ -z "$POOL_COIN" ]; then
     echo "ERROR: POOL_COIN is required (e.g., bitcoin, litecoin, digibyte, bitcoincash, bitcoinii, dogecoin)"

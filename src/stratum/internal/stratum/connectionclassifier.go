@@ -324,19 +324,24 @@ func (cc *ConnectionClassifier) applyLevel2(ev *connectionEvidence) {
 	signals := append([]string(nil), ev.result.Signals...) // copy
 
 	// ── Timing anomaly ───────────────────────────────────────────────────────
-	if !ev.subscribeAt.IsZero() && !ev.authorizeAt.IsZero() {
+	// NOTE: On local networks (LAN), even physical ASICs (Antminer S19, etc.)
+	// can authorize in <5ms because there's no WAN latency. Only apply timing
+	// signals when Level 1 did NOT already identify the miner as a known ASIC
+	// class (i.e. minerClass is still Unknown). If Level 1 matched a known
+	// device via user-agent, timing evidence is redundant and misleading.
+	if !ev.subscribeAt.IsZero() && !ev.authorizeAt.IsZero() && ev.minerClass == MinerClassUnknown {
 		delay := ev.authorizeAt.Sub(ev.subscribeAt)
 		switch {
 		case delay < time.Duration(authDelayInstantMs)*time.Millisecond:
 			signals = append(signals, fmt.Sprintf(
-				"auth_delay=%v (<5ms: automated software, not firmware)",
+				"auth_delay=%v (<5ms: possible proxy or fast LAN ASIC)",
 				delay.Round(time.Microsecond)))
-			score += 0.40
+			score += 0.25 // Reduced from 0.40 — LAN ASICs routinely hit <5ms
 		case delay < time.Duration(authDelayFastMs)*time.Millisecond:
 			signals = append(signals, fmt.Sprintf(
-				"auth_delay=%v (<20ms: likely automated)",
+				"auth_delay=%v (<20ms: likely automated or fast LAN)",
 				delay.Round(time.Microsecond)))
-			score += 0.20
+			score += 0.15 // Reduced from 0.20
 		}
 	}
 
