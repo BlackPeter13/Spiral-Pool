@@ -2,6 +2,21 @@
 
 ---
 
+## Recommended Reading Order
+
+If you are new to Spiral Pool, read in this order:
+
+1. [README.md](../README.md) — Project overview, features, and quick start
+2. [WARNINGS.md](../WARNINGS.md) — Read before installing; specific hazard warnings
+3. [OPERATIONS.md](setup/OPERATIONS.md) — Installation, configuration, and day-to-day operations
+4. [CLOUD_OPERATIONS.md](setup/CLOUD_OPERATIONS.md) — Only if deploying on cloud/VPS
+5. [REFERENCE.md](reference/REFERENCE.md) — Ports, CLI commands, API endpoints (lookup reference)
+6. [ARCHITECTURE.md](architecture/ARCHITECTURE.md) — How it works under the hood
+
+Legal documents ([LICENSE](../LICENSE), [TERMS.md](../TERMS.md), [PRIVACY.md](../PRIVACY.md), [SECURITY.md](../SECURITY.md), [EXPORT.md](../EXPORT.md)) should be reviewed before production deployment.
+
+---
+
 ## Setup
 
 Getting started, installation, and deployment guides.
@@ -10,8 +25,8 @@ Getting started, installation, and deployment guides.
 |----------|-------------|
 | [OPERATIONS.md](setup/OPERATIONS.md) | Installation, configuration, monitoring, HA setup, upgrading, troubleshooting |
 | [CLOUD_OPERATIONS.md](setup/CLOUD_OPERATIONS.md) | Cloud/VPS deployment: dashboard SSH tunnel, firewall layout, SSH hardening, HTTPS options, provider-specific config |
-| [UPGRADE_GUIDE.md](setup/UPGRADE_GUIDE.md) | Upgrading to v1.1.2 (Phi Forge): compatibility, all coin types, step-by-step |
-| [DOCKER_GUIDE.md](setup/DOCKER_GUIDE.md) | Docker & WSL2 deployment guide (V1 single-coin mode) |
+| [UPGRADE_GUIDE.md](setup/UPGRADE_GUIDE.md) | Upgrading to v1.2.0 (Convergent Spiral): compatibility, all coin types, step-by-step |
+| [DOCKER_GUIDE.md](setup/DOCKER_GUIDE.md) | Docker & WSL2 deployment guide (V1 single-coin and multi-coin mode) |
 
 ## Architecture
 
@@ -62,4 +77,4 @@ Legal documents are in the repository root:
 
 ---
 
-*Spiral Pool -- Phi Forge 1.1.2*
+*Spiral Pool -- Convergent Spiral 1.2.0*

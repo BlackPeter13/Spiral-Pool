@@ -7,6 +7,149 @@ Versioning follows `MAJOR.MINOR.PATCH` — patch releases are applied in-place o
 
 ---
 
+## [1.2.0] — 2026-03-23 - Convergent Spiral
+
+> *One pool. Every coin. No limits.*
+
+### Added
+
+**Docker Multi-Coin Support**
+- New `POOL_MODE=multi` for running multiple coins in a single Docker deployment
+- `--profile multi` launches all enabled coin daemons and shared services
+- Per-coin `ENABLE_<COIN>=true` flags and `<COIN>_POOL_ADDRESS` wallet addresses in `.env`
+- V2 config generation in entrypoint: programmatic YAML output matching install.sh's multi-coin format
+- All 14 supported coins available: DGB, BTC, BCH, BC2, NMC, SYS, XMY, FBTC, QBX, LTC, DOGE, DGB-SCRYPT, PEP, CAT
+
+**Docker Merge Mining**
+- Merge mining now supported in Docker multi-coin mode
+- SHA-256d: BTC+NMC, BTC+FBTC, BTC+SYS, BTC+XMY (or DGB as parent if BTC disabled)
+- Scrypt: LTC+DOGE, LTC+PEP
+- Configured via `MERGE_MINING_ENABLED`, `MERGE_MINING_ALGO`, `MERGE_MINING_AUX_CHAINS_SHA256D`, `MERGE_MINING_AUX_CHAINS_SCRYPT`
+
+**Docker Stratum V2 (Noise Protocol Encryption)**
+- V2 Enhanced Stratum now available in Docker via `STRATUM_V2_ENABLED=true` in `.env`
+- Uses `Noise_NX_secp256k1_ChaChaPoly_SHA256` — ephemeral keys generated in memory at startup
+- No certificate files, no key management — zero-config encryption
+- Works in both single-coin and multi-coin Docker modes
+- Each coin gets a dedicated V2 port (V1 port + 1, e.g. DGB: 3334, BTC: 4334)
+- Docker is now at full feature parity with native install for single-node deployments
+
+**Dashboard Statistics Chart Grid**
+- New 2×2 chart grid showing Pool Hashrate, Network Hashrate, Difficulty, and Workers & Miners — each with a current value and time-series chart
+- Shared time-range dropdown selector: 15M, 1H, 6H, 12H, 24H, 7D, 30D
+- Chart colors are fully theme-aware — each of the 23 built-in themes defines its own chart palette via `chart-pool-hashrate`, `chart-network-hashrate`, `chart-difficulty`, `chart-workers` color keys
+- Chart colors customizable in the Custom Theme Editor (4 new color pickers: Pool HR, Net HR, Difficulty, Workers)
+- Pool Hashrate stat card restored to the stats overview row (first position)
+
+**Activity & Top Block Finders Section**
+- Activity Feed and Top Block Finders now displayed side-by-side in a 2-column layout (stacks on mobile)
+- Top Block Finders moved out of the Health section into its own dedicated panel
+- Leaderboard now consolidates workers that map to the same device — e.g. `HashForge` and `HashForge.worker1` are merged into a single entry with combined block count and rewards
+
+**V1.2 Convergent Spiral Codename Theme**
+- New release codename theme with its own distinct palette — deeper charcoal backgrounds, brighter gold convergence points, stronger amethyst purple accents
+- Each major release now has its own codename theme in the selector: V1.0 Black Ice, V1.1 Phi Forge, V1.2 Convergent Spiral
+
+**Network Hashrate Tracking**
+- Backend now records `network_difficulty` and `network_hashrate` to historical data for the statistics chart grid
+- `/api/pool/history` response includes `network_difficulty` and `network_hashrate` arrays
+- `/api/miners` response includes `network_hashrate` for live dashboard updates
+
+### Fixed
+
+**Network Hashrate Accuracy**
+- All three network hashrate code paths (statistics charts, node health card, multi-node health) now prefer the node's `getnetworkhashps` RPC value over the theoretical formula (`difficulty × 2³² / block_time`)
+- The RPC value uses a moving average over recent blocks and reflects actual network performance, rather than assuming blocks arrive exactly at the target rate
+- Background polling loop now fetches and caches `getnetworkhashps` from the coin node each cycle
+
+**Miner Dashboard String-to-Number Crash**
+- `'>' not supported between instances of 'str' and 'int'` when adding stock Antminer to dashboard — CGMiner API returns numeric values as strings
+- Added `_safe_num()` helper for safe string-to-number conversion across all 11 miner fetch functions: `fetch_antminer`, `fetch_braiins`, `fetch_vnish`, `fetch_luxos`, `fetch_epic_http`, `fetch_axeos`, `fetch_esp32miner`, `fetch_avalon`, `fetch_whatsminer`, `fetch_innosilicon`, `fetch_goldshell`
+- Innosilicon firmware confirmed highest risk — returns string-encoded values for power, fan speed, temperature, and error codes
+
+**Backup ACL Inheritance**
+- New backup files created by cron were not inheriting read permissions for the pool user
+- Added default ACL (`setfacl -R -d -m`) in `install.sh` so new files automatically inherit the correct permissions
+
+**Sentinel Backup Status Display**
+- Removed `du -sh` size check from backup report section — fails with "Permission denied" when pool user lacks recursive read on `/spiralpool/backups/`
+- Now displays snapshot count only (`💾 Snapshots: 2`) instead of erroring with a `setfacl` hint
+
+**Theme Mojibake**
+- Fixed double-encoded UTF-8 em dashes in `black-ice.json` (name, description) and `bitcoin-laser.json` (description, customCSS) — displayed as garbled `â€"` characters
+
+**Spiral Router — User-Agent Pattern Cleanup**
+- Removed ~70% of miner detection patterns that were dead code — matched hardware model names (e.g. "Antminer S19", "Avalon Nano 3S") that manufacturers never include in stratum user-agent strings
+- All remaining patterns verified against firmware source code (ESP-Miner, cgminer, bmminer, NerdMiner, etc.)
+- `cgminer` and `bfgminer` reclassified from `MinerClassMid` to `MinerClassUnknown` — these generic mining clients span a 45,000× hashrate range (GekkoScience 2 TH/s to Avalon A16XP 300 TH/s); vardiff now handles classification, and Sentinel's DeviceHints provides model-specific difficulty for known devices
+- Pattern count reduced from ~280 to 47 verified patterns; all 15 SHA-256d and 8 Scrypt difficulty profiles unchanged
+
+**Scrypt Miner Test Accuracy**
+- Removed SHA-256d-only miners from Scrypt test suite: `bmminer` (SHA-256d only per bitmaintech/bmminer-mix), `btminer` (MicroBT makes no Scrypt miners), `Braiins OS` (SHA-256d only, no L-series support), `sgminer` (GPU — not supported), NerdMiner/ESP32/BitAxe/NerdQAxe (BM-series SHA-256d ASICs)
+- Antminer L-series (L3+, L7, L9) correctly identified as sending `cgminer/X.X.X` (per bitmaintech/cgminer-ltc), not `bmminer`
+- Algorithm switch test updated to use `cgminer/4.10.1` (real Scrypt firmware UA) instead of `bmminer/2.0.0`
+
+**Sentinel Network Hashrate**
+- Sentinel `fetch_network_stats()` QBX section now calls `getnetworkhashps` RPC first, falling back to pool API and formula methods
+
+**Wood Paneling Theme**
+- Complete palette rework — replaced all-amber/gold colors with walnut browns, copper/burnt sienna accents, cream text, and forest green status indicators
+
+**Avalon Restart Button**
+- Avalon/Canaan devices showed a "Restart" button that always failed — Avalon firmware does not support the CGMiner `restart` command
+- Miner card now shows "⚙ Configure" which opens the Avalon web UI in a new tab; detail modal hides the restart button entirely for Avalon devices
+- Removed `avalon` from the CGMiner restart code path in the backend
+
+**Block Celebration Stale Alert**
+- Block celebration (confetti/audio) fired for blocks found hours ago after a page reload or service restart — `sessionStorage` block count was stale
+- Celebrations now only fire for blocks found within the last 5 minutes; older blocks silently update the counter
+
+**Pool Hashrate Farm Fallback**
+- Pool Hashrate stat card was falling back to farm hashrate (self-reported by miner devices) when the stratum reported 0 — displayed wildly inaccurate numbers (e.g. 32 TH/s when actual pool hashrate was 0)
+- Removed farm hashrate fallback; pool hashrate now shows stratum-reported value only
+
+**Miners Connected Stat Card**
+- "Miners Online" stat card showed a confusing `X / Y` mixing stratum-connected miners with fleet device count, making it look like devices were mining on the pool when they weren't
+- Renamed to "Miners Connected" showing only stratum-connected count; fleet device count and average temperature shown as subtitle
+
+**RPC Credential Loading**
+- `coin_rpc()` silently returned `None` when RPC credentials were not loaded into `MULTI_COIN_NODES` — `load_multi_coin_config()` loads ports and enabled status but not credentials
+- `coin_rpc()` now reads credentials directly from the coin's daemon conf file (e.g. `/spiralpool/qbx/qbitx.conf`) as a fallback when credentials are missing
+
+**Network Hashrate History Recording**
+- `record_historical_data()` was using the formula (`difficulty × 2³² / block_time`) instead of `_compute_network_hashrate()` which prefers the accurate RPC value — chart history oscillated wildly on coins with fast block times
+- Now uses `_compute_network_hashrate()` for consistent RPC-backed values in both live display and chart history
+
+**Codename Theme Switching**
+- V1.2 Convergent Spiral theme was missing from the `themeColors` JavaScript object — selecting it cleared the previous theme's customCSS but applied no new colors until the API fetch completed, making the theme appear broken
+- `phi-forge.json` was incorrectly overwritten with Convergent Spiral data — the V1.1 Phi Forge codename theme was lost
+- Restored `phi-forge.json` as V1.1 Phi Forge; created `convergent-spiral.json` as V1.2 Convergent Spiral with its own distinct palette (deeper backgrounds, brighter gold convergence, stronger purple)
+- Both codename themes now have instant-switch entries in `themeColors` alongside V1.0 Black Ice
+
+**Version String Consistency**
+- 21 stale `1.2` references (missing `.0` patch) found and fixed across 19 files — script variables, Docker labels, display banners, and documentation taglines now all read `1.2.0`
+- Affected: `install.sh` (3), `docker/Dockerfile`, `scripts/spiralctl.sh`, `scripts/linux/blockchain-export.sh`, `scripts/linux/blockchain-restore.sh`, `scripts/linux/ha-replicate.sh`, `scripts/linux/ha-setup-ssh.sh`, `scripts/linux/update-checker.sh`, `install-windows.ps1`, `dashboard.py`, `dashboard.html`, `upgrade.sh`, `SpiralSentinel.py` (2), `UPGRADE_GUIDE.md` (4), `README.md` (2), and 9 documentation taglines
+
+### Changed
+
+- Dashboard statistics chart period selector changed from button group to dropdown, added 15M and 12H periods
+- Added `--chart-pool-hashrate`, `--chart-network-hashrate`, `--chart-difficulty`, `--chart-workers` CSS variable defaults and theme-overridable color keys across all themes
+- Responsive rules for statistics chart grid, period dropdown, and activity/leaderboard split layout
+- Mobile CSS improvements: statistics chart grid, activity feed, and leaderboard panels now properly sized and readable on mobile and small phones
+- All version strings bumped to semver `1.2.0` — variables, labels, banners, and documentation taglines across all scripts, Docker, dashboard, Sentinel, and docs
+- MOTD command grid column padding widened (24→26 chars) to fix `spiralctl chain export/restore` alignment
+- All coin daemon containers now include `"multi"` profile in docker-compose.yml
+- Updated docker-compose.yml header to document both single-coin and multi-coin usage
+- Removed "Docker limitations" block from docker-compose.yml — multi-coin and merge mining are no longer unsupported
+- `POOL_COIN`, `POOL_ID`, `POOL_ADDRESS` no longer required in Docker — defaults to empty for multi-coin mode
+- `.env.example` expanded with full multi-coin configuration section (per-coin enable flags, wallet addresses, merge mining settings)
+- Dockerfile description updated from "Single-Coin Mode" to "Single + Multi-Coin Mode"
+- `config.docker.template` comments clarified as single-coin only; multi-coin mode generates config programmatically
+- Coin daemon config templates (Fractal, Myriadcoin, Namecoin) updated to reference Docker multi-coin mode availability
+- `stratum-entrypoint.sh` now branches on `POOL_MODE` with mode-aware validation (single requires `POOL_COIN`/`POOL_ADDRESS`; multi validates at least one coin enabled)
+
+---
+
 ## [1.1.2] — 2026-03-22 — Phi Forge
 
 > *When the miner speaks, the pool listens.*

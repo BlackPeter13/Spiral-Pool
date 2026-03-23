@@ -1,0 +1,56 @@
+{
+  "name": "V1.2.0 — Convergent Spiral",
+  "id": "convergent-spiral",
+  "author": "Spiral Pool",
+  "version": "1.2.0",
+  "description": "Evolution of Phi Forge — deeper purples, brighter gold convergence points, spiral energy",
+  "category": "Codename",
+  "colors": {
+    "bg-primary": "#08070c",
+    "bg-secondary": "#100e18",
+    "bg-card": "#181520",
+    "bg-card-hover": "#201c2a",
+    "neon-blue": "#c89818",
+    "neon-cyan": "#e8c840",
+    "neon-purple": "#9070d0",
+    "neon-pink": "#d07838",
+    "neon-orange": "#f09828",
+    "neon-yellow": "#ffe030",
+    "neon-green": "#50b050",
+    "neon-red": "#e04848",
+    "text-primary": "#f0eade",
+    "text-secondary": "#a09878",
+    "text-muted": "#585048",
+    "status-online": "#50b050",
+    "status-offline": "#e04848",
+    "status-warning": "#ffe030",
+    "border-primary": "rgba(200, 152, 24, 0.20)",
+    "border-accent": "rgba(144, 112, 208, 0.22)",
+    "chart-pool-hashrate": "#f09828",
+    "chart-network-hashrate": "#c89818",
+    "chart-difficulty": "#9070d0",
+    "chart-workers": "#50b050"
+  },
+  "gradients": {
+    "primary": "linear-gradient(137.5deg, #c89818 0%, #ffe030 61.8%)",
+    "secondary": "linear-gradient(137.5deg, #9070d0 0%, #7050b0 61.8%)",
+    "accent": "linear-gradient(137.5deg, #f09828 0%, #ffe030 100%)",
+    "card": "linear-gradient(180deg, rgba(24, 21, 32, 0.95) 0%, rgba(16, 14, 24, 1) 100%)"
+  },
+  "fonts": {
+    "display": "'Cinzel', serif",
+    "body": "'Inter', sans-serif",
+    "mono": "'Fira Code', monospace"
+  },
+  "effects": {
+    "glowIntensity": 0.22,
+    "animationSpeed": 1.0,
+    "borderRadius": "10px",
+    "useGlitchEffect": false,
+    "useParticles": true,
+    "useScanLines": false,
+    "useNeonGlow": true,
+    "backgroundStyle": "none"
+  },
+  "customCSS": "/* Convergent Spiral — Where Phi Meets Infinity */\n@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Inter:wght@300;400;500;600&family=Fira+Code&display=swap');\n\n.cyber-glow {\n  background:\n    radial-gradient(ellipse 610px 377px at 38.2% 0%, rgba(200, 152, 24, 0.12), transparent),\n    radial-gradient(ellipse 377px 233px at 61.8% 100%, rgba(144, 112, 208, 0.08), transparent);\n}\n\n.cyber-particles { opacity: 0.3; }\n\n.stat-card {\n  border: 1px solid rgba(200, 152, 24, 0.14);\n  backdrop-filter: blur(10px);\n  background: rgba(24, 21, 32, 0.88);\n}\n\n.stat-card::before {\n  background: linear-gradient(137.5deg, #c89818, #ffe030, #9070d0);\n  height: 2px;\n}\n\n.stat-card:hover {\n  border-color: rgba(200, 152, 24, 0.35);\n  box-shadow: 0 4px 28px rgba(200, 152, 24, 0.15);\n}\n\n.stat-value {\n  text-shadow: 0 0 18px rgba(200, 152, 24, 0.45);\n}\n\n.celebration-title {\n  background: linear-gradient(137.5deg, #c89818, #ffe030, #9070d0);\n  -webkit-background-clip: text;\n  -webkit-text-fill-color: transparent;\n  background-clip: text;\n  text-shadow: none;\n  filter: drop-shadow(0 0 20px rgba(200, 152, 24, 0.4));\n}\n\n.miner-card, .health-card, .lifetime-card {\n  border: 1px solid rgba(200, 152, 24, 0.10);\n  background: rgba(24, 21, 32, 0.75);\n}\n\n.miner-card:hover {\n  border-color: rgba(144, 112, 208, 0.25);\n}\n\n.logo {\n  color: #c89818;\n  text-shadow: 0 0 20px rgba(200, 152, 24, 0.4);\n}"
+}

@@ -374,7 +374,7 @@ var ScryptProfiles = map[MinerClass]MinerProfile{
 	MinerClassUnknown: {
 		Class:           MinerClassUnknown,
 		InitialDiff:     8000,    // Conservative default (~52 MH/s at 10s)
-		MinDiff:         128,     // Floor for GPU miners (~838 KH/s at 10s)
+		MinDiff:         128,     // Floor for low-power miners (~838 KH/s at 10s)
 		MaxDiff:         2048000, // Ceiling for ASICs (~13.4 GH/s at 10s)
 		TargetShareTime: 10,
 	},
@@ -382,7 +382,7 @@ var ScryptProfiles = map[MinerClass]MinerProfile{
 		Class:           MinerClassLottery,
 		InitialDiff:     0.1,    // CPU mining at ~109 H/s
 		MinDiff:         0.001,  // ESP32 at ~1 H/s
-		MaxDiff:         16,     // GPU at ~17.5 KH/s
+		MaxDiff:         16,     // Lottery ceiling at ~17.5 KH/s
 		TargetShareTime: 60,
 	},
 	MinerClassLow: {
@@ -610,553 +610,138 @@ func NewSpiralRouterWithBlockTime(blockTimeSec int) *SpiralRouter {
 		name    string
 	}{
 		// ========================================================================
-		// AVALON/CANAAN MINERS - EXHAUSTIVE DETECTION
+		// MINER USER-AGENT PATTERNS
 		// ========================================================================
-		// CRITICAL: All Avalon patterns must be checked BEFORE lottery patterns
-		// because "AvalonMiner" contains "miner" which could match lottery patterns.
+		// Source verification key:
+		//   CONFIRMED = verified in manufacturer's GitHub source code
+		//   HIGH      = confirmed via pyasic, test fixtures, or multiple pool codebases
+		//   MEDIUM    = confirmed in 1-2 secondary sources
 		//
-		// Pattern ordering is critical:
-		//   1. Most specific model numbers first (e.g., A1566, 1246)
-		//   2. Series patterns next (e.g., A15, 12xx)
-		//   3. Generic fallbacks last (e.g., "avalon", "canaan")
+		// IMPORTANT: Many miners share generic firmware user-agents:
+		//   - ALL Avalon/Canaan → "cgminer/4.x.x" (ckolivas/cgminer)
+		//   - ALL Bitmain/Antminer → "bmminer/X.X.X" (bitmaintech/bmminer-mix)
+		//   - ALL MicroBT/Whatsminer → "btminer/X.X.X" (pyasic)
+		//   - ALL BitAxe/ESP-Miner → "bitaxe/{ASIC}/{ver}" (bitaxeorg/ESP-Miner)
+		//   - GekkoScience → "cgminer/4.13.x" (GekkoScience/cgminer)
+		//   - FutureBit Apollo → "bfgminer/5.4.0" (luke-jr/bfgminer)
 		//
-		// Each pattern maps to a specific Avalon class for accurate difficulty.
-		// NO Avalon device should fall through to generic handling.
+		// For specific model identification (NMAxe vs BitAxe Ultra, Antminer S9 vs S21,
+		// Avalon Nano 3S vs A16XP), use DeviceHints (IP-based HTTP API discovery).
+		// See devicehints.go and SpiralSentinel for model-level classification.
 
 		// ----------------------------------------------------------------
-		// AVALON HOME SERIES (Consumer products with WiFi/App support)
-		// Avalon Mini 3: 37.5 TH/s @ 800W - Silent home miner
-		// Avalon Q: 90 TH/s @ 1674W - High-performance home miner
+		// TIER 1: CONFIRMED — verified in manufacturer source code
 		// ----------------------------------------------------------------
-		{`(?i)avalon.*mini.*3`, MinerClassAvalonHome, "Avalon Mini 3"},
-		{`(?i)canaan.*mini.*3`, MinerClassAvalonHome, "Canaan Mini 3"},
-		{`(?i)mini.*3.*avalon`, MinerClassAvalonHome, "Mini 3 (Avalon)"},
-		{`(?i)avalon[^a-z]*q\b`, MinerClassAvalonHome, "Avalon Q"},
-		{`(?i)canaan[^a-z]*q\b`, MinerClassAvalonHome, "Canaan Q"},
-		{`(?i)avalon.*home`, MinerClassAvalonHome, "Avalon Home"},
-		{`(?i)canaan.*home`, MinerClassAvalonHome, "Canaan Home"},
 
-		// ----------------------------------------------------------------
-		// AVALON NANO SERIES (Consumer USB/WiFi miners)
-		// Nano 2: ~3 TH/s, Nano 3: ~4 TH/s, Nano 3S: ~6 TH/s
-		// These use cgminer firmware and may report minimal user-agent.
-		// ----------------------------------------------------------------
-		{`(?i)avalon.*nano.*3s`, MinerClassAvalonNano, "Avalon Nano 3S"},
-		{`(?i)canaan.*nano.*3s`, MinerClassAvalonNano, "Canaan Nano 3S"}, // MUST be before nano.*3s
-		{`(?i)nano.*3s`, MinerClassAvalonNano, "Nano 3S"},
-		{`(?i)avalon.*nano.*3\b`, MinerClassAvalonNano, "Avalon Nano 3"},
-		{`(?i)canaan.*nano.*3\b`, MinerClassAvalonNano, "Canaan Nano 3"}, // MUST be before canaan.*nano
-		{`(?i)avalon.*nano.*2`, MinerClassAvalonNano, "Avalon Nano 2"},
-		{`(?i)avalon.*nano`, MinerClassAvalonNano, "Avalon Nano"},
-		{`(?i)canaan.*nano`, MinerClassAvalonNano, "Canaan Nano"},
-		{`(?i)nano.*avalon`, MinerClassAvalonNano, "Nano (Avalon)"},
-		// Nano 3 may report simply as "Avalon 3" - must distinguish from Avalon 3 (legacy)
-		// Check for context clues: "nano" anywhere, or small power indicators
-		{`(?i)nano[^a-z]*3`, MinerClassAvalonNano, "Nano 3"},
+		// NerdMiner V2: ESP32 lottery miner, ~78 KH/s
+		// Source: BitMaker-hub/NerdMiner_v2 — sends "NerdMinerV2/{version}" [CONFIRMED]
+		{`(?i)nerdminerv2`, MinerClassLottery, "NerdMiner V2"},
 
-		// ----------------------------------------------------------------
-		// AVALON PRO (A14, A15, A16 Series - Latest generation)
-		// A1466: 150-170 TH/s, A1566: 185 TH/s, A16: 282 TH/s, A16XP: 300 TH/s
-		// A15Pro: 215 TH/s, A15XP: 200-212 TH/s, A15: 188-203 TH/s, A15SE: 170-185 TH/s
-		// ----------------------------------------------------------------
-		// A16 series (newest gen, check BEFORE A15)
-		{`(?i)a16\s*xp`, MinerClassAvalonPro, "Avalon A16XP"},             // 300 TH/s
-		{`(?i)avalon.*a16`, MinerClassAvalonPro, "Avalon A16"},             // 282 TH/s
-		// A15 variants (specific models first)
-		{`(?i)a15\s*pro`, MinerClassAvalonPro, "Avalon A15Pro"},
-		{`(?i)a15\s*xp`, MinerClassAvalonPro, "Avalon A15XP"},
-		{`(?i)a15\s*se`, MinerClassAvalonPro, "Avalon A15SE"},
-		{`(?i)avalonminer.*1566`, MinerClassAvalonPro, "AvalonMiner A1566"},
-		{`(?i)avalon.*a?1566`, MinerClassAvalonPro, "Avalon A1566"},
-		{`(?i)avalon.*a15`, MinerClassAvalonPro, "Avalon A15"},
-		// A14 series
-		{`(?i)avalonminer.*1466`, MinerClassAvalonPro, "AvalonMiner A1466"},
-		{`(?i)avalon.*a?1466`, MinerClassAvalonPro, "Avalon A1466"},
-		{`(?i)avalon.*a14`, MinerClassAvalonPro, "Avalon A14"},
-		// Generic 14xx/15xx/16xx series patterns
-		{`(?i)avalonminer.*16[0-9]{2}`, MinerClassAvalonPro, "AvalonMiner 16xx"},
-		{`(?i)avalonminer.*15[0-9]{2}`, MinerClassAvalonPro, "AvalonMiner 15xx"},
-		{`(?i)avalonminer.*14[0-9]{2}`, MinerClassAvalonPro, "AvalonMiner 14xx"},
-		{`(?i)avalon.*16[0-9]{2}`, MinerClassAvalonPro, "Avalon 16xx"},
-		{`(?i)avalon.*15[0-9]{2}`, MinerClassAvalonPro, "Avalon 15xx"},
-		{`(?i)avalon.*14[0-9]{2}`, MinerClassAvalonPro, "Avalon 14xx"},
+		// HAN_SOLOminer: ESP32 lottery miner firmware variant
+		// Source: valerio-vaccaro/HAN_SOLOminer [CONFIRMED]
+		{`(?i)han.?solo`, MinerClassLottery, "HAN_SOLOminer"},
 
-		// ----------------------------------------------------------------
-		// AVALON HIGH (A12, A13 Series - Modern datacenter ASICs)
-		// A1246: 85-96 TH/s, A1346: 104-126 TH/s, A1366: 130 TH/s
-		// ----------------------------------------------------------------
-		// A13 series (specific models)
-		{`(?i)avalonminer.*1366`, MinerClassAvalonHigh, "AvalonMiner A1366"},
-		{`(?i)avalonminer.*1346`, MinerClassAvalonHigh, "AvalonMiner A1346"},
-		{`(?i)avalon.*a?1366`, MinerClassAvalonHigh, "Avalon A1366"},
-		{`(?i)avalon.*a?1346`, MinerClassAvalonHigh, "Avalon A1346"},
-		{`(?i)avalon.*a13`, MinerClassAvalonHigh, "Avalon A13"},
-		// A12 series (specific models)
-		{`(?i)avalonminer.*1246`, MinerClassAvalonHigh, "AvalonMiner A1246"},
-		{`(?i)avalon.*a?1246`, MinerClassAvalonHigh, "Avalon A1246"},
-		{`(?i)avalon.*a12`, MinerClassAvalonHigh, "Avalon A12"},
-		// Generic 12xx/13xx series patterns
-		{`(?i)avalonminer.*13[0-9]{2}`, MinerClassAvalonHigh, "AvalonMiner 13xx"},
-		{`(?i)avalonminer.*12[0-9]{2}`, MinerClassAvalonHigh, "AvalonMiner 12xx"},
-		{`(?i)avalon.*13[0-9]{2}`, MinerClassAvalonHigh, "Avalon 13xx"},
-		{`(?i)avalon.*12[0-9]{2}`, MinerClassAvalonHigh, "Avalon 12xx"},
+		// NerdQAxe++: 4x BM1370, ~5 TH/s — sends "NerdQAxe++/BM1370/{ver}"
+		// Source: WantClue/ESP-Miner-NerdQAxePlus [CONFIRMED]
+		// MUST be before generic nerdq?axe pattern
+		{`(?i)nerdqaxe\+\+`, MinerClassMid, "NerdQAxe++"},
 
-		// ----------------------------------------------------------------
-		// AVALON MID (A9, A10, A11 Series - Third-generation datacenter)
-		// A911/921: 18-20 TH/s, A1026/1047/1066: 30-50 TH/s
-		// A1126/1146/1166: 64-81 TH/s
-		// ----------------------------------------------------------------
-		// A11 series (specific models)
-		{`(?i)avalonminer.*1166`, MinerClassAvalonMid, "AvalonMiner 1166"},
-		{`(?i)avalonminer.*1146`, MinerClassAvalonMid, "AvalonMiner 1146"},
-		{`(?i)avalonminer.*1126`, MinerClassAvalonMid, "AvalonMiner 1126"},
-		{`(?i)avalon.*1166`, MinerClassAvalonMid, "Avalon 1166"},
-		{`(?i)avalon.*1146`, MinerClassAvalonMid, "Avalon 1146"},
-		{`(?i)avalon.*1126`, MinerClassAvalonMid, "Avalon 1126"},
-		// A10 series (specific models)
-		{`(?i)avalonminer.*1066`, MinerClassAvalonMid, "AvalonMiner 1066"},
-		{`(?i)avalonminer.*1047`, MinerClassAvalonMid, "AvalonMiner 1047"},
-		{`(?i)avalonminer.*1026`, MinerClassAvalonMid, "AvalonMiner 1026"},
-		{`(?i)avalon.*1066`, MinerClassAvalonMid, "Avalon 1066"},
-		{`(?i)avalon.*1047`, MinerClassAvalonMid, "Avalon 1047"},
-		{`(?i)avalon.*1026`, MinerClassAvalonMid, "Avalon 1026"},
-		// A9 series (specific models)
-		{`(?i)avalonminer.*921`, MinerClassAvalonMid, "AvalonMiner 921"},
-		{`(?i)avalonminer.*911`, MinerClassAvalonMid, "AvalonMiner 911"},
-		{`(?i)avalon.*921`, MinerClassAvalonMid, "Avalon 921"},
-		{`(?i)avalon.*911`, MinerClassAvalonMid, "Avalon 911"},
-		// Generic 9xx/10xx/11xx series patterns
-		{`(?i)avalonminer.*11[0-9]{2}`, MinerClassAvalonMid, "AvalonMiner 11xx"},
-		{`(?i)avalonminer.*10[0-9]{2}`, MinerClassAvalonMid, "AvalonMiner 10xx"},
-		{`(?i)avalonminer.*9[0-9]{2}`, MinerClassAvalonMid, "AvalonMiner 9xx"},
-		{`(?i)avalon.*11[0-9]{2}`, MinerClassAvalonMid, "Avalon 11xx"},
-		{`(?i)avalon.*10[0-9]{2}`, MinerClassAvalonMid, "Avalon 10xx"},
-		{`(?i)avalon.*9[0-9]{2}`, MinerClassAvalonMid, "Avalon 9xx"},
-
-		// ----------------------------------------------------------------
-		// AVALON LEGACY MID (A7, A8 Series - Second-generation)
-		// A721/741/761: 6-8 TH/s, A821/841/851: 11-15 TH/s
-		// ----------------------------------------------------------------
-		// A8 series (specific models)
-		{`(?i)avalonminer.*851`, MinerClassAvalonLegacyMid, "AvalonMiner 851"},
-		{`(?i)avalonminer.*841`, MinerClassAvalonLegacyMid, "AvalonMiner 841"},
-		{`(?i)avalonminer.*821`, MinerClassAvalonLegacyMid, "AvalonMiner 821"},
-		{`(?i)avalon.*851`, MinerClassAvalonLegacyMid, "Avalon 851"},
-		{`(?i)avalon.*841`, MinerClassAvalonLegacyMid, "Avalon 841"},
-		{`(?i)avalon.*821`, MinerClassAvalonLegacyMid, "Avalon 821"},
-		// A7 series (specific models)
-		{`(?i)avalonminer.*761`, MinerClassAvalonLegacyMid, "AvalonMiner 761"},
-		{`(?i)avalonminer.*741`, MinerClassAvalonLegacyMid, "AvalonMiner 741"},
-		{`(?i)avalonminer.*721`, MinerClassAvalonLegacyMid, "AvalonMiner 721"},
-		{`(?i)avalon.*761`, MinerClassAvalonLegacyMid, "Avalon 761"},
-		{`(?i)avalon.*741`, MinerClassAvalonLegacyMid, "Avalon 741"},
-		{`(?i)avalon.*721`, MinerClassAvalonLegacyMid, "Avalon 721"},
-		// Generic 7xx/8xx series patterns
-		{`(?i)avalonminer.*8[0-9]{2}`, MinerClassAvalonLegacyMid, "AvalonMiner 8xx"},
-		{`(?i)avalonminer.*7[0-9]{2}`, MinerClassAvalonLegacyMid, "AvalonMiner 7xx"},
-		{`(?i)avalon.*8[0-9]{2}`, MinerClassAvalonLegacyMid, "Avalon 8xx"},
-		{`(?i)avalon.*7[0-9]{2}`, MinerClassAvalonLegacyMid, "Avalon 7xx"},
-
-		// ----------------------------------------------------------------
-		// AVALON LEGACY LOW (A3, A6 Series - First-generation)
-		// A3/3S: 0.8-1 TH/s, A6/621/641: 3.5 TH/s
-		// NOTE: "Avalon 3" without "Nano" context = legacy Avalon 3, NOT Nano 3
-		// ----------------------------------------------------------------
-		// A6 series (specific models)
-		{`(?i)avalonminer.*641`, MinerClassAvalonLegacyLow, "AvalonMiner 641"},
-		{`(?i)avalonminer.*621`, MinerClassAvalonLegacyLow, "AvalonMiner 621"},
-		{`(?i)avalon.*641`, MinerClassAvalonLegacyLow, "Avalon 641"},
-		{`(?i)avalon.*621`, MinerClassAvalonLegacyLow, "Avalon 621"},
-		{`(?i)avalon[^a-z]*6\b`, MinerClassAvalonLegacyLow, "Avalon 6"},
-		// A3 series - CAREFUL: Must not match "Nano 3" or "Mini 3"
-		// Only match if NOT preceded by "nano" or "mini"
-		{`(?i)avalonminer.*3s?\b`, MinerClassAvalonLegacyLow, "AvalonMiner 3/3S"},
-		{`(?i)avalon[^a-z]*3s\b`, MinerClassAvalonLegacyLow, "Avalon 3S"},
-		// Generic 6xx series pattern
-		{`(?i)avalonminer.*6[0-9]{2}`, MinerClassAvalonLegacyLow, "AvalonMiner 6xx"},
-		{`(?i)avalon.*6[0-9]{2}`, MinerClassAvalonLegacyLow, "Avalon 6xx"},
-
-		// ----------------------------------------------------------------
-		// AVALON GENERIC FALLBACKS
-		// These catch any Avalon/Canaan device not matched by specific patterns.
-		// Uses MinerClassAvalonMid as safe default (MaxDiff 25000 provides headroom).
-		// ----------------------------------------------------------------
-		{`(?i)avalonminer`, MinerClassAvalonMid, "AvalonMiner (generic)"},
-		{`(?i)avalon\s*miner`, MinerClassAvalonMid, "Avalon Miner (generic)"},
-		{`(?i)avalon`, MinerClassAvalonMid, "Avalon (generic)"},
-		{`(?i)canaan`, MinerClassAvalonMid, "Canaan (generic)"},
-
-		// ========================================================================
-		// NON-AVALON MINERS
-		// ========================================================================
-
-		// Lottery miners (ESP32-based, very low hashrate)
-		// NerdMinerV2 specific — must come BEFORE generic nerdminer catch-all
-		{`(?i)nerdminerv2`, MinerClassLottery, "NerdMiner"},
-		{`(?i)nerdminer`, MinerClassLottery, "ESP32 Miner"},
-		{`(?i)han.?solo`, MinerClassLottery, "ESP32 Miner"},  // HAN_SOLOminer firmware variant
-		{`(?i)^nminer`, MinerClassLottery, "NMiner"},  // ^ anchor to avoid matching AvalonMiner
-		{`(?i)\bnminer`, MinerClassLottery, "NMiner"}, // Word boundary version
-		{`(?i)bitmaker`, MinerClassLottery, "BitMaker"},
-		{`(?i)nerd.*esp`, MinerClassLottery, "NerdESP"},
-		{`(?i)lottery`, MinerClassLottery, "LotteryMiner"},
-		{`(?i)esp32`, MinerClassLottery, "ESP32"},
-		{`(?i)arduino`, MinerClassLottery, "Arduino"},
-		{`(?i)sparkminer`, MinerClassLottery, "ESP32 Miner"},  // SparkMiner ESP32 firmware
-
-		// Mid-range (multi-ASIC boards, NerdQAxe) - check specific models FIRST
-		// NerdOctaxe Gamma: 8x BM1370, 9.6 TH/s, 160W - check BEFORE generic nerdaxe
-		{`(?i)nerdoctaxe`, MinerClassMid, "NerdOctaxe Gamma"},
+		// NerdOctaxe: 8x BM1370, ~9.6 TH/s — sends "NerdOCTAXE/BM1370/{ver}"
+		// Source: WantClue ESP-Miner fork [CONFIRMED]
+		{`(?i)nerdoctaxe`, MinerClassMid, "NerdOctaxe"},
 		{`(?i)octaxe`, MinerClassMid, "NerdOctaxe"},
+
+		// Generic NerdAxe/NerdQAxe catch-all
 		{`(?i)nerdq?axe`, MinerClassMid, "NerdQAxe"},
-		// BitAxe Hex variants (6-chip boards) - check BEFORE single-chip models
-		// Supra Hex 701/702: 6x BM1368, ~3.5-4.2 TH/s, 90W
-		{`(?i)bitaxe.*supra.*hex`, MinerClassMid, "BitAxe Supra Hex"},
-		{`(?i)supra.*hex`, MinerClassMid, "Supra Hex"},
-		// Ultra Hex: 6x BM1366, ~3+ TH/s
-		{`(?i)bitaxe.*ultra.*hex`, MinerClassMid, "BitAxe Ultra Hex"},
-		{`(?i)ultra.*hex`, MinerClassMid, "Ultra Hex"},
-		// Generic Hex (catches remaining hex models)
-		{`(?i)bitaxe.*hex`, MinerClassMid, "BitAxe Hex"},
-		// BitAxe GT 801 (Gamma Turbo): 2x BM1370, ~2.15 TH/s, 43W - check BEFORE generic gamma
-		{`(?i)bitaxe.*gt`, MinerClassMid, "BitAxe GT"},
-		{`(?i)bitaxe.*801`, MinerClassMid, "BitAxe GT 801"},
-		{`(?i)bitaxe.*turbo`, MinerClassMid, "BitAxe GT"},
-		{`(?i)gamma.*turbo`, MinerClassMid, "BitAxe GT"},
-		{`(?i)bitaxe.*gamma`, MinerClassMid, "BitAxe Gamma"},
-		{`(?i)gekkoscience`, MinerClassMid, "GekkoScience"},
 
-		// Low-end (single BitAxe class, small USB miners) - generic patterns AFTER specific models
-		{`(?i)bitaxe.*ultra`, MinerClassLow, "BitAxe Ultra"},
-		{`(?i)bitaxe.*supra`, MinerClassLow, "BitAxe Supra"},
-		{`(?i)nmaxe`, MinerClassLow, "NMAxe"},   // NMAxe (~500 GH/s, Gamma fork)
-		{`(?i)bitaxe`, MinerClassLow, "BitAxe"}, // Generic bitaxe (catches all remaining)
-		// ESP-Miner firmware: Used by BitAxe (~500 GH/s), NerdQAxe++ (~5 TH/s), and others.
-		// Classify as MinerClassLow (MaxDiff 10K) - vardiff will quickly ramp up for
-		// higher-hashrate devices like NerdQAxe++. This prevents massive overshoot.
-		// Note: CYD/lottery ESP32 devices use ESP32 miner firmware, not ESP-Miner.
-		{`(?i)esp-miner`, MinerClassLow, "ESP-Miner"},
-
-		// ----------------------------------------------------------------
-		// LUCKY MINER (SHA-256d + Scrypt)
-		// Chinese BitAxe clones with BM1366 chip, ESP-Miner/AxeOS firmware
-		// SHA-256d: LV06: 500 GH/s @ 13W, LV07: 1 TH/s @ 30W, LV08: 4.5 TH/s @ 120W
-		// Scrypt:   LG07: 11 MH/s @ 25W (Lottery-class for Scrypt)
-		// ----------------------------------------------------------------
-		{`(?i)lucky.*miner.*lv08`, MinerClassMid, "Lucky Miner LV08"},    // 4.5 TH/s SHA-256d
-		{`(?i)lucky.*miner.*lv07`, MinerClassMid, "Lucky Miner LV07"},    // 1 TH/s SHA-256d
-		{`(?i)lucky.*lv08`, MinerClassMid, "Lucky Miner LV08"},
-		{`(?i)lucky.*lv07`, MinerClassMid, "Lucky Miner LV07"},
-		{`(?i)lv08`, MinerClassMid, "LV08"},
-		{`(?i)lv07`, MinerClassMid, "LV07"},
-		{`(?i)lucky.*miner.*lv06`, MinerClassLow, "Lucky Miner LV06"},    // 500 GH/s SHA-256d
-		{`(?i)lucky.*lv06`, MinerClassLow, "Lucky Miner LV06"},
-		{`(?i)lv06`, MinerClassLow, "LV06"},
-		// LG07 (Scrypt): 11 MH/s @ 25W - tiny Scrypt ASIC
-		// Low class: diff 8 gives ~90s shares (slow but functional, no pool flooding)
-		// Lottery MaxDiff=1 would cause ~2 shares/sec = pool flooding
-		{`(?i)lucky.*miner.*lg07`, MinerClassLow, "Lucky Miner LG07"},    // 11 MH/s Scrypt
-		{`(?i)lucky.*lg07`, MinerClassLow, "Lucky Miner LG07"},
-		{`(?i)lg07`, MinerClassLow, "LG07"},
-		{`(?i)lucky.*miner`, MinerClassLow, "Lucky Miner"},              // Generic fallback
-
-		{`(?i)compac.*f`, MinerClassLow, "Compac F"},
-		{`(?i)futurebit.*moonlander`, MinerClassLow, "Moonlander"}, // FutureBit Moonlander 2
-
-		// More mid-range
-		{`(?i)compac`, MinerClassMid, "Compac"},
-		{`(?i)newpac`, MinerClassMid, "NewPac"},
-		{`(?i)r606`, MinerClassMid, "R606"},
-
-		// ----------------------------------------------------------------
-		// JINGLE MINER (SHA-256d)
-		// BM1370 chip, ESP-Miner based firmware (AxeOS-style API)
-		// BTC Solo Lite: 1.2 TH/s @ 23W, BTC Solo Pro: 4.8 TH/s @ 96W
-		// ----------------------------------------------------------------
-		{`(?i)jingle.*miner.*pro`, MinerClassMid, "Jingle Miner BTC Solo Pro"},  // 4.8 TH/s
-		{`(?i)jingle.*pro`, MinerClassMid, "Jingle Miner Pro"},
-		{`(?i)btc.*solo.*pro`, MinerClassMid, "BTC Solo Pro"},
-		{`(?i)jingle.*miner.*lite`, MinerClassMid, "Jingle Miner BTC Solo Lite"}, // 1.2 TH/s
-		{`(?i)jingle.*lite`, MinerClassMid, "Jingle Miner Lite"},
-		{`(?i)btc.*solo.*lite`, MinerClassMid, "BTC Solo Lite"},
-		{`(?i)jingleminer`, MinerClassMid, "JingleMiner"},            // MUST be before jingle.*miner
+		// JingleMiner: BM1370, ESP-Miner based
+		// Sends "JingleMiner" (static, no version) [CONFIRMED]
+		{`(?i)jingleminer`, MinerClassMid, "JingleMiner"},
 		{`(?i)jingle.*miner`, MinerClassMid, "Jingle Miner"},
 
-		// ----------------------------------------------------------------
-		// FUTUREBIT APOLLO (SHA-256d)
-		// Desktop home miner with built-in full node
-		// Gen1: 2-3.8 TH/s @ 125-200W, Gen2 (Apollo II): 6-9 TH/s @ 175-375W
-		// Uses CGMiner API or proprietary web interface
-		// ----------------------------------------------------------------
-		{`(?i)futurebit.*apollo.*ii`, MinerClassMid, "FutureBit Apollo II"},  // 6-9 TH/s
-		{`(?i)apollo.*ii`, MinerClassMid, "Apollo II"},
-		{`(?i)futurebit.*apollo`, MinerClassMid, "FutureBit Apollo"},         // 2-3.8 TH/s
-		{`(?i)apollo.*btc`, MinerClassMid, "Apollo BTC"},
-		{`(?i)futurebit`, MinerClassMid, "FutureBit"},
+		// Zyber miners: TinyChipHub, 8x BM1368/BM1370
+		// Source: TinyChipHub/ESP-Miner-Zyber — sends "Zyber8S/{ver}" or "Zyber8G/{ver}" [CONFIRMED]
+		{`(?i)zyber`, MinerClassMid, "Zyber"},
 
-		// ----------------------------------------------------------------
-		// ZYBER MINERS (SHA-256d) - TinyChipHub
-		// Premium home miners with AxeOS firmware (ESP-Miner fork)
-		// Zyber 8S: 6.4 TH/s @ 140W, 8x BM1368 chips
-		// Zyber 8G: 10+ TH/s @ 180W, 8x BM1370 chips (up to 12 TH/s OC)
-		// ----------------------------------------------------------------
-		{`(?i)zyber.*8gp`, MinerClassMid, "Zyber 8GP"},       // 10+ TH/s (home variant) — MUST be before 8g
-		{`(?i)zyber.*8g`, MinerClassMid, "Zyber 8G"},         // 10+ TH/s
-		{`(?i)zyber.*8s`, MinerClassMid, "Zyber 8S"},         // 6.4 TH/s
-		{`(?i)zyber`, MinerClassMid, "Zyber"},                // Generic Zyber
-		{`(?i)tinychip`, MinerClassMid, "TinyChipHub"},       // TinyChipHub devices
+		// BitAxe / ESP-Miner devices — sends "bitaxe/{ASIC_CHIP}/{version}"
+		// Source: bitaxeorg/ESP-Miner stratum_api.c [CONFIRMED]
+		// Covers: BitAxe Ultra, Supra, Gamma, GT, Hex, NMAxe, Lucky Miner, all ESP-Miner forks
+		{`(?i)bitaxe/bm1370`, MinerClassLow, "BitAxe (BM1370)"},
+		{`(?i)bitaxe/bm1368`, MinerClassLow, "BitAxe (BM1368)"},
+		{`(?i)bitaxe/bm1366`, MinerClassLow, "BitAxe (BM1366)"},
+		{`(?i)bitaxe/bm1397`, MinerClassLow, "BitAxe (BM1397)"},
+		{`(?i)bitaxe`, MinerClassLow, "BitAxe"},
 
-		// High-end (older ASICs, small farms) - 10-80 TH/s range
-		{`(?i)antminer.*s9`, MinerClassHigh, "Antminer S9"},
-		{`(?i)antminer.*s11`, MinerClassHigh, "Antminer S11"},
-		{`(?i)antminer.*s15`, MinerClassHigh, "Antminer S15"},
-		{`(?i)antminer.*s17`, MinerClassHigh, "Antminer S17"},
-		{`(?i)antminer.*t9`, MinerClassHigh, "Antminer T9"},
-		{`(?i)antminer.*t15`, MinerClassHigh, "Antminer T15"},
-		{`(?i)antminer.*t17`, MinerClassHigh, "Antminer T17"},
-		{`(?i)antminer.*t19`, MinerClassPro, "Antminer T19"},  // 84 TH/s - Pro class
-		{`(?i)whatsminer.*m30s\+\+`, MinerClassPro, "Whatsminer M30S++"},  // 112 TH/s - Pro class
-		{`(?i)whatsminer.*m30s\+`, MinerClassPro, "Whatsminer M30S+"},    // 100 TH/s - Pro class
-		{`(?i)whatsminer.*m30s`, MinerClassPro, "Whatsminer M30S"},       // 86-88 TH/s - Pro class
-		{`(?i)whatsminer.*m[12]0s?\b`, MinerClassHigh, "Whatsminer M10-M20"},  // 55-68 TH/s
-		{`(?i)innosilicon.*t[12]\b`, MinerClassHigh, "Innosilicon T1/T2"},
-		{`(?i)innosilicon.*t3`, MinerClassHigh, "Innosilicon T3"},
-		// Ebang/Ebit miners (37-44 TH/s)
-		{`(?i)ebang`, MinerClassHigh, "Ebang"},
-		{`(?i)ebit.*e1[12]`, MinerClassHigh, "Ebit E11/E12"},
-		{`(?i)ebit`, MinerClassHigh, "Ebit"},
+		// Bitmain stock firmware — sends "bmminer/{version}"
+		// Source: bitmaintech/bmminer-mix config.h [CONFIRMED]
+		// Covers: ALL Antminer S/T series (S9 through S21 XP Hyd)
+		{`(?i)bmminer`, MinerClassPro, "Bitmain (bmminer)"},
 
-		// Modern ASICs (high hashrate) - 100+ TH/s range
-		{`(?i)antminer.*s19`, MinerClassPro, "Antminer S19"},
-		{`(?i)antminer.*s21`, MinerClassPro, "Antminer S21"},
-		{`(?i)antminer.*t21`, MinerClassPro, "Antminer T21"},
-		// Whatsminer M60 series (150-226 TH/s air-cooled)
-		{`(?i)whatsminer.*m60`, MinerClassPro, "Whatsminer M60"},
-		// Whatsminer M63 series (334-390 TH/s hydro-cooled)
-		{`(?i)whatsminer.*m63`, MinerClassPro, "Whatsminer M63"},
-		// Whatsminer M66 series (240-356 TH/s immersion)
-		{`(?i)whatsminer.*m66`, MinerClassPro, "Whatsminer M66"},
-		// Whatsminer M70 series (Dec 2025 — air, hydro, immersion, rack)
-		// M79/M79S: 870-1040 TH/s hydro rack, M78/M78S: 440-522 TH/s immersion
-		// M76/M76S/M76S+: 336-440 TH/s immersion, M73/M73S+: 470-600 TH/s hydro
-		// M72/M72S: 246-300 TH/s air OC, M70/M70S: 220-258 TH/s air
-		{`(?i)whatsminer.*m79`, MinerClassPro, "Whatsminer M79"},
-		{`(?i)whatsminer.*m78`, MinerClassPro, "Whatsminer M78"},
-		{`(?i)whatsminer.*m76`, MinerClassPro, "Whatsminer M76"},
-		{`(?i)whatsminer.*m73`, MinerClassPro, "Whatsminer M73"},
-		{`(?i)whatsminer.*m72`, MinerClassPro, "Whatsminer M72"},
-		{`(?i)whatsminer.*m70`, MinerClassPro, "Whatsminer M70"},
-		{`(?i)whatsminer.*m[5-9]0`, MinerClassPro, "Whatsminer M50+"},
-		{`(?i)whatsminer.*m[3-4]0s`, MinerClassPro, "Whatsminer M30S+"},
+		// MicroBT stock firmware — sends "btminer/{version}"
+		// Source: pyasic [HIGH]
+		// Covers: ALL Whatsminer models (M30S through M79S)
+		{`(?i)btminer`, MinerClassPro, "MicroBT (btminer)"},
 
-		// ----------------------------------------------------------------
-		// FARM PROXY / STRATUM AGGREGATION PROXIES
-		// MUST appear BEFORE the generic `(?i)braiins` catch-all below,
-		// so that "braiins-farm-proxy/1.0.0" matches FarmProxy (100M MaxDiff)
-		// rather than MinerClassPro (500K MaxDiff), which would immediately cap.
-		//
-		// Braiins Farm Proxy user-agent examples:
-		//   "braiins-farm-proxy/1.0.0", "farm-proxy/1.0", "farmproxy"
-		// ----------------------------------------------------------------
+		// Braiins Farm Proxy — MUST match before generic Braiins
+		// Source: Braiins documentation [CONFIRMED]
 		{`(?i)braiins.*farm[_-]?proxy`, MinerClassFarmProxy, "Braiins Farm Proxy"},
 		{`(?i)farm[_-]?proxy`, MinerClassFarmProxy, "Farm Proxy"},
 		{`(?i)farmproxy`, MinerClassFarmProxy, "Farm Proxy"},
 
-		{`(?i)braiins`, MinerClassPro, "Braiins"},
+		// Braiins OS+ — aftermarket firmware for Antminer/Whatsminer
+		// Source: test fixtures — sends "Braiins OS {version}" [CONFIRMED]
+		{`(?i)braiins`, MinerClassPro, "Braiins OS"},
+
+		// ----------------------------------------------------------------
+		// TIER 2: HIGH/MEDIUM confidence from secondary sources
+		// ----------------------------------------------------------------
+
+		// Vnish — aftermarket Antminer firmware [MEDIUM]
 		{`(?i)vnish`, MinerClassPro, "Vnish"},
+
+		// LuxOS — aftermarket Antminer firmware [MEDIUM]
 		{`(?i)luxos|luxminer`, MinerClassPro, "LuxOS"},
 
-		// ----------------------------------------------------------------
-		// BITDEER / SEALMINER (SHA-256d)
-		// SEAL chip architecture (4nm/5nm), proprietary firmware
-		// A3 (Sep 2025): A3 260 TH/s, A3 Pro 310 TH/s, A3 Hydro 500 TH/s, A3 Pro Hydro 660 TH/s
-		// A2: 226 TH/s, A2 Pro: 255 TH/s, A2 Hydro: 446 TH/s, A2 Pro Hydro: 500+ TH/s
-		// ----------------------------------------------------------------
-		// A3 series (newest gen, check BEFORE A2)
-		{`(?i)sealminer.*a3.*pro.*hydro`, MinerClassPro, "Sealminer A3 Pro Hydro"}, // 660 TH/s
-		{`(?i)sealminer.*a3.*hydro`, MinerClassPro, "Sealminer A3 Hydro"},          // 500 TH/s
-		{`(?i)sealminer.*a3.*pro`, MinerClassPro, "Sealminer A3 Pro"},              // 310 TH/s
-		{`(?i)sealminer.*a3`, MinerClassPro, "Sealminer A3"},                       // 260 TH/s
-		// A2 series
-		{`(?i)sealminer.*a2.*pro.*hydro`, MinerClassPro, "Sealminer A2 Pro Hydro"}, // 500 TH/s
-		{`(?i)sealminer.*a2.*hydro`, MinerClassPro, "Sealminer A2 Hydro"},          // 446 TH/s
-		{`(?i)sealminer.*a2.*pro`, MinerClassPro, "Sealminer A2 Pro"},              // 255 TH/s
-		{`(?i)sealminer.*a2`, MinerClassPro, "Sealminer A2"},                       // 226 TH/s
-		{`(?i)sealminer`, MinerClassPro, "Sealminer"},
-		{`(?i)bitdeer`, MinerClassPro, "Bitdeer"},
+		// NiceHash — hashrate marketplace
+		// Source: btcpool/yaamp — sends "NiceHash/{version}" or "excavator" [HIGH]
+		{`(?i)nicehash|excavator`, MinerClassHashMarketplace, "NiceHash"},
 
 		// ----------------------------------------------------------------
-		// AURADINE / TERAFLUX (SHA-256d)
-		// US-based, proprietary firmware (FluxVision), EnergyTune/AutoTune
-		// AH3880: 600 TH/s hydro, AI3680: 365-375 TH/s, AT2880: 180-260 TH/s
+		// TIER 3: GENERIC mining software
 		// ----------------------------------------------------------------
-		{`(?i)teraflux.*ah3880`, MinerClassPro, "Auradine Teraflux AH3880"},  // 600 TH/s hydro
-		{`(?i)teraflux.*ai3680`, MinerClassPro, "Auradine Teraflux AI3680"},  // 375 TH/s
-		{`(?i)teraflux.*at2880`, MinerClassPro, "Auradine Teraflux AT2880"},  // 260 TH/s
-		{`(?i)teraflux`, MinerClassPro, "Auradine Teraflux"},
-		{`(?i)auradine`, MinerClassPro, "Auradine"},
+		// cgminer covers: ALL Avalon (6.6-300 TH/s), GekkoScience (~2 TH/s),
+		//   Goldshell (Scrypt), FutureBit Apollo, some Innosilicon — 45,000x range.
+		// MinerClassUnknown (MinDiff=100, MaxDiff=1M) lets vardiff find optimal.
+		// For Avalon model classification, use DeviceHints (IP-based discovery).
+		{`(?i)cgminer`, MinerClassUnknown, "cgminer"},
 
-		// ----------------------------------------------------------------
-		// GOLDSHELL MINERS (Scrypt - LTC/DOGE)
-		// Full Scrypt ASIC lineup: Mini DOGE series, LT series, DG Max, BYTE
-		// Power: 65W (BYTE DG Card) to 3400W (DG Max)
-		// User-agents: "goldshell", model names, or "cgminer" (internal)
-		// ----------------------------------------------------------------
-		// DG Max: 6.5 GH/s @ 3400W, industrial Scrypt (Nov 2024)
-		{`(?i)goldshell.*dg.*max`, MinerClassPro, "Goldshell DG Max"},
-		// LT6 series (high-end Scrypt): 3.35 GH/s — MinerClassHigh, NOT Pro.
-		// At Pro Scrypt (MinDiff=128000, target=2s), D_optimal=102234 falls BELOW MinDiff floor.
-		// At High Scrypt (MinDiff=64000, target=4s), D_optimal=204468 — vardiff has full range.
-		{`(?i)goldshell.*lt6`, MinerClassHigh, "Goldshell LT6"},
-		{`(?i)lt6.*goldshell`, MinerClassHigh, "Goldshell LT6"},
-		// LT5 series (mid-high Scrypt): ~2-2.5 GH/s
-		{`(?i)goldshell.*lt5`, MinerClassHigh, "Goldshell LT5"},
-		{`(?i)lt5.*goldshell`, MinerClassHigh, "Goldshell LT5"},
-		// LT Lite: 1.62 GH/s @ 1450W, mid-range rack miner
-		{`(?i)goldshell.*lt.*lite`, MinerClassMid, "Goldshell LT Lite"},
-		// Mini DOGE series (specific models BEFORE generic — "III" before "II")
-		{`(?i)goldshell.*mini.*doge.*iii.*(\+|plus)`, MinerClassLow, "Goldshell Mini DOGE III+"}, // 810 MH/s
-		{`(?i)goldshell.*mini.*doge.*iii`, MinerClassLow, "Goldshell Mini DOGE III"},        // 700 MH/s
-		{`(?i)goldshell.*mini.*doge.*ii`, MinerClassLow, "Goldshell Mini DOGE II"},           // 420 MH/s
-		{`(?i)goldshell.*mini.*doge.*pro`, MinerClassLow, "Goldshell Mini DOGE Pro"},         // 205 MH/s
-		{`(?i)goldshell.*mini.*doge`, MinerClassLow, "Goldshell Mini DOGE"},                  // 185 MH/s
-		{`(?i)mini.*doge`, MinerClassLow, "Mini DOGE"},
-		// BYTE modular platform (80 MH/s per DG Card, swappable)
-		{`(?i)goldshell.*byte`, MinerClassLow, "Goldshell BYTE"},
-		// Generic Goldshell (fallback to mid-range)
-		{`(?i)goldshell`, MinerClassMid, "Goldshell"},
+		// bfgminer covers: FutureBit Apollo (~2-9 TH/s), various
+		{`(?i)bfgminer`, MinerClassUnknown, "bfgminer"},
 
-		// ----------------------------------------------------------------
-		// ANTMINER L SERIES (Scrypt - LTC/DOGE)
-		// Bitmain's Scrypt ASIC lineup for Litecoin/Dogecoin mining
-		// ----------------------------------------------------------------
-		// L11 (newest gen): 20-35 GH/s, 3612-5775W
-		{`(?i)antminer.*l11.*hydro`, MinerClassPro, "Antminer L11 Hydro"}, // 33-35 GH/s
-		{`(?i)antminer.*l11.*pro`, MinerClassPro, "Antminer L11 Pro"},     // 21 GH/s
-		{`(?i)antminer.*l11`, MinerClassPro, "Antminer L11"},              // 20 GH/s
-		// L9: 16-17 GH/s, 3360-3570W
-		{`(?i)antminer.*l9`, MinerClassPro, "Antminer L9"},
-		// L7: 9.5 GH/s, 3425W
-		{`(?i)antminer.*l7`, MinerClassPro, "Antminer L7"},
-		// L3+ (older): 504 MH/s, 800W - still widely used
-		{`(?i)antminer.*l3`, MinerClassLow, "Antminer L3+"},
-
-		// ----------------------------------------------------------------
-		// ELPHAPEX MINERS (Scrypt - LTC/DOGE)
-		// DG2 series (2025): DG2+/DG2 20.5 GH/s, DG2 Mini 2.4 GH/s
-		// DG Hydro 1: 20 GH/s water-cooled
-		// DG1 series: DG1+ 14 GH/s, DG1/DG1 Lite 11 GH/s, DG Home 2.1 GH/s
-		// ----------------------------------------------------------------
-		// DG2 series (newest gen — check BEFORE DG1)
-		{`(?i)elphapex.*dg2\+`, MinerClassPro, "Elphapex DG2+"},             // 20.5 GH/s, best efficiency
-		{`(?i)dg2\+`, MinerClassPro, "DG2+"},
-		{`(?i)elphapex.*dg2.*mini`, MinerClassHigh, "Elphapex DG2 Mini"},    // 2.4 GH/s home
-		{`(?i)elphapex.*dg2`, MinerClassPro, "Elphapex DG2"},                // 20.5 GH/s
-		// DG Hydro 1: 20 GH/s, water-cooled industrial
-		{`(?i)elphapex.*dg.*hydro`, MinerClassPro, "Elphapex DG Hydro"},     // 20 GH/s
-		{`(?i)dg.*hydro`, MinerClassPro, "DG Hydro"},
-		// DG1+ (high-end): ~14 GH/s
-		{`(?i)elphapex.*dg1\+`, MinerClassPro, "Elphapex DG1+"},
-		{`(?i)dg1\+`, MinerClassPro, "DG1+"},
-		// DG1/DG1 Lite (standard): ~11 GH/s
-		{`(?i)elphapex.*dg1.*lite`, MinerClassPro, "Elphapex DG1 Lite"},     // 11 GH/s budget
-		{`(?i)elphapex.*dg1`, MinerClassPro, "Elphapex DG1"},
-		// DG Home 1: ~2.1 GH/s, 630W - home miner
-		{`(?i)elphapex.*dg.*home`, MinerClassHigh, "Elphapex DG Home"},
-		{`(?i)dg.*home`, MinerClassHigh, "DG Home"},
-		// Generic Elphapex
-		{`(?i)elphapex`, MinerClassHigh, "Elphapex"},
-
-		// ----------------------------------------------------------------
-		// VOLCMINER (Scrypt - LTC/DOGE)
-		// Chinese manufacturer, proprietary firmware with web GUI
-		// D1 Hydro: 30.4 GH/s, D3: 20 GH/s, D1 Pro: 18 GH/s
-		// D1: 15-18.5 GH/s, D1 Lite: 14 GH/s, D1 Mini: 2.2 GH/s
-		// ----------------------------------------------------------------
-		{`(?i)volcminer.*d1.*hydro`, MinerClassPro, "VolcMiner D1 Hydro"},  // 30.4 GH/s
-		{`(?i)volcminer.*d1.*pro`, MinerClassPro, "VolcMiner D1 Pro"},      // 18 GH/s
-		{`(?i)volcminer.*d3`, MinerClassPro, "VolcMiner D3"},               // 20 GH/s
-		{`(?i)volcminer.*d1.*lite`, MinerClassPro, "VolcMiner D1 Lite"},    // 14 GH/s
-		{`(?i)volcminer.*d1.*mini`, MinerClassHigh, "VolcMiner D1 Mini"},   // 2.2 GH/s
-		{`(?i)volcminer.*d1`, MinerClassPro, "VolcMiner D1"},               // 15-18.5 GH/s
-		{`(?i)volcminer`, MinerClassPro, "VolcMiner"},
-
-		// ----------------------------------------------------------------
-		// FLUMINER (SHA-256d + Scrypt)
-		// Chinese manufacturer: Flu Electronic Technology (Hong Kong) Co., Ltd.
-		// Proprietary firmware with web UI, stratum protocol support
-		// L-series: Scrypt (LTC/DOGE), T-series: SHA-256d (BTC)
-		// ----------------------------------------------------------------
-		// T3 (SHA-256d): 115 TH/s @ 1700W, silent home miner
-		{`(?i)fluminer.*t3`, MinerClassPro, "FluMiner T3"},
-		{`(?i)flu.*miner.*t3`, MinerClassPro, "FluMiner T3"},
-		// L3 (Scrypt): 9.5 GH/s @ 1700W - check BEFORE L1 to prevent L1 matching L13/L3
-		{`(?i)fluminer.*l3`, MinerClassPro, "FluMiner L3"},
-		{`(?i)flu.*miner.*l3`, MinerClassPro, "FluMiner L3"},
-		// L2 (Scrypt): 1-1.2 GH/s @ 230-280W, speaker box form factor
-		{`(?i)fluminer.*l2`, MinerClassMid, "FluMiner L2"},
-		{`(?i)flu.*miner.*l2`, MinerClassMid, "FluMiner L2"},
-		// L1 Pro (Scrypt): 6 GH/s @ 1400W - check BEFORE L1
-		{`(?i)fluminer.*l1.*pro`, MinerClassPro, "FluMiner L1 Pro"},
-		{`(?i)flu.*miner.*l1.*pro`, MinerClassPro, "FluMiner L1 Pro"},
-		// L1 (Scrypt): 5.3 GH/s @ 1200W
-		{`(?i)fluminer.*l1`, MinerClassPro, "FluMiner L1"},
-		{`(?i)flu.*miner.*l1`, MinerClassPro, "FluMiner L1"},
-		// Generic FluMiner fallback
-		{`(?i)fluminer`, MinerClassPro, "FluMiner"},
-		{`(?i)flu.*miner`, MinerClassMid, "FluMiner"},
-
-		// ----------------------------------------------------------------
-		// IBELINK MINERS (Scrypt - LTC/DOGE)
-		// BM-L3: 3.2 GH/s @ 3000W, actively shipping
-		// ----------------------------------------------------------------
-		{`(?i)ibelink.*bm.*l3`, MinerClassHigh, "iBeLink BM-L3"},  // 3.2 GH/s Scrypt
-		{`(?i)ibelink`, MinerClassHigh, "iBeLink"},
-
-		// ----------------------------------------------------------------
-		// HAMMER MINER / PLEBSOURCE (Scrypt - LTC/DOGE)
-		// Entry-level Scrypt ASIC: 105 MH/s, 25W, WiFi connected
-		// Made by PlebSource, single-chip design
-		// ----------------------------------------------------------------
-		{`(?i)hammer.*miner`, MinerClassLow, "Hammer Miner"},
-		{`(?i)hammerminer`, MinerClassLow, "Hammer Miner"},
-		{`(?i)plebsource.*hammer`, MinerClassLow, "PlebSource Hammer"},
-		{`(?i)plebsource`, MinerClassLow, "PlebSource"},
-		{`(?i)doge.*digger`, MinerClassLow, "Doge Digger"},
-
-		// Stock manufacturer firmware (identifies brand, not specific model)
-		// Bitmain sends "bmminer/X.X.X" on stock firmware (S9 through S21 XP Hyd)
-		// MicroBT sends "btminer/X.X.X" on stock firmware (M30S through M79S)
-		// Pro class: modern ASICs dominate usage; MaxDiff=500K covers up to ~2.1 PH/s.
-		// Older models (S9 etc.) get vardiff-adjusted down within seconds.
-		{`(?i)bmminer`, MinerClassPro, "Bitmain Stock Firmware"},
-		{`(?i)btminer`, MinerClassPro, "MicroBT Stock Firmware"},
-
-		// Common mining software
-		// cgminer is used by many devices including Avalon Nano 3s (~6.6 TH/s)
-		// Use MinerClassMid to support Avalon-class devices (MaxDiff=50000 needed for 6.6 TH/s)
-		// Lower hashrate devices using cgminer will simply stabilize at lower difficulty
-		{`(?i)cgminer`, MinerClassMid, "cgminer"},
-		{`(?i)bfgminer`, MinerClassMid, "bfgminer"},
+		// General-purpose mining software
 		{`(?i)sgminer`, MinerClassLow, "sgminer"},
 		{`(?i)cpuminer`, MinerClassLow, "cpuminer"},
 		{`(?i)ccminer`, MinerClassLow, "ccminer"},
 
 		// ----------------------------------------------------------------
-		// HASHRATE RENTAL / MARKETPLACE SERVICES (User-Agent Detection)
+		// TIER 4: LOTTERY miners (ESP32, no ASIC)
 		// ----------------------------------------------------------------
-		// USER-AGENT DETECTION: Vendor names below are required for miner identification.
-		// These are technical identifiers from the miner's user-agent string, not endorsements,
-		// recommendations, or affiliations. Accurate detection enables proper initial difficulty
-		// assignment for miners connecting via these services. The authors have no business
-		// relationship with any of these services. All trademarks are property of their
-		// respective owners. Users are solely responsible for any fees, costs, or agreements
-		// with third-party hashrate rental services.
-		//
-		// MinerClassHashMarketplace is used: per-connection hashrate is unknown since
-		// marketplace platforms may route multiple rigs through a single upstream connection.
-		// MaxDiff=50M (~214 PH/s) gives sufficient ceiling vs MinerClassPro's 2.1 PH/s cap.
-		{`(?i)nicehash|excavator`, MinerClassHashMarketplace, "NiceHash"},
+		{`(?i)^nminer`, MinerClassLottery, "NMiner"},
+		{`(?i)\bnminer`, MinerClassLottery, "NMiner"},
+		{`(?i)bitmaker`, MinerClassLottery, "BitMaker"},
+		{`(?i)esp32`, MinerClassLottery, "ESP32"},
+		{`(?i)arduino`, MinerClassLottery, "Arduino"},
+		{`(?i)sparkminer`, MinerClassLottery, "SparkMiner"},
+		{`(?i)lottery`, MinerClassLottery, "LotteryMiner"},
+
+		// ----------------------------------------------------------------
+		// TIER 5: HASHRATE MARKETPLACES
+		// ----------------------------------------------------------------
+		// USER-AGENT DETECTION: Vendor names are technical identifiers from
+		// the miner's user-agent string, not endorsements or affiliations.
+		// All trademarks are property of their respective owners. Users are
+		// solely responsible for any fees, costs, or agreements with third-party
+		// hashrate rental services.
 		{`(?i)miningrigrentals|mrr`, MinerClassHashMarketplace, "MiningRigRentals"},
 		{`(?i)cudo`, MinerClassHashMarketplace, "Cudo Miner"},
 		{`(?i)zergpool`, MinerClassHashMarketplace, "Zergpool"},

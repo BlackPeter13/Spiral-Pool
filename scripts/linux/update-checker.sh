@@ -271,7 +271,7 @@ get_current_version() {
     if [[ -f "${VERSION_FILE}" ]]; then
         cat "${VERSION_FILE}" | tr -d '[:space:]'
     else
-        echo "1.1.2"
+        echo "1.2.0"
     fi
 }
 
@@ -428,13 +428,19 @@ notify_user() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
 
-    # Send external notifications
-    local discord_msg
-    printf -v discord_msg "Current: v%s\nLatest: v%s\n\nRun: sudo /spiralpool/upgrade.sh" "${current}" "${latest}"
-    send_discord_notification "$discord_msg"
-    local tg_msg
-    printf -v tg_msg "<b>Spiral Pool Update Available</b>\n\nCurrent: v%s\nLatest: v%s\n\nRun: <code>sudo /spiralpool/upgrade.sh</code>" "${current}" "${latest}"
-    send_telegram_notification "$tg_msg"
+    # Send external notifications only if Sentinel is NOT running.
+    # When the Sentinel is active, it handles Discord/Telegram itself with
+    # richer embed formatting, so we skip here to avoid duplicate alerts.
+    if ! pgrep -f "SpiralSentinel" > /dev/null 2>&1; then
+        local discord_msg
+        printf -v discord_msg "Current: v%s\nLatest: v%s\n\nRun: sudo /spiralpool/upgrade.sh" "${current}" "${latest}"
+        send_discord_notification "$discord_msg"
+        local tg_msg
+        printf -v tg_msg "<b>Spiral Pool Update Available</b>\n\nCurrent: v%s\nLatest: v%s\n\nRun: <code>sudo /spiralpool/upgrade.sh</code>" "${current}" "${latest}"
+        send_telegram_notification "$tg_msg"
+    else
+        log "INFO" "Sentinel is running - skipping Discord/Telegram (Sentinel sends rich embeds)"
+    fi
 
     # Update last notified version
     LAST_NOTIFIED_VERSION="$latest"

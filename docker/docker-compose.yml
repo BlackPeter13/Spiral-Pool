@@ -2,30 +2,29 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 Spiral Pool Contributors
 # ╔════════════════════════════════════════════════════════════════════════════╗
 # ║                                                                            ║
-# ║           SPIRAL POOL - DOCKER COMPOSE (SINGLE-COIN V1)                   ║
+# ║           SPIRAL POOL - DOCKER COMPOSE                                    ║
 # ║                                                                            ║
-# ║   Solo mining in Docker containers — one coin per deployment              ║
+# ║   Solo mining in Docker containers                                        ║
 # ║                                                                            ║
-# ║   SUPPORTED COINS (solo mining, one coin per deployment):                  ║
+# ║   MODES:                                                                   ║
+# ║   - Single-coin (default): POOL_MODE=single + --profile <coin>            ║
+# ║   - Multi-coin:            POOL_MODE=multi  + --profile multi             ║
+# ║                                                                            ║
+# ║   SUPPORTED COINS:                                                        ║
 # ║   - SHA-256d: DigiByte, Bitcoin, Bitcoin Cash, Bitcoin II,               ║
 # ║               Namecoin, Syscoin*, Myriadcoin, Fractal Bitcoin, Q-BitX    ║
 # ║               (* Syscoin = merge-mining only, requires BTC parent)       ║
 # ║   - Scrypt:   Litecoin, Dogecoin, DigiByte-Scrypt, PepeCoin, Catcoin    ║
 # ║                                                                            ║
-# ║   STRATUM PROTOCOL:                                                       ║
-# ║   V1 Stratum (plain + TLS encrypted). Miners connect via:               ║
-# ║   - stratum+tcp://  (plain, standard port)                                ║
-# ║   - stratum+ssl://  (TLS encrypted, TLS port)                            ║
+# ║   MERGE MINING (multi-coin mode only):                                    ║
+# ║   - SHA-256d: BTC+NMC, BTC+FBTC, BTC+SYS, BTC+XMY                      ║
+# ║   - Scrypt:   LTC+DOGE, LTC+PEP                                         ║
 # ║                                                                            ║
-# ║   DOCKER LIMITATIONS:                                                     ║
-# ║   Docker supports V1 single-coin solo mining only. The following          ║
-# ║   features require native installation via install.sh:                    ║
-# ║   - V2 Enhanced Stratum (SV2 binary protocol with Noise encryption)      ║
-# ║   - Multi-coin mining (14 coins simultaneously)                           ║
-# ║   - Merge mining (BTC+NMC, BTC+FBTC, BTC+SYS, BTC+XMY, LTC+DOGE,      ║
-# ║     LTC+PEP)                                                              ║
-# ║   Run: sudo ./install.sh  on a bare-metal Linux server for full           ║
-# ║   feature support.                                                         ║
+# ║   STRATUM PROTOCOL:                                                       ║
+# ║   V1 Stratum (plain + TLS) and V2 Enhanced (Noise encryption):          ║
+# ║   - stratum+tcp://  (V1 plain, standard port)                            ║
+# ║   - stratum+ssl://  (V1 TLS encrypted, TLS port)                        ║
+# ║   - stratum+sv2://  (V2 Noise encrypted — set STRATUM_V2_ENABLED=true)  ║
 # ║                                                                            ║
 # ║   NETWORKING: bridge (container isolation with port mapping)              ║
 # ║   IPv4 only — IPv6 is not supported.                                    ║
@@ -34,8 +33,7 @@
 # ║                                                                            ║
 # ╚════════════════════════════════════════════════════════════════════════════╝
 #
-# USAGE WITH PROFILES:
-#   # SHA-256d coins
+# USAGE — SINGLE-COIN (one coin per deployment):
 #   docker compose --profile dgb up -d        # DigiByte
 #   docker compose --profile btc up -d        # Bitcoin
 #   docker compose --profile bch up -d        # Bitcoin Cash
@@ -44,38 +42,38 @@
 #   docker compose --profile xmy up -d        # Myriadcoin
 #   docker compose --profile fbtc up -d       # Fractal Bitcoin
 #   docker compose --profile qbx up -d        # Q-BitX
-#   # Scrypt coins
 #   docker compose --profile ltc up -d        # Litecoin
 #   docker compose --profile doge up -d       # Dogecoin
 #   docker compose --profile dgb-scrypt up -d # DigiByte-Scrypt (uses DGB node)
 #   docker compose --profile pep up -d        # PepeCoin
 #   docker compose --profile cat up -d        # Catcoin
 #
+# USAGE — MULTI-COIN (set POOL_MODE=multi in .env, enable coins with ENABLE_<COIN>=true):
+#   docker compose --profile multi up -d      # All enabled coins
+#
 #   docker compose --profile <profile> logs -f    # View logs
 #   docker compose --profile <profile> down       # Stop all services
 #   docker compose --profile <profile> ps         # Check status
 #
-# NOTE: Run one profile at a time. Each deployment mines a single coin.
-# For multi-coin mining, use native installation: sudo ./install.sh
-#
-# PORT ALLOCATION (V1 / TLS — V2 requires native install.sh):
-#   SHA-256d:                        V1      TLS     RPC     P2P
-#     DGB:                           3333    3335    14022   12024
-#     BTC:                           4333    4335    8332    8333
-#     BCH:                           5333    5335    8432    8433
-#     BC2:                           6333    6335    8339    8338
-#     NMC:                           14335   14337   8336    8334
-#     SYS:                           15335   15337   8370    8369
-#     XMY:                           17335   17337   10889   10888
-#     FBTC:                          18335   18337   8340    8341
-#     QBX:                           20335   20337   8344    8345
+# PORT ALLOCATION (V1 / V2 Noise / TLS):
+#   SHA-256d:                        V1      V2      TLS     RPC     P2P
+#     DGB:                           3333    3334    3335    14022   12024
+#     BTC:                           4333    4334    4335    8332    8333
+#     BCH:                           5333    5334    5335    8432    8433
+#     BC2:                           6333    6334    6335    8339    8338
+#     NMC:                           14335   14336   14337   8336    8334
+#     SYS:                           15335   15336   15337   8370    8369
+#     XMY:                           17335   17336   17337   10889   10888
+#     FBTC:                          18335   18336   18337   8340    8341
+#     QBX:                           20335   20336   20337   8344    8345
 #   Scrypt:
-#     LTC:                           7333    7335    9332    9333
-#     DOGE:                          8335    8342    22555   22556
-#     DGB-SCRYPT:                    3336    3338    (uses DGB node)
-#     PEP:                           10335   10337   33873   33874
-#     CAT:                           12335   12337   9932    9933
+#     LTC:                           7333    7334    7335    9332    9333
+#     DOGE:                          8335    8337    8342    22555   22556
+#     DGB-SCRYPT:                    3336    3337    3338    (uses DGB node)
+#     PEP:                           10335   10336   10337   33873   33874
+#     CAT:                           12335   12336   12337   9932    9933
 #   Shared: API 4000, Dashboard 1618, PostgreSQL 5432, Prometheus 9090, Grafana 3000
+#   V2 ports are only active when STRATUM_V2_ENABLED=true in .env
 
 # Default logging limits — prevents unbounded log growth filling disk.
 # Override per-service if needed. Docker default (json-file, no limit) is unsafe
@@ -259,7 +257,7 @@ services:
   # Namecoin (NMC) - SHA-256d
   # NOTE: no-new-privileges NOT set - gosu requires setuid for privilege drop
   namecoin:
-    profiles: ["nmc"]
+    profiles: ["nmc", "multi"]
     build:
       context: ..
       dockerfile: docker/Dockerfile.namecoin
@@ -300,7 +298,7 @@ services:
   # Myriadcoin (XMY) - SHA-256d
   # NOTE: no-new-privileges NOT set - gosu requires setuid for privilege drop
   myriadcoin:
-    profiles: ["xmy"]
+    profiles: ["xmy", "multi"]
     build:
       context: ..
       dockerfile: docker/Dockerfile.myriadcoin
@@ -342,7 +340,7 @@ services:
   # NOTE: no-new-privileges NOT set - gosu requires setuid for privilege drop
   # NOTE: Fractal uses Bitcoin Core binaries aliased as fractald/fractal-cli
   fractalbitcoin:
-    profiles: ["fbtc"]
+    profiles: ["fbtc", "multi"]
     build:
       context: ..
       dockerfile: docker/Dockerfile.fractalbitcoin
@@ -384,7 +382,7 @@ services:
   # NOTE: no-new-privileges NOT set - gosu requires setuid for privilege drop
   # NOTE: QBX is a standalone SHA-256d coin with post-quantum (Dilithium) address support
   qbitx:
-    profiles: ["qbx"]
+    profiles: ["qbx", "multi"]
     build:
       context: ..
       dockerfile: docker/Dockerfile.qbitx
@@ -427,7 +425,7 @@ services:
   # NOTE: SYS cannot be solo mined — it is always merge-mined with BTC.
   # The "sys" profile should only be used in combination with "btc".
   syscoin:
-    profiles: ["sys"]
+    profiles: ["sys", "multi"]
     build:
       context: ..
       dockerfile: docker/Dockerfile.syscoin
@@ -554,7 +552,7 @@ services:
   # PepeCoin (PEP) - Scrypt
   # NOTE: no-new-privileges NOT set - gosu requires setuid for privilege drop
   pepecoin:
-    profiles: ["pep"]
+    profiles: ["pep", "multi"]
     build:
       context: ..
       dockerfile: docker/Dockerfile.pepecoin
@@ -595,7 +593,7 @@ services:
   # Catcoin (CAT) - Scrypt
   # NOTE: no-new-privileges NOT set - gosu requires setuid for privilege drop
   catcoin:
-    profiles: ["cat"]
+    profiles: ["cat", "multi"]
     build:
       context: ..
       dockerfile: docker/Dockerfile.catcoin
@@ -684,39 +682,54 @@ services:
     networks:
       - spiralpool
     ports:
-      # Stratum ports (V1 plain + TLS only — V2 not available in Docker)
+      # Stratum ports (V1 plain + V2 Noise + TLS)
       # NOTE: Port assignments are fixed per coin. Miners MUST specify the correct
-      # port for their chosen coin. V2 Enhanced Stratum requires native install.sh.
-      # SHA-256d Stratum ports (V1 / TLS)
+      # port for their chosen coin. V2 uses Noise Protocol encryption (no certs needed).
+      # V2 ports are only active when STRATUM_V2_ENABLED=true in .env.
+      # SHA-256d Stratum ports (V1 / V2 / TLS)
       - "3333:3333"     # DGB Stratum V1
+      - "3334:3334"     # DGB Stratum V2 (Noise)
       - "3335:3335"     # DGB Stratum TLS
       - "4333:4333"     # BTC Stratum V1
+      - "4334:4334"     # BTC Stratum V2 (Noise)
       - "4335:4335"     # BTC Stratum TLS
       - "5333:5333"     # BCH Stratum V1
+      - "5334:5334"     # BCH Stratum V2 (Noise)
       - "5335:5335"     # BCH Stratum TLS
       - "6333:6333"     # BC2 Stratum V1
+      - "6334:6334"     # BC2 Stratum V2 (Noise)
       - "6335:6335"     # BC2 Stratum TLS
-      # Scrypt Stratum ports (V1 / TLS)
+      # Scrypt Stratum ports (V1 / V2 / TLS)
       - "7333:7333"     # LTC Stratum V1
+      - "7334:7334"     # LTC Stratum V2 (Noise)
       - "7335:7335"     # LTC Stratum TLS
       - "8335:8335"     # DOGE Stratum V1
+      - "8337:8337"     # DOGE Stratum V2 (Noise)
       - "8342:8342"     # DOGE Stratum TLS
       - "3336:3336"     # DGB-SCRYPT Stratum V1
+      - "3337:3337"     # DGB-SCRYPT Stratum V2 (Noise)
       - "3338:3338"     # DGB-SCRYPT Stratum TLS
       - "10335:10335"   # PEP Stratum V1
+      - "10336:10336"   # PEP Stratum V2 (Noise)
       - "10337:10337"   # PEP Stratum TLS
       - "12335:12335"   # CAT Stratum V1
+      - "12336:12336"   # CAT Stratum V2 (Noise)
       - "12337:12337"   # CAT Stratum TLS
-      # Merge-minable Stratum ports (V1 / TLS)
+      # Merge-minable Stratum ports (V1 / V2 / TLS)
       - "14335:14335"   # NMC Stratum V1
+      - "14336:14336"   # NMC Stratum V2 (Noise)
       - "14337:14337"   # NMC Stratum TLS
       - "17335:17335"   # XMY Stratum V1
+      - "17336:17336"   # XMY Stratum V2 (Noise)
       - "17337:17337"   # XMY Stratum TLS
       - "15335:15335"   # SYS Stratum V1
+      - "15336:15336"   # SYS Stratum V2 (Noise)
       - "15337:15337"   # SYS Stratum TLS
       - "18335:18335"   # FBTC Stratum V1
+      - "18336:18336"   # FBTC Stratum V2 (Noise)
       - "18337:18337"   # FBTC Stratum TLS
       - "20335:20335"   # QBX Stratum V1
+      - "20336:20336"   # QBX Stratum V2 (Noise)
       - "20337:20337"   # QBX Stratum TLS
       # API
       - "4000:4000"     # Pool API
@@ -725,7 +738,7 @@ services:
       postgres:
         condition: service_healthy
       # All daemon services listed with required: false — only the selected
-      # coin's daemon will actually be running (single-coin Docker mode)
+      # coin's daemon(s) will actually be running (single-coin or multi-coin mode)
       digibyte:
         condition: service_healthy
         required: false
@@ -803,10 +816,46 @@ services:
       - COINBASE_TEXT=${COINBASE_TEXT:-Mined by Spiral Pool}
       - ADMIN_API_KEY=${ADMIN_API_KEY:-}
       - SPIRAL_METRICS_TOKEN=${SPIRAL_METRICS_TOKEN:-}
-      # Config template variables (used by stratum-entrypoint.sh)
-      - POOL_COIN=${POOL_COIN:?POOL_COIN must be set in .env}
-      - POOL_ID=${POOL_ID:?POOL_ID must be set in .env}
-      - POOL_ADDRESS=${POOL_ADDRESS:?POOL_ADDRESS must be set in .env}
+      # Pool mode and config (used by stratum-entrypoint.sh)
+      - POOL_MODE=${POOL_MODE:-single}
+      - POOL_COIN=${POOL_COIN:-}
+      - POOL_ID=${POOL_ID:-}
+      - POOL_ADDRESS=${POOL_ADDRESS:-}
+      # Multi-coin mode: per-coin enable flags and wallet addresses
+      - ENABLE_DGB=${ENABLE_DGB:-false}
+      - DGB_POOL_ADDRESS=${DGB_POOL_ADDRESS:-}
+      - ENABLE_BTC=${ENABLE_BTC:-false}
+      - BTC_POOL_ADDRESS=${BTC_POOL_ADDRESS:-}
+      - ENABLE_BCH=${ENABLE_BCH:-false}
+      - BCH_POOL_ADDRESS=${BCH_POOL_ADDRESS:-}
+      - ENABLE_BC2=${ENABLE_BC2:-false}
+      - BC2_POOL_ADDRESS=${BC2_POOL_ADDRESS:-}
+      - ENABLE_NMC=${ENABLE_NMC:-false}
+      - NMC_POOL_ADDRESS=${NMC_POOL_ADDRESS:-}
+      - ENABLE_SYS=${ENABLE_SYS:-false}
+      - SYS_POOL_ADDRESS=${SYS_POOL_ADDRESS:-}
+      - ENABLE_XMY=${ENABLE_XMY:-false}
+      - XMY_POOL_ADDRESS=${XMY_POOL_ADDRESS:-}
+      - ENABLE_FBTC=${ENABLE_FBTC:-false}
+      - FBTC_POOL_ADDRESS=${FBTC_POOL_ADDRESS:-}
+      - ENABLE_QBX=${ENABLE_QBX:-false}
+      - QBX_POOL_ADDRESS=${QBX_POOL_ADDRESS:-}
+      - ENABLE_LTC=${ENABLE_LTC:-false}
+      - LTC_POOL_ADDRESS=${LTC_POOL_ADDRESS:-}
+      - ENABLE_DOGE=${ENABLE_DOGE:-false}
+      - DOGE_POOL_ADDRESS=${DOGE_POOL_ADDRESS:-}
+      - ENABLE_DGB_SCRYPT=${ENABLE_DGB_SCRYPT:-false}
+      - ENABLE_PEP=${ENABLE_PEP:-false}
+      - PEP_POOL_ADDRESS=${PEP_POOL_ADDRESS:-}
+      - ENABLE_CAT=${ENABLE_CAT:-false}
+      - CAT_POOL_ADDRESS=${CAT_POOL_ADDRESS:-}
+      # Merge mining (multi-coin mode only)
+      - MERGE_MINING_ENABLED=${MERGE_MINING_ENABLED:-false}
+      - MERGE_MINING_ALGO=${MERGE_MINING_ALGO:-sha256d}
+      - MERGE_MINING_AUX_CHAINS_SHA256D=${MERGE_MINING_AUX_CHAINS_SHA256D:-}
+      - MERGE_MINING_AUX_CHAINS_SCRYPT=${MERGE_MINING_AUX_CHAINS_SCRYPT:-}
+      # Stratum V2 (Noise Protocol — opt-in, keys generated in memory)
+      - STRATUM_V2_ENABLED=${STRATUM_V2_ENABLED:-false}
       # Daemon connection — auto-detected by entrypoint from POOL_COIN + coin RPC vars.
       # Set these only to override auto-detection (e.g., remote daemon).
       - DAEMON_HOST=${DAEMON_HOST:-}
@@ -863,7 +912,7 @@ services:
         condition: service_healthy
     environment:
       - POOL_API_URL=http://stratum:4000
-      # Dashboard Authentication (v1.1.2)
+      # Dashboard Authentication (v1.2.0)
       - DASHBOARD_AUTH_ENABLED=${DASHBOARD_AUTH_ENABLED:-true}
       - DASHBOARD_SESSION_LIFETIME=${DASHBOARD_SESSION_LIFETIME:-24}
       - DASHBOARD_API_KEY=${DASHBOARD_API_KEY:-}

@@ -18,7 +18,7 @@ These systems work together to ensure miners of vastly different hashrates (50 K
 When a miner connects, Spiral Pool performs the following sequence:
 
 1. **Extract User-Agent** - The Stratum `mining.subscribe` message includes a user-agent string
-2. **Pattern Matching** - The Spiral Router matches the user-agent against 280+ regex patterns
+2. **Pattern Matching** - The Spiral Router matches the user-agent against 47 verified regex patterns
 3. **Class Assignment** - Miner is assigned to a class (Lottery, Low, Mid, High, Pro, or 7 Avalon-specific classes) with an Unknown fallback for unrecognized devices
 4. **Profile Lookup** - Each class has a profile with `InitialDiff`, `MinDiff`, `MaxDiff`, and `TargetShareTime`
 5. **Block Time Scaling** - Profile values are scaled based on the blockchain's block time
@@ -140,7 +140,7 @@ Follow the prompts to select coins and enter wallet addresses.
 
 ### Docker
 
-Docker supports V1 single-coin solo mining only. For V2 Enhanced Stratum, multi-coin, or merge mining, use native installation (`sudo ./install.sh`).
+Docker supports V1 + V2 Stratum in both single-coin and multi-coin mode, including merge mining. V2 uses Noise Protocol encryption (opt-in via `STRATUM_V2_ENABLED=true`). Docker is at full feature parity for single-node deployments.
 
 **Requirements:** Docker Engine 24+ or Docker Desktop with Compose V2.
 
@@ -223,7 +223,7 @@ docker compose --profile dgb up -d       # Start (replace dgb with your coin)
 - Windows Home: WSL2 only (no Hyper-V option)
 - Docker Desktop uses bridge networking; host mode not available
 - No automated upgrade path
-- V1 single-coin solo mining only (same as Linux Docker)
+- V1 Stratum only — single-coin and multi-coin modes supported (same as Linux Docker)
 
 **Use Windows/WSL2 for:** Development, testing, pool evaluation.
 **Use Linux native for:** All production mining operations.
@@ -734,4 +734,35 @@ sudo ufw enable
 
 ---
 
-*Spiral Pool — Phi Forge 1.1.2*
+## 10. Operator Legal Protection (Optional)
+
+If you accept miners from the public, you may want to establish a direct legal relationship between you (the operator) and your miners. The Spiral Pool [LICENSE](../../LICENSE) and [TERMS.md](../../TERMS.md) govern the software license between authors and users of the code — they do **not** create a legal relationship between pool operators and miners connecting to operator-hosted pools.
+
+### Stratum MOTD — Built-in Legal Banner
+
+Spiral Pool implements a stratum-level "Message of the Day" via the `client.show_message` protocol extension ([server.go:732-743](../../src/stratum/internal/stratum/server.go#L732-L743)). This is sent over the Stratum TCP connection directly to mining hardware/software immediately after `mining.subscribe`, before any work is issued. Compatible miners display the message on their status screen or LCD; incompatible miners silently ignore it.
+
+**Configuration** (in `config.yaml`):
+```yaml
+stratum:
+  motd: "By connecting to this pool, you agree to our Terms of Service at https://example.com/tos"
+```
+
+**Legal use cases:** Terms of service acceptance notices, jurisdiction-specific disclaimers, data processing notices (GDPR), service-level expectations.
+
+**Limitations:** MOTD acceptance is passive (display-only). Whether a displayed banner constitutes legally binding acceptance varies by jurisdiction. For stronger acceptance mechanisms, consider web-based registration with click-through terms.
+
+### Suggested Operator Terms
+
+Operators accepting public miners may wish to require acceptance of terms covering:
+- Acknowledgment of financial risks and single-operator wallet architecture
+- No guarantee of rewards or uptime
+- Operator's limitation of liability
+- Governing law for the operator's jurisdiction
+- Data handling and privacy practices
+
+Consult legal counsel in your jurisdiction. **The Spiral Pool authors provide no legal templates and accept no liability for operator-miner relationships.**
+
+---
+
+*Spiral Pool — Convergent Spiral 1.2.0*

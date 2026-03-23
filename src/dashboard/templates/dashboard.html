@@ -679,7 +679,7 @@
         .collapsible-content {
             overflow: hidden;
             transition: max-height 0.4s ease, opacity 0.3s ease, padding 0.3s ease;
-            max-height: 2000px;
+            max-height: 50000px;
             opacity: 1;
             padding-top: 1rem;
         }
@@ -779,6 +779,103 @@
         .miners-section .miner-card {
             flex: 0 1 320px;
             max-width: 380px;
+        }
+
+        /* Statistics Chart Grid (2x2 KlingEx-style) */
+        .stats-chart-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+
+        .stats-chart-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-primary, rgba(0, 212, 255, 0.15));
+            border-radius: var(--border-radius, 12px);
+            padding: 1rem 1.25rem;
+            display: flex;
+            flex-direction: column;
+            min-height: 220px;
+        }
+
+        .stats-chart-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+
+        .stats-chart-label {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-family: var(--font-body, 'Rajdhani', sans-serif);
+            font-size: 0.85rem;
+            color: var(--text-secondary, #a1a9b8);
+            font-weight: 500;
+        }
+
+        .stats-chart-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            flex-shrink: 0;
+        }
+
+        .stats-chart-value {
+            font-family: var(--font-mono, 'Share Tech Mono', monospace);
+            font-size: 1.05rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        .stats-chart-body {
+            flex: 1;
+            position: relative;
+            min-height: 150px;
+        }
+
+        .stats-chart-body canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100% !important;
+            height: 100% !important;
+        }
+
+        /* Period selector dropdown */
+        .stats-period-dropdown {
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid var(--border-primary, rgba(0, 212, 255, 0.15));
+            border-radius: 6px;
+            color: var(--text-primary, #f1f5f9);
+            font-family: var(--font-mono, 'Share Tech Mono', monospace);
+            font-size: 0.7rem;
+            padding: 4px 8px;
+            cursor: pointer;
+            letter-spacing: 0.5px;
+            outline: none;
+            -webkit-appearance: none;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236b7280'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 6px center;
+            padding-right: 20px;
+        }
+
+        .stats-period-dropdown:hover {
+            border-color: var(--neon-blue, #3b9dff);
+        }
+
+        .stats-period-dropdown:focus {
+            border-color: var(--neon-blue, #3b9dff);
+            box-shadow: 0 0 8px rgba(59, 157, 255, 0.2);
+        }
+
+        .stats-period-dropdown option {
+            background: var(--bg-card, #0a0e15);
+            color: var(--text-primary, #f1f5f9);
         }
 
         /* Charts Row */
@@ -1671,6 +1768,44 @@
         .activity-message { flex: 1; color: var(--text-secondary, #c0c0c0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .activity-time { flex-shrink: 0; color: var(--text-muted, #8899aa); font-size: 0.72rem; }
         .activity-empty { text-align: center; color: var(--text-muted, #8899aa); padding: 2rem 0; font-size: 0.85rem; }
+
+        /* Activity + Leaderboard split layout */
+        .activity-leaderboard-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+        .activity-panel,
+        .leaderboard-panel {
+            background: var(--bg-card, #0a0e15);
+            border: 1px solid var(--border-primary, rgba(0, 212, 255, 0.15));
+            border-radius: var(--border-radius, 12px);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .panel-header {
+            padding: 0.6rem 0.8rem;
+            border-bottom: 1px solid var(--border-primary, rgba(0, 212, 255, 0.15));
+            background: rgba(0, 0, 0, 0.15);
+        }
+        .panel-title {
+            font-family: var(--font-display, 'Orbitron', sans-serif);
+            font-size: 0.8rem;
+            color: var(--text-primary, #f1f5f9);
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+        .activity-panel .activity-feed-list {
+            max-height: 380px;
+            padding: 0.4rem;
+        }
+        .leaderboard-content {
+            max-height: 380px;
+            overflow-y: auto;
+            padding: 0.6rem 0.8rem;
+            font-size: 0.85rem;
+        }
     </style>
     <script>
         (function() {
@@ -2165,6 +2300,25 @@
                         </div>
                     </div>
 
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 0.4rem; margin-bottom: 0.75rem;">
+                        <div>
+                            <label style="color: var(--text-muted); font-size: 0.6rem; display: block; margin-bottom: 2px;">Pool HR</label>
+                            <input type="color" id="ct-chart-pool-hashrate" value="#fb923c" data-var="chart-pool-hashrate" onchange="customThemeLive()" style="width: 100%; height: 24px; border: none; border-radius: 4px; cursor: pointer;">
+                        </div>
+                        <div>
+                            <label style="color: var(--text-muted); font-size: 0.6rem; display: block; margin-bottom: 2px;">Net HR</label>
+                            <input type="color" id="ct-chart-network-hashrate" value="#3b9dff" data-var="chart-network-hashrate" onchange="customThemeLive()" style="width: 100%; height: 24px; border: none; border-radius: 4px; cursor: pointer;">
+                        </div>
+                        <div>
+                            <label style="color: var(--text-muted); font-size: 0.6rem; display: block; margin-bottom: 2px;">Difficulty</label>
+                            <input type="color" id="ct-chart-difficulty" value="#9175f0" data-var="chart-difficulty" onchange="customThemeLive()" style="width: 100%; height: 24px; border: none; border-radius: 4px; cursor: pointer;">
+                        </div>
+                        <div>
+                            <label style="color: var(--text-muted); font-size: 0.6rem; display: block; margin-bottom: 2px;">Workers</label>
+                            <input type="color" id="ct-chart-workers" value="#4ade80" data-var="chart-workers" onchange="customThemeLive()" style="width: 100%; height: 24px; border: none; border-radius: 4px; cursor: pointer;">
+                        </div>
+                    </div>
+
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 0.75rem;">
                         <div>
                             <label style="color: var(--text-muted); font-size: 0.7rem; display: block; margin-bottom: 2px;">Text</label>
@@ -2235,10 +2389,10 @@
             <div class="stat-card hashrate">
                 <div class="stat-label">Pool Hashrate</div>
                 <div class="stat-value">
-                    <span id="total-hashrate">--</span>
-                    <span class="stat-unit">TH/s</span>
+                    <span id="hashrate-value">--</span>
+                    <span class="stat-unit" id="hashrate-unit">TH/s</span>
                 </div>
-                <div class="stat-sub" id="hashrate-sub">-- GH/s</div>
+                <div class="stat-sub" id="hashrate-sub">Workers: --</div>
             </div>
 
             <div class="stat-card shares">
@@ -2283,12 +2437,11 @@
             </div>
 
             <div class="stat-card temp">
-                <div class="stat-label">Miners Online</div>
+                <div class="stat-label">Miners Connected</div>
                 <div class="stat-value">
                     <span id="miners-online">-</span>
-                    <span class="stat-unit">/ <span id="miners-total">-</span></span>
                 </div>
-                <div class="stat-sub"><span id="avg-temp">Avg Temp: --°C</span> <span id="fleet-count" class="fleet-count"></span></div>
+                <div class="stat-sub"><span id="fleet-count"></span> <span id="avg-temp"></span></div>
             </div>
         </section>
 
@@ -2336,28 +2489,74 @@
             </div><!-- /collapsible-content -->
         </section>
 
-        <!-- Hashrate History Chart (Full Width) -->
+        <!-- Statistics Chart Grid (2x2: Pool Hashrate, Network Hashrate, Difficulty, Workers) -->
         <section class="collapsible-section charts-row" id="charts-section" data-section-id="charts">
             <div class="collapsible-header" onclick="toggleSection('charts-section')">
                 <span class="drag-handle" title="Drag to reorder">⠿</span>
-                <h3>📈 Hashrate History</h3>
+                <h3>📊 Statistics</h3>
                 <div style="display:flex; align-items:center; gap:0.5rem;">
-                    <select id="chart-period" class="chart-period-select" onclick="event.stopPropagation()" onchange="changeChartPeriod()">
-                        <option value="15m">15 Minutes</option>
-                        <option value="1h">1 Hour</option>
-                        <option value="24h" selected>24 Hours</option>
-                        <option value="7d">7 Days</option>
-                        <option value="30d">30 Days</option>
+                    <select id="stats-period-selector" class="stats-period-dropdown" onchange="changeStatsPeriod(this.value)" onclick="event.stopPropagation()">
+                        <option value="15m">15M</option>
+                        <option value="1h">1H</option>
+                        <option value="6h">6H</option>
+                        <option value="12h">12H</option>
+                        <option value="24h" selected>24H</option>
+                        <option value="7d">7D</option>
+                        <option value="30d">30D</option>
                     </select>
-                    <div class="chart-legend">
-                        <span class="legend-item"><span class="legend-dot hashrate"></span> Hashrate</span>
-                    </div>
                     <span class="collapsible-toggle">▼</span>
                 </div>
             </div>
             <div class="collapsible-content">
-                <div class="chart-container">
-                    <canvas id="hashrate-chart"></canvas>
+                <div class="stats-chart-grid">
+                    <div class="stats-chart-card">
+                        <div class="stats-chart-header">
+                            <div class="stats-chart-label">
+                                <span class="stats-chart-dot" style="background: var(--chart-pool-hashrate)"></span>
+                                Pool Hashrate
+                            </div>
+                            <div class="stats-chart-value" id="chart-val-pool-hashrate" style="color: var(--chart-pool-hashrate)">--</div>
+                        </div>
+                        <div class="stats-chart-body">
+                            <canvas id="chart-pool-hashrate"></canvas>
+                        </div>
+                    </div>
+                    <div class="stats-chart-card">
+                        <div class="stats-chart-header">
+                            <div class="stats-chart-label">
+                                <span class="stats-chart-dot" style="background: var(--chart-network-hashrate)"></span>
+                                Network Hashrate
+                            </div>
+                            <div class="stats-chart-value" id="chart-val-network-hashrate" style="color: var(--chart-network-hashrate)">--</div>
+                        </div>
+                        <div class="stats-chart-body">
+                            <canvas id="chart-network-hashrate"></canvas>
+                        </div>
+                    </div>
+                    <div class="stats-chart-card">
+                        <div class="stats-chart-header">
+                            <div class="stats-chart-label">
+                                <span class="stats-chart-dot" style="background: var(--chart-difficulty)"></span>
+                                Difficulty
+                            </div>
+                            <div class="stats-chart-value" id="chart-val-difficulty" style="color: var(--chart-difficulty)">--</div>
+                        </div>
+                        <div class="stats-chart-body">
+                            <canvas id="chart-difficulty"></canvas>
+                        </div>
+                    </div>
+                    <div class="stats-chart-card">
+                        <div class="stats-chart-header">
+                            <div class="stats-chart-label">
+                                <span class="stats-chart-dot" style="background: var(--chart-workers)"></span>
+                                Workers &amp; Miners
+                            </div>
+                            <div class="stats-chart-value" id="chart-val-workers" style="color: var(--chart-workers)">--</div>
+                        </div>
+                        <div class="stats-chart-body">
+                            <canvas id="chart-workers"></canvas>
+                        </div>
+                    </div>
                 </div>
             </div>
         </section>
@@ -2560,26 +2759,34 @@
                     </div>
                 </div>
 
-                <!-- Top Block Finders -->
-                <div style="margin-top: 1rem; border-top: 1px solid rgba(0, 212, 255, 0.15); padding-top: 0.75rem;">
-                    <h4 style="margin: 0 0 0.5rem; font-size: 0.85rem; color: var(--neon-cyan); font-family: var(--font-display);">&#127942; Top Block Finders</h4>
-                    <div id="leaderboard-content" style="font-size: 0.85rem;">
-                        <span style="color: var(--text-muted);">Loading...</span>
-                    </div>
-                </div>
             </div>
         </section>
 
-        <!-- Activity Feed -->
+        <!-- Activity Feed & Top Block Finders -->
         <section class="collapsible-section" id="activity-section" data-section-id="activity">
             <div class="collapsible-header" onclick="toggleSection('activity-section')">
                 <span class="drag-handle" title="Drag to reorder">⠿</span>
-                <h3>📋 Activity Feed</h3>
+                <h3>📋 Activity &amp; Top Block Finders</h3>
                 <span class="collapsible-toggle">▼</span>
             </div>
             <div class="collapsible-content">
-                <div id="activity-feed-list" class="activity-feed-list">
-                    <div class="activity-empty">No events recorded yet</div>
+                <div class="activity-leaderboard-grid">
+                    <div class="activity-panel">
+                        <div class="panel-header">
+                            <span class="panel-title">Activity Feed</span>
+                        </div>
+                        <div id="activity-feed-list" class="activity-feed-list">
+                            <div class="activity-empty">No events recorded yet</div>
+                        </div>
+                    </div>
+                    <div class="leaderboard-panel">
+                        <div class="panel-header">
+                            <span class="panel-title">&#127942; Top Block Finders</span>
+                        </div>
+                        <div id="leaderboard-content" class="leaderboard-content">
+                            <span style="color: var(--text-muted);">Loading...</span>
+                        </div>
+                    </div>
                 </div>
             </div>
         </section>
@@ -2591,7 +2798,7 @@
     <footer class="dashboard-footer" style="background: var(--bg-primary) !important;">
         <div class="footer-slogan">Not your pool, not your code. Run your own.</div>
         <div class="footer-info">
-            <span>Spiral Pool Dashboard v1.1.2</span>
+            <span>Spiral Pool Dashboard v1.2.0</span>
             <span> | </span>
             <span>Auto-refresh: <span id="refresh-countdown">30</span>s</span>
         </div>
@@ -2740,184 +2947,200 @@
             }
         }
 
-        // Hashrate History Chart - Multiple time periods
-        let hashrateChart = null;
-        let currentChartPeriod = '24h';
+        // =====================================================================
+        // STATISTICS CHART GRID (2x2: Pool HR, Network HR, Difficulty, Workers)
+        // =====================================================================
+        const statsCharts = {};  // {metricKey: Chart instance}
+        let currentStatsPeriod = '24h';
 
-        // Separate history storage for each time period
-        const hashrateHistoryData = {
-            '15m': [],   // 15-sec intervals, max 60 points
-            '1h': [],    // 1-min intervals, max 60 points
-            '24h': [],   // 5-min intervals, max 288 points
-            '7d': [],    // 30-min intervals, max 336 points
-            '30d': []    // 2-hour intervals, max 360 points
+        // Metrics config: canvas ID, CSS var, value element ID, tooltip formatter, value converter
+        const statsMetrics = {
+            'pool_hashrate':    { canvasId: 'chart-pool-hashrate',    cssVar: '--chart-pool-hashrate',    valueId: 'chart-val-pool-hashrate',    fill: true },
+            'network_hashrate': { canvasId: 'chart-network-hashrate', cssVar: '--chart-network-hashrate', valueId: 'chart-val-network-hashrate', fill: true },
+            'network_difficulty':{ canvasId: 'chart-difficulty',       cssVar: '--chart-difficulty',       valueId: 'chart-val-difficulty',       fill: true },
+            'connected_miners': { canvasId: 'chart-workers',          cssVar: '--chart-workers',          valueId: 'chart-val-workers',          fill: true }
         };
 
-        const historyConfig = {
-            '15m': { maxPoints: 60, intervalMs: 15 * 1000, label: '15 Minutes' },
-            '1h': { maxPoints: 60, intervalMs: 60 * 1000, label: '1 Hour' },
-            '24h': { maxPoints: 288, intervalMs: 5 * 60 * 1000, label: '24 Hours' },
-            '7d': { maxPoints: 336, intervalMs: 30 * 60 * 1000, label: '7 Days' },
+        // History data: {metric: {period: [{time, value, timestamp}]}}
+        const statsHistoryData = {};
+        const statsLastUpdate = {};
+        Object.keys(statsMetrics).forEach(m => {
+            statsHistoryData[m] = { '15m': [], '1h': [], '6h': [], '12h': [], '24h': [], '7d': [], '30d': [] };
+            statsLastUpdate[m] = { '15m': 0, '1h': 0, '6h': 0, '12h': 0, '24h': 0, '7d': 0, '30d': 0 };
+        });
+
+        const statsHistoryConfig = {
+            '15m': { maxPoints: 30,  intervalMs: 30 * 1000,          label: '15 Minutes' },
+            '1h':  { maxPoints: 60,  intervalMs: 60 * 1000,          label: '1 Hour' },
+            '6h':  { maxPoints: 72,  intervalMs: 5 * 60 * 1000,      label: '6 Hours' },
+            '12h': { maxPoints: 72,  intervalMs: 10 * 60 * 1000,     label: '12 Hours' },
+            '24h': { maxPoints: 144, intervalMs: 10 * 60 * 1000,     label: '24 Hours' },
+            '7d':  { maxPoints: 336, intervalMs: 30 * 60 * 1000,     label: '7 Days' },
             '30d': { maxPoints: 360, intervalMs: 2 * 60 * 60 * 1000, label: '30 Days' }
         };
 
-        let lastHistoryUpdate = { '15m': 0, '1h': 0, '24h': 0, '7d': 0, '30d': 0 };
+        // Read a CSS custom property value
+        function getChartColor(cssVar) {
+            return getComputedStyle(document.documentElement).getPropertyValue(cssVar).trim() || '#888';
+        }
 
-        // Initialize Chart
-        function initHashrateChart() {
-            const ctx = document.getElementById('hashrate-chart').getContext('2d');
+        // Convert hex color to rgba
+        function hexToRgba(hex, alpha) {
+            hex = hex.replace('#', '');
+            if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+            const r = parseInt(hex.substring(0,2), 16);
+            const g = parseInt(hex.substring(2,4), 16);
+            const b = parseInt(hex.substring(4,6), 16);
+            return `rgba(${r},${g},${b},${alpha})`;
+        }
 
-            hashrateChart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: [],
-                    datasets: [{
-                        label: 'Hashrate (TH/s)',
-                        data: [],
-                        borderColor: '#00fff2',
-                        backgroundColor: 'rgba(0, 255, 242, 0.1)',
-                        borderWidth: 2,
-                        fill: true,
-                        tension: 0.3,
-                        pointRadius: 0,
-                        pointHoverRadius: 4,
-                        pointHoverBackgroundColor: '#00fff2',
-                        pointHoverBorderColor: '#fff'
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    interaction: {
-                        intersect: false,
-                        mode: 'index'
+        // Format hashrate value with auto-scaling units
+        function formatHashrateValue(hps) {
+            if (hps >= 1e18) return (hps / 1e18).toFixed(2) + ' EH/s';
+            if (hps >= 1e15) return (hps / 1e15).toFixed(2) + ' PH/s';
+            if (hps >= 1e12) return (hps / 1e12).toFixed(2) + ' TH/s';
+            if (hps >= 1e9) return (hps / 1e9).toFixed(2) + ' GH/s';
+            if (hps >= 1e6) return (hps / 1e6).toFixed(2) + ' MH/s';
+            if (hps >= 1e3) return (hps / 1e3).toFixed(2) + ' KH/s';
+            return hps.toFixed(0) + ' H/s';
+        }
+
+        // Format difficulty with SI suffixes
+        function formatDifficultyValue(diff) {
+            if (diff >= 1e15) return (diff / 1e15).toFixed(2) + ' P';
+            if (diff >= 1e12) return (diff / 1e12).toFixed(2) + ' T';
+            if (diff >= 1e9) return (diff / 1e9).toFixed(2) + ' G';
+            if (diff >= 1e6) return (diff / 1e6).toFixed(2) + ' M';
+            if (diff >= 1e3) return (diff / 1e3).toFixed(2) + ' K';
+            return diff.toFixed(2);
+        }
+
+        // Get tooltip label callback for a metric
+        function getTooltipCallback(metricKey) {
+            if (metricKey === 'pool_hashrate' || metricKey === 'network_hashrate') {
+                return function(ctx) { return formatHashrateValue(ctx.parsed.y); };
+            } else if (metricKey === 'network_difficulty') {
+                return function(ctx) { return formatDifficultyValue(ctx.parsed.y); };
+            } else {
+                return function(ctx) { return Math.round(ctx.parsed.y) + ' workers'; };
+            }
+        }
+
+        // Get Y-axis tick callback for a metric
+        function getYTickCallback(metricKey) {
+            if (metricKey === 'pool_hashrate' || metricKey === 'network_hashrate') {
+                return function(v) { return v > 0 ? formatHashrateValue(v) : '0'; };
+            } else if (metricKey === 'network_difficulty') {
+                return function(v) { return v > 0 ? formatDifficultyValue(v) : '0'; };
+            } else {
+                return function(v) { return Math.round(v); };
+            }
+        }
+
+        // Initialize all 4 stats charts
+        function initStatsCharts() {
+            Object.entries(statsMetrics).forEach(([metricKey, cfg]) => {
+                const canvas = document.getElementById(cfg.canvasId);
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+                const color = getChartColor(cfg.cssVar);
+
+                statsCharts[metricKey] = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: [],
+                        datasets: [{
+                            data: [],
+                            borderColor: color,
+                            backgroundColor: hexToRgba(color, 0.08),
+                            borderWidth: 2,
+                            fill: cfg.fill,
+                            tension: 0.3,
+                            pointRadius: 0,
+                            pointHoverRadius: 3,
+                            pointHoverBackgroundColor: color,
+                            pointHoverBorderColor: '#fff'
+                        }]
                     },
-                    plugins: {
-                        legend: {
-                            display: false
-                        },
-                        tooltip: {
-                            backgroundColor: 'rgba(10, 15, 26, 0.95)',
-                            borderColor: 'rgba(0, 212, 255, 0.3)',
-                            borderWidth: 1,
-                            titleColor: '#00d4ff',
-                            bodyColor: '#e2e8f0',
-                            padding: 10,
-                            displayColors: false,
-                            callbacks: {
-                                label: function(context) {
-                                    const value = context.parsed.y;
-                                    // Algorithm-aware tooltip formatting
-                                    if (isScryptCoin()) {
-                                        // Scrypt: value is in TH/s, convert to GH/s or MH/s
-                                        const ghs = value * 1000;
-                                        if (ghs >= 1000) {
-                                            return value.toFixed(2) + ' TH/s';
-                                        } else if (ghs >= 1) {
-                                            return ghs.toFixed(2) + ' GH/s';
-                                        } else {
-                                            return (ghs * 1000).toFixed(1) + ' MH/s';
-                                        }
-                                    }
-                                    // SHA-256d: standard TH/s to PH/s scale
-                                    if (value >= 1000) {
-                                        return (value / 1000).toFixed(2) + ' PH/s';
-                                    } else if (value >= 1) {
-                                        return value.toFixed(3) + ' TH/s';
-                                    } else {
-                                        return (value * 1000).toFixed(1) + ' GH/s';
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    scales: {
-                        x: {
-                            display: true,
-                            grid: {
-                                color: 'rgba(0, 212, 255, 0.05)',
-                                drawBorder: false
-                            },
-                            ticks: {
-                                color: '#64748b',
-                                maxTicksLimit: 6,
-                                maxRotation: 0,
-                                autoSkip: true,
-                                font: {
-                                    family: "'Share Tech Mono', monospace",
-                                    size: 10
-                                }
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: { intersect: false, mode: 'index' },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                backgroundColor: 'rgba(10, 15, 26, 0.95)',
+                                borderColor: hexToRgba(color, 0.3),
+                                borderWidth: 1,
+                                titleColor: color,
+                                bodyColor: '#e2e8f0',
+                                padding: 8,
+                                displayColors: false,
+                                callbacks: { label: getTooltipCallback(metricKey) }
                             }
                         },
-                        y: {
-                            display: true,
-                            beginAtZero: true,
-                            grace: '10%',
-                            grid: {
-                                color: 'rgba(0, 212, 255, 0.05)',
-                                drawBorder: false
+                        scales: {
+                            x: {
+                                display: true,
+                                grid: { color: 'rgba(255,255,255,0.03)', drawBorder: false },
+                                ticks: {
+                                    color: '#64748b', maxTicksLimit: 5, maxRotation: 0, autoSkip: true,
+                                    font: { family: "'Share Tech Mono', monospace", size: 9 }
+                                }
                             },
-                            ticks: {
-                                color: '#64748b',
-                                maxTicksLimit: 5,
-                                font: {
-                                    family: "'Share Tech Mono', monospace",
-                                    size: 10
-                                },
-                                callback: function(value) {
-                                    if (value >= 1000) {
-                                        return (value / 1000).toFixed(1) + ' PH/s';
-                                    } else if (value >= 1) {
-                                        return value.toFixed(2) + ' TH/s';
-                                    } else if (value >= 0.001) {
-                                        return (value * 1000).toFixed(1) + ' GH/s';
-                                    } else if (value > 0) {
-                                        return (value * 1000000).toFixed(0) + ' MH/s';
-                                    } else {
-                                        return '0';
-                                    }
+                            y: {
+                                display: true,
+                                beginAtZero: metricKey === 'connected_miners',
+                                grace: '10%',
+                                grid: { color: 'rgba(255,255,255,0.03)', drawBorder: false },
+                                ticks: {
+                                    color: '#64748b', maxTicksLimit: 4,
+                                    font: { family: "'Share Tech Mono', monospace", size: 9 },
+                                    callback: getYTickCallback(metricKey)
                                 }
                             }
                         }
                     }
-                }
+                });
             });
         }
 
-        // Update hashrate history for all time periods
-        function updateHashrateHistory(hashrateThs) {
+        // Update stats history for all metrics and periods
+        function updateStatsHistory(poolHashrateHps, networkHashrateHps, networkDifficulty, connectedMiners) {
             const now = Date.now();
+            const values = {
+                'pool_hashrate': poolHashrateHps,
+                'network_hashrate': networkHashrateHps,
+                'network_difficulty': networkDifficulty,
+                'connected_miners': connectedMiners
+            };
 
-            // Update each time period if enough time has passed
-            Object.keys(historyConfig).forEach(period => {
-                const config = historyConfig[period];
-                if (now - lastHistoryUpdate[period] >= config.intervalMs) {
-                    const timeLabel = formatTimeLabel(period);
-
-                    hashrateHistoryData[period].push({
-                        time: timeLabel,
-                        value: hashrateThs,
-                        timestamp: now
-                    });
-
-                    // Trim to max points
-                    if (hashrateHistoryData[period].length > config.maxPoints) {
-                        hashrateHistoryData[period].shift();
+            Object.keys(statsHistoryConfig).forEach(period => {
+                const config = statsHistoryConfig[period];
+                Object.keys(values).forEach(metric => {
+                    if (now - statsLastUpdate[metric][period] >= config.intervalMs) {
+                        const timeLabel = formatStatsTimeLabel(period);
+                        statsHistoryData[metric][period].push({
+                            time: timeLabel,
+                            value: values[metric],
+                            timestamp: now
+                        });
+                        if (statsHistoryData[metric][period].length > config.maxPoints) {
+                            statsHistoryData[metric][period].shift();
+                        }
+                        statsLastUpdate[metric][period] = now;
                     }
-
-                    lastHistoryUpdate[period] = now;
-                }
+                });
             });
 
-            // Update the visible chart
-            updateChartDisplay();
+            updateAllStatsCharts();
         }
 
         // Format time label based on period
-        function formatTimeLabel(period) {
+        function formatStatsTimeLabel(period) {
             const now = new Date();
-            if (period === '15m' || period === '1h') {
-                return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            if (period === '15m' || period === '1h' || period === '6h' || period === '12h') {
+                return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             } else if (period === '24h') {
                 return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             } else if (period === '7d') {
@@ -2927,106 +3150,143 @@
             }
         }
 
-        // Load saved history from server to seed charts on page load
+        // Update all 4 chart displays with current period data
+        function updateAllStatsCharts() {
+            Object.entries(statsMetrics).forEach(([metricKey, cfg]) => {
+                const chart = statsCharts[metricKey];
+                if (!chart) return;
+
+                const data = statsHistoryData[metricKey][currentStatsPeriod] || [];
+                chart.data.labels = data.map(h => h.time);
+                chart.data.datasets[0].data = data.map(h => h.value);
+                chart.update('none');
+            });
+
+            // Update current value displays
+            updateStatsValueDisplays();
+        }
+
+        // Update the value text in each chart card header
+        function updateStatsValueDisplays() {
+            // Pool Hashrate
+            const poolEl = document.getElementById('chart-val-pool-hashrate');
+            if (poolEl && currentHashrateThs !== undefined) {
+                poolEl.textContent = formatHashrate(currentHashrateThs) + ' ' + getHashrateUnit(currentHashrateThs);
+            }
+            // Network Hashrate
+            const netEl = document.getElementById('chart-val-network-hashrate');
+            if (netEl && _lastNetworkHashrate > 0) {
+                netEl.textContent = formatHashrateValue(_lastNetworkHashrate);
+            }
+            // Difficulty
+            const diffEl = document.getElementById('chart-val-difficulty');
+            if (diffEl && currentNetworkDifficulty > 0) {
+                diffEl.textContent = formatDifficultyValue(currentNetworkDifficulty);
+            }
+            // Workers & Miners
+            const workEl = document.getElementById('chart-val-workers');
+            if (workEl) {
+                const poolW = _lastConnectedMiners || 0;
+                const farmM = _lastTotalMiners || 0;
+                workEl.textContent = poolW + ' w' + (farmM > 0 ? ' \u00B7 ' + farmM + ' m' : '');
+            }
+        }
+
+        // Track latest values for display
+        let _lastNetworkHashrate = 0;
+        let _lastConnectedMiners = 0;
+        let _lastTotalMiners = 0;
+
+        // Change stats period (shared for all 4 charts)
+        function changeStatsPeriod(period) {
+            currentStatsPeriod = period;
+            updateAllStatsCharts();
+        }
+
+        // Load saved history from server to seed all 4 charts
         async function loadSavedHistory() {
             try {
-                const response = await fetch('/api/pool/history?hours=168');
+                const response = await fetch('/api/pool/history?hours=720');
                 if (!response.ok) return;
                 const data = await response.json();
-                const poolHR = data.pool_hashrate || [];
-                if (poolHR.length === 0) return;
 
-                // Seed each period with the appropriate time range
+                // Map API fields to metric keys with value converters
+                const apiMap = {
+                    'pool_hashrate':     { src: data.pool_hashrate || [],     convert: v => v },      // Already H/s
+                    'network_hashrate':  { src: data.network_hashrate || [],  convert: v => v },      // Already H/s
+                    'network_difficulty':{ src: data.network_difficulty || [], convert: v => v },      // Raw difficulty
+                    'connected_miners':  { src: data.connected_miners || [],  convert: v => v }       // Count
+                };
+
                 const now = Date.now();
                 const periodCutoffs = {
                     '15m': now - 15 * 60 * 1000,
                     '1h':  now - 1 * 3600 * 1000,
+                    '6h':  now - 6 * 3600 * 1000,
+                    '12h': now - 12 * 3600 * 1000,
                     '24h': now - 24 * 3600 * 1000,
                     '7d':  now - 7 * 24 * 3600 * 1000,
                     '30d': now - 30 * 24 * 3600 * 1000
                 };
 
-                Object.keys(periodCutoffs).forEach(period => {
-                    const cutoff = periodCutoffs[period];
-                    const config = historyConfig[period];
-                    const points = poolHR.filter(p => (p.time * 1000) >= cutoff);
-                    if (points.length === 0) return;
+                Object.entries(apiMap).forEach(([metric, {src, convert}]) => {
+                    if (src.length === 0) return;
 
-                    // Downsample to match the period's target resolution
-                    const targetIntervalMs = config.intervalMs;
-                    let lastTs = 0;
-                    const sampled = [];
-                    for (const p of points) {
-                        const tsMs = p.time * 1000;
-                        if (tsMs - lastTs >= targetIntervalMs * 0.8) {
-                            const d = new Date(tsMs);
-                            let label;
-                            if (period === '15m' || period === '1h') {
-                                label = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                            } else if (period === '24h') {
-                                label = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                            } else if (period === '7d') {
-                                label = d.toLocaleDateString([], { weekday: 'short', hour: '2-digit' });
-                            } else {
-                                label = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+                    Object.keys(periodCutoffs).forEach(period => {
+                        const cutoff = periodCutoffs[period];
+                        const config = statsHistoryConfig[period];
+                        const points = src.filter(p => (p.time * 1000) >= cutoff);
+                        if (points.length === 0) return;
+
+                        let lastTs = 0;
+                        const sampled = [];
+                        for (const p of points) {
+                            const tsMs = p.time * 1000;
+                            if (tsMs - lastTs >= config.intervalMs * 0.8) {
+                                const d = new Date(tsMs);
+                                let label;
+                                if (period === '1h' || period === '6h') {
+                                    label = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                } else if (period === '24h') {
+                                    label = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                } else if (period === '7d') {
+                                    label = d.toLocaleDateString([], { weekday: 'short', hour: '2-digit' });
+                                } else {
+                                    label = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+                                }
+                                sampled.push({ time: label, value: convert(p.value), timestamp: tsMs });
+                                lastTs = tsMs;
                             }
-                            // Convert hashrate to TH/s (backend stores raw H/s from pool API)
-                            sampled.push({ time: label, value: p.value / 1e12, timestamp: tsMs });
-                            lastTs = tsMs;
                         }
-                    }
 
-                    // Only seed if we have more points than what's already accumulated client-side
-                    if (sampled.length > hashrateHistoryData[period].length) {
-                        hashrateHistoryData[period] = sampled.slice(-config.maxPoints);
-                        lastHistoryUpdate[period] = sampled.length > 0 ? sampled[sampled.length - 1].timestamp : 0;
-                    }
+                        if (sampled.length > statsHistoryData[metric][period].length) {
+                            statsHistoryData[metric][period] = sampled.slice(-config.maxPoints);
+                            statsLastUpdate[metric][period] = sampled.length > 0 ? sampled[sampled.length - 1].timestamp : 0;
+                        }
+                    });
                 });
 
-                updateChartDisplay();
-                console.log('[HISTORY] Loaded saved history from server');
+                updateAllStatsCharts();
+                console.log('[STATS] Loaded saved history from server');
             } catch (err) {
-                console.warn('[HISTORY] Could not load saved history:', err);
+                console.warn('[STATS] Could not load saved history:', err);
             }
         }
 
-        // Change chart period
-        function changeChartPeriod() {
-            const select = document.getElementById('chart-period');
-            currentChartPeriod = select.value;
-            updateChartDisplay();
-        }
-
-        // Update chart with current period data
-        function updateChartDisplay() {
-            if (!hashrateChart) return;
-
-            const data = hashrateHistoryData[currentChartPeriod];
-            const values = data.map(h => h.value);
-
-            hashrateChart.data.labels = data.map(h => h.time);
-            hashrateChart.data.datasets[0].data = values;
-
-            // Update chart label based on algorithm
-            hashrateChart.data.datasets[0].label = isScryptCoin()
-                ? 'Hashrate (GH/s scale)'
-                : 'Hashrate (TH/s)';
-
-            // Auto-scale Y axis based on actual data
-            if (values.length > 0) {
-                const maxVal = Math.max(...values);
-                const minVal = Math.min(...values);
-
-                // Set appropriate scale with 20% headroom
-                if (maxVal > 0) {
-                    hashrateChart.options.scales.y.suggestedMax = maxVal * 1.2;
-                } else {
-                    // No data yet - use sensible default
-                    hashrateChart.options.scales.y.suggestedMax = 1;
-                }
-            }
-
-            hashrateChart.update('none');
+        // Update chart colors after theme change
+        function updateStatsChartColors() {
+            Object.entries(statsMetrics).forEach(([metricKey, cfg]) => {
+                const chart = statsCharts[metricKey];
+                if (!chart) return;
+                const color = getChartColor(cfg.cssVar);
+                const ds = chart.data.datasets[0];
+                ds.borderColor = color;
+                ds.backgroundColor = hexToRgba(color, 0.08);
+                ds.pointHoverBackgroundColor = color;
+                chart.options.plugins.tooltip.borderColor = hexToRgba(color, 0.3);
+                chart.options.plugins.tooltip.titleColor = color;
+                chart.update('none');
+            });
         }
 
         // Update all coin symbol displays
@@ -3851,9 +4111,16 @@
             actionsEl.style.display = (miner.online && supportedTypes.some(t => minerType.includes(t)))
                 ? 'flex' : 'none';
 
-            // Avalon: hide Overclock, show Mode (reuses Schedule button with relabeled text)
-            // Non-Avalon: show Overclock, hide Schedule button
-            const isAvalon = minerType.includes('avalon');
+            // Avalon: Configure (web UI) instead of Restart, hide Overclock, show Mode
+            // Non-Avalon: show Restart + Overclock, hide Schedule button
+            const isAvalon = minerType.includes('avalon') || minerType.includes('canaan');
+            const restartBtn = actionsEl.querySelector('.restart-btn');
+            if (restartBtn) {
+                restartBtn.style.display = isAvalon ? 'none' : 'inline-flex';
+                restartBtn.textContent = '⟳ Restart';
+                restartBtn.title = 'Restart Miner';
+                restartBtn.onclick = restartFromDetail;
+            }
             const overclockBtn = document.getElementById('detail-overclock-btn');
             const scheduleBtn = document.getElementById('detail-schedule-btn');
             if (overclockBtn) overclockBtn.style.display = isAvalon ? 'none' : 'inline-flex';
@@ -4686,6 +4953,7 @@
 
             // Quick actions available for all supported miners
             const minerTypeLower = (miner.type || '').toLowerCase();
+            const isAvalon = minerTypeLower === 'avalon' || minerTypeLower === 'canaan' || minerTypeLower.includes('avalon') || minerTypeLower.includes('canaan');
             const supportsRestart = ['axeos', 'nmaxe', 'nerdqaxe', 'qaxe', 'qaxeplus', 'bitaxe', 'hammer', 'avalon', 'canaan', 'antminer', 'antminer_scrypt', 'whatsminer', 'innosilicon', 'goldshell', 'futurebit', 'braiins', 'vnish', 'luxos', 'luckyminer', 'jingleminer', 'zyber', 'gekkoscience', 'ipollo', 'ebang', 'epic', 'elphapex'].includes(minerTypeLower) ||
                                    minerTypeLower.includes('axe') || minerTypeLower.includes('avalon') || minerTypeLower.includes('canaan') || minerTypeLower.includes('braiins') || minerTypeLower.includes('bos') || minerTypeLower.includes('vnish') || minerTypeLower.includes('luxos');
             // Overclock supported on AxeOS-based miners only (frequency/voltage tuning)
@@ -4756,9 +5024,15 @@
                         </div>
                         ${supportsRestart && isOnline ? `
                         <div class="miner-actions">
+                            ${isAvalon ? `
+                            <button class="miner-action-btn restart" onclick="event.stopPropagation(); window.open('http://${escapedIp}', '_blank')" title="Open Avalon Web UI">
+                                ⚙ Configure
+                            </button>
+                            ` : `
                             <button class="miner-action-btn restart" onclick="event.stopPropagation(); restartMiner('${escapedName}', '${escapedIp}', '${escapedType}')" title="Restart Miner">
                                 ⟳ Restart
                             </button>
+                            `}
                             ${supportsOverclock ? `
                             <button class="miner-action-btn overclock" onclick="event.stopPropagation(); openOverclockModal('${escapedName}', '${escapedIp}', '${escapedType}', ${miner.frequency || 500}, ${miner.voltage || 1200})" title="Overclock Settings">
                                 ⚡ Overclock
@@ -4880,41 +5154,27 @@
             const farmHashrateThs = totals.hashrate_ths || 0;
 
             // Pool Hashrate card: only show stratum hashrate, never farm fallback
-            // If no miners are connected to the pool, hashrate is 0
+            // Farm hashrate is self-reported by devices and can be wildly inaccurate
             const poolMinersConnected = data.pool_connected_miners || 0;
-            const displayHashrateThs = poolMinersConnected > 0 ? (poolHashrateThs > 0 ? poolHashrateThs : farmHashrateThs) : 0;
+            const displayHashrateThs = poolHashrateThs;
             currentHashrateThs = displayHashrateThs; // Store for earnings calc
 
-            // Algorithm-aware hashrate display
-            document.getElementById('total-hashrate').textContent = formatHashrate(displayHashrateThs);
+            // Update Pool Hashrate stat card
+            const hrValEl = document.getElementById('hashrate-value');
+            const hrUnitEl = document.getElementById('hashrate-unit');
+            const hrSubEl = document.getElementById('hashrate-sub');
+            if (hrValEl) hrValEl.textContent = formatHashrate(displayHashrateThs);
+            if (hrUnitEl) hrUnitEl.textContent = getHashrateUnit(displayHashrateThs);
+            if (hrSubEl) hrSubEl.textContent = 'Workers: ' + poolMinersConnected;
 
-            // Update the unit label based on algorithm
-            const hashrateUnitEl = document.querySelector('.stat-card.hashrate .stat-unit');
-            if (hashrateUnitEl) {
-                hashrateUnitEl.textContent = getHashrateUnit(displayHashrateThs);
-            }
-
-            // Update hashrate history chart with pool hashrate
-            updateHashrateHistory(displayHashrateThs);
-
-            // Show pool connected miners count if available, otherwise show miner count
-            if (poolHashrateThs > 0) {
-                const poolMiners = data.pool_connected_miners || 0;
-                const totalCountW = totals.total_count || 0;
-                const clampedWorkers = totalCountW > 0 ? Math.min(poolMiners, totalCountW) : poolMiners;
-                // Show both pool and farm hashrate for comparison (algorithm-aware)
-                const farmDisplay = farmHashrateThs > 0
-                    ? ` • Farm: ${formatHashrate(farmHashrateThs)} ${getHashrateUnit(farmHashrateThs)}`
-                    : '';
-                document.getElementById('hashrate-sub').textContent = `${clampedWorkers} workers${farmDisplay}`;
-            } else {
-                // Pool hashrate not available, show pool-connected count with fleet fallback
-                const poolMinersAlt = data.pool_connected_miners || 0;
-                const totalCount = totals.total_count || 0;
-                const clampedOnline = totalCount > 0 ? Math.min(poolMinersAlt, totalCount) : poolMinersAlt;
-                document.getElementById('hashrate-sub').textContent =
-                    `${clampedOnline}/${totalCount} miners online`;
-            }
+            // Update Statistics chart grid (pool hashrate, network, difficulty, workers)
+            const networkHashrateHps = data.network_hashrate || 0;
+            const networkDiff = data.network_difficulty || 0;
+            _lastNetworkHashrate = networkHashrateHps;
+            _lastConnectedMiners = poolMinersConnected;
+            _lastTotalMiners = totals.total_count || 0;
+            updateStatsHistory(poolHashrateHps, networkHashrateHps, networkDiff, poolMinersConnected);
+            updateStatsValueDisplays();
 
             // Power stats (optional elements - may not exist in all layouts)
             const powerEl = document.getElementById('total-power');
@@ -4966,30 +5226,39 @@
             updateLastBlockDisplay(lastBlockTime, lastBlockFinder, lastBlockHeight);
 
             // Check for new blocks and trigger celebration (with finder info from API)
-            // Quiet hours: suppress confetti/audio but still update block count
+            // Only celebrate blocks found recently (within 5 minutes) to prevent
+            // stale celebrations after page reload, service restart, or session clear
             const blockFinder = data.last_block_finder || null;
             const blockHeight = data.last_block_height || null;
             const celebrationQuiet = data.celebration_quiet_hours || false;
-            checkForNewBlocks(currentBlocks, blockFinder, blockHeight, celebrationQuiet);
+            const blockTime = data.last_block_time ? new Date(data.last_block_time).getTime() : 0;
+            const blockAgeMs = blockTime > 0 ? (Date.now() - blockTime) : Infinity;
+            const isRecentBlock = blockAgeMs < 5 * 60 * 1000; // 5 minutes
+            if (isRecentBlock) {
+                checkForNewBlocks(currentBlocks, blockFinder, blockHeight, celebrationQuiet);
+            } else {
+                // Still update the block count tracker without firing celebration
+                lastKnownBlockCount = currentBlocks;
+                sessionStorage.setItem('spiral_last_blocks', currentBlocks);
+            }
 
             // Update all-time best difficulty
             document.getElementById('best-diff-alltime').textContent =
                 formatDifficulty(lifetime.best_share_difficulty);
 
-            // Pool-connected miners (stratum) as primary display
+            // Pool-connected miners (stratum only — actually submitting shares)
             const poolConnected = data.pool_connected_miners || 0;
-            const totalCount2 = totals.total_count || 0;
-            const clampedConnected = totalCount2 > 0 ? Math.min(poolConnected, totalCount2) : poolConnected;
-            document.getElementById('miners-online').textContent = clampedConnected;
-            document.getElementById('miners-total').textContent = totalCount2;
-            // Show fleet count as secondary info
+            document.getElementById('miners-online').textContent = poolConnected;
+
+            // Fleet info (devices reachable on network, may not be mining on this pool)
             const fleetEl = document.getElementById('fleet-count');
+            const fleetOnline = totals.online_count || 0;
+            const fleetTotal = totals.total_count || 0;
             if (fleetEl) {
-                const fleetOnline = totals.online_count || 0;
-                fleetEl.textContent = fleetOnline > 0 ? `(Fleet: ${fleetOnline} online)` : '';
+                fleetEl.textContent = fleetTotal > 0 ? `Fleet: ${fleetOnline}/${fleetTotal}` : '';
             }
 
-            // Calculate average temperature
+            // Average temperature from fleet devices
             let totalTemp = 0;
             let tempCount = 0;
             Object.values(miners).forEach(m => {
@@ -4998,8 +5267,11 @@
                     tempCount++;
                 }
             });
-            const avgTemp = tempCount > 0 ? (totalTemp / tempCount).toFixed(2) : '--';
-            document.getElementById('avg-temp').textContent = `Avg Temp: ${avgTemp}°C`;
+            const avgTempEl = document.getElementById('avg-temp');
+            if (avgTempEl) {
+                const avgTemp = tempCount > 0 ? (totalTemp / tempCount).toFixed(2) : null;
+                avgTempEl.textContent = avgTemp ? `${avgTemp}°C` : '';
+            }
 
             // Update lifetime stats — use pool-accepted shares directly from Prometheus
             const lifetimeShares = data.pool_accepted_shares > 0 ? data.pool_accepted_shares : (lifetime.total_pool_shares > 0 ? lifetime.total_pool_shares : 0);
@@ -5831,6 +6103,20 @@
                 'neon-pink': '#ff007c', 'neon-orange': '#ff9e64', 'neon-yellow': '#e0af68',
                 'neon-green': '#9ece6a', 'neon-red': '#f7768e',
                 'text-primary': '#c0caf5', 'text-secondary': '#a9b1d6', 'text-muted': '#565f89'
+            },
+            'phi-forge': {
+                'bg-primary': '#0a0a0e', 'bg-secondary': '#121118', 'bg-card': '#1a1822',
+                'neon-blue': '#d4a020', 'neon-cyan': '#f0d060', 'neon-purple': '#8868c0',
+                'neon-pink': '#c87040', 'neon-orange': '#e89020', 'neon-yellow': '#ffd700',
+                'neon-green': '#5cb85c', 'neon-red': '#d9534f',
+                'text-primary': '#ede8dc', 'text-secondary': '#9a9080', 'text-muted': '#5c564c'
+            },
+            'convergent-spiral': {
+                'bg-primary': '#08070c', 'bg-secondary': '#100e18', 'bg-card': '#181520',
+                'neon-blue': '#c89818', 'neon-cyan': '#e8c840', 'neon-purple': '#9070d0',
+                'neon-pink': '#d07838', 'neon-orange': '#f09828', 'neon-yellow': '#ffe030',
+                'neon-green': '#50b050', 'neon-red': '#e04848',
+                'text-primary': '#f0eade', 'text-secondary': '#a09878', 'text-muted': '#585048'
             }
         };
 
@@ -5889,6 +6175,11 @@
                 }
             } catch (e) {
                 console.log('Could not load theme data:', e);
+            }
+
+            // Update chart colors after theme CSS variables are applied
+            if (typeof updateStatsChartColors === 'function') {
+                updateStatsChartColors();
             }
         }
 
@@ -6126,6 +6417,11 @@
             const bgStyle = document.getElementById('ct-bg-style')?.value || 'grid';
             const grid = document.querySelector('.cyber-grid');
             if (grid) grid.setAttribute('data-bg-style', bgStyle);
+
+            // Update chart colors to match custom theme
+            if (typeof updateStatsChartColors === 'function') {
+                updateStatsChartColors();
+            }
         }
 
         function adjustBrightness(hex, amount) {
@@ -6578,8 +6874,8 @@
         document.addEventListener('DOMContentLoaded', () => {
             restoreCollapsedStates();  // Restore collapsed section states
             updateViewToggleButton(); // Restore miner view mode (flat/grouped)
-            initHashrateChart();
-            loadSavedHistory();   // Seed chart with server-saved history
+            initStatsCharts();
+            loadSavedHistory();   // Seed charts with server-saved history
             updateCoinSymbols();  // Set initial coin symbols
             fetchCurrencyConfig(); // Load currency display preferences
             fetchData();

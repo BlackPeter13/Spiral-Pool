@@ -862,7 +862,7 @@ def run_all_e2e_tests():
     total = len(results)
 
     for test_name, result in results.items():
-        status = "✓ PASS" if result else "✗ FAIL"
+        status = "[PASS]" if result else "[FAIL]"
         print(f"  {status} - {test_name}")
 
     print()

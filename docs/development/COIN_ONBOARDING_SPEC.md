@@ -329,4 +329,4 @@ QBX (Q-BitX)
 
 ---
 
-*Spiral Pool — Phi Forge 1.1.2 — Built on what came before. Growing toward phi.*
+*Spiral Pool — Convergent Spiral 1.2.0 — Built on what came before. Growing toward phi.*

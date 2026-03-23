@@ -166,72 +166,15 @@ The following may be provided at maintainer discretion, but are NOT guaranteed:
 
 Operators are responsible for their own incident response capabilities.
 
-## Operator Legal Protection Recommendations
+## Operator Legal Protection
 
-### Runtime Disclaimer Acceptance
+If you accept miners from the public, you should implement your own legal framework (terms of service, MOTD banners, privacy policies) appropriate to your operations and jurisdiction. Spiral Pool includes a built-in Stratum MOTD feature for this purpose.
 
-**Optional:** Operators may implement their own terms acceptance mechanism for miners connecting to their pool. This creates a direct legal relationship between the operator and their users.
-
-Implementation options:
-1. **Web-based registration** with click-through terms before providing pool credentials
-2. **Stratum MOTD** (implemented — see below) displaying terms on miner hardware when they connect (check if your jurisdiction recognizes banner acceptance)
-3. **Registration portal** requiring explicit acceptance before pool access
-
-### Stratum MOTD — Built-in Legal Banner (Not SSH)
-
-Spiral Pool implements a stratum-level "Message of the Day" via the `client.show_message` protocol extension ([server.go:732-743](src/stratum/internal/stratum/server.go#L732-L743)). This is **not** an SSH or CLI login banner — it is sent over the Stratum TCP connection directly to mining hardware/software (cgminer, AxeOS, Avalon controllers, etc.) immediately after the `mining.subscribe` response, before any work is issued. Compatible miners display the message on their status screen or LCD; incompatible miners silently ignore it.
-
-**Configuration** (in `config.yaml`):
-```yaml
-stratum:
-  motd: "By connecting to this pool, you agree to our Terms of Service at https://example.com/tos"
-```
-
-**How it works:**
-- The message is sent once per session at connection time, over the Stratum TCP wire
-- Displayed on the miner's screen/LCD (cgminer status, Avalon LCD, AxeOS web UI, etc.)
-
-**Legal use case:** Operators may use the MOTD to display:
-- Terms of service acceptance notices
-- Jurisdiction-specific legal disclaimers
-- Data processing notices (for GDPR compliance)
-- Service-level expectations (e.g., "This is a solo mining pool — no guaranteed payouts")
-
-**Limitations:** MOTD acceptance is passive (display-only). Whether a displayed banner constitutes legally binding acceptance varies by jurisdiction. Consult legal counsel for your specific requirements. For stronger acceptance mechanisms, consider web-based registration (option 1 above).
-
-### Suggested Operator Terms
-
-Operators may wish to require users to accept terms covering:
-- Acknowledgment of financial risks
-- No guarantee of rewards or uptime
-- Operator's limitation of liability
-- Governing law for the operator's jurisdiction
-- Data handling and privacy practices
-
-### Why This Matters
-
-The Spiral Pool LICENSE and TERMS.md govern the software license between authors and users of the software code. They do **not** create a legal relationship between pool operators and miners connecting to operator-hosted pools.
-
-Operators who:
-- Accept miners from the public
-- Construct block templates containing miner wallet addresses
-- Process miner data (IP addresses, wallet addresses, share submissions)
-
-Should implement their own legal framework appropriate to their operations and jurisdiction.
-
-### Template Resources
-
-Operators may wish to consult:
-- Legal counsel in their jurisdiction
-- Standard terms of service templates
-- Privacy policy generators (if collecting miner data)
-- Industry-standard mining pool terms
-
-**The Spiral Pool authors provide no legal templates for operators and accept no liability for operator-miner relationships.**
+See [OPERATIONS.md Section 10](docs/setup/OPERATIONS.md#10-operator-legal-protection-optional) for configuration details, implementation options, and suggested operator terms.
 
 ---
 
 *Security is a shared responsibility. This policy describes how to report vulnerabilities and provides general security guidance. You are responsible for securing your deployment.*
 
-*Spiral Pool v1.1.2 - Security Policy*
+*Spiral Pool v1.2.0 - Security Policy*
 *Made with 💙 from Canada 🍁 — ☮️✌️Peace and Love to the World 🌎 ❤️*

@@ -3885,8 +3885,8 @@ func (p *Pool) updateStats(ctx context.Context) {
 		return
 	}
 
-	// Calculate pool hashrate from recent shares
-	hashrate, err := p.db.GetPoolHashrate(ctx, 10)
+	// Calculate pool hashrate from recent shares (30-min window for stable readings)
+	hashrate, err := p.db.GetPoolHashrate(ctx, 30)
 	if err != nil {
 		p.logger.Warnw("Failed to calculate pool hashrate", "error", err)
 	}

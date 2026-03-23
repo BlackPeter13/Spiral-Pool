@@ -19,7 +19,7 @@ ASIC Miner API Protocol References (protocol documentation, not derived code):
 See LICENSE file for full BSD-3-Clause license terms.
 """
 
-__version__ = "1.1.2-PHI_FORGE"
+__version__ = "1.2.0-CONVERGENT_SPIRAL"
 
 import os
 import json
@@ -1458,6 +1458,8 @@ historical_data = {
     "shares_per_second": deque(maxlen=HISTORY_MAX_POINTS),
     "power_watts": deque(maxlen=HISTORY_MAX_POINTS),
     "temperatures": deque(maxlen=HISTORY_MAX_POINTS),
+    "network_difficulty": deque(maxlen=HISTORY_MAX_POINTS),
+    "network_hashrate": deque(maxlen=HISTORY_MAX_POINTS),
     "per_miner_hashrate": {}  # {name: deque(maxlen=HISTORY_MAX_POINTS)} - per-miner hashrate tracking
 }
 
@@ -3707,6 +3709,23 @@ def coin_rpc(symbol, method, params=None):
         load_multi_coin_config()
         node = MULTI_COIN_NODES[symbol]
 
+    # If credentials still missing, try loading from the coin's daemon conf file
+    if not node['rpc_user'] or not node['rpc_password']:
+        conf_path = node.get('config_file', '')
+        if conf_path and os.path.exists(conf_path):
+            try:
+                with open(conf_path, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith('rpcuser='):
+                            node['rpc_user'] = line.split('=', 1)[1].strip().strip('"').strip("'")
+                        elif line.startswith('rpcpassword='):
+                            node['rpc_password'] = line.split('=', 1)[1].strip().strip('"').strip("'")
+                if node['rpc_user'] and node['rpc_password']:
+                    print(f"Loaded RPC credentials from {conf_path} for {symbol}")
+            except Exception as e:
+                print(f"Could not read {conf_path}: {e}")
+
     if not node['rpc_user'] or not node['rpc_password']:
         return None
 
@@ -3818,10 +3837,12 @@ def fetch_coin_node_health(symbol):
         if uptime:
             health["uptime"] = uptime
 
-        # Calculate network hashrate from difficulty
-        if health["difficulty"] > 0:
-            # For SHA256/Scrypt: hashrate = difficulty * 2^32 / block_time
-            # Block times: DGB=15s, BTC/BCH/BC2=600s, LTC=150s, DOGE=60s
+        # Calculate network hashrate — prefer node RPC (actual recent block timing)
+        # over the formula (diff * 2^32 / block_time) which assumes target block rate
+        rpc_nhps = pool_stats_cache.get("node_networkhashps", 0)
+        if rpc_nhps and rpc_nhps > 0:
+            health["network_hashrate"] = rpc_nhps
+        elif health["difficulty"] > 0:
             coin_block_times = {
                 "DGB": 15, "BTC": 600, "BCH": 600, "BC2": 600,
                 "LTC": 150, "DOGE": 60, "DGB-SCRYPT": 15,
@@ -4062,23 +4083,26 @@ def fetch_health_data():
             node_health["mempool_bytes"] = mempool.get("bytes", 0)
 
         # Get mining info for network hashrate
-        # Use difficulty-based formula (diff * 2^32 / block_time) rather than
-        # getmininginfo.networkhashps — the RPC estimate can be inflated on
-        # small networks (e.g. QBX reports ~400 TH/s when explorer shows ~140 TH/s).
+        # Prefer cached node RPC getnetworkhashps (actual recent block timing)
+        # over the formula which assumes blocks arrive at target rate
         mining = coin_rpc(primary_coin, "getmininginfo")
-        if mining and not node_health.get("network_hashrate"):
-            diff_val = node_health.get("difficulty", 0) or float(mining.get("difficulty", 0))
-            if diff_val > 0:
-                coin_block_times = {
-                    "DGB": 15, "BTC": 600, "BCH": 600, "BC2": 600,
-                    "LTC": 150, "DOGE": 60, "DGB-SCRYPT": 15,
-                    "PEP": 60, "CAT": 600,
-                    "NMC": 600, "SYS": 60, "XMY": 60, "FBTC": 30, "QBX": 150
-                }
-                bt = coin_block_times.get(primary_coin, 600)
-                node_health["network_hashrate"] = diff_val * (2**32) / bt
-            else:
-                node_health["network_hashrate"] = mining.get("networkhashps", 0)
+        if not node_health.get("network_hashrate"):
+            cached_nhps = pool_stats_cache.get("node_networkhashps", 0)
+            if cached_nhps and cached_nhps > 0:
+                node_health["network_hashrate"] = cached_nhps
+            elif mining:
+                diff_val = node_health.get("difficulty", 0) or float(mining.get("difficulty", 0))
+                if diff_val > 0:
+                    coin_block_times = {
+                        "DGB": 15, "BTC": 600, "BCH": 600, "BC2": 600,
+                        "LTC": 150, "DOGE": 60, "DGB-SCRYPT": 15,
+                        "PEP": 60, "CAT": 600,
+                        "NMC": 600, "SYS": 60, "XMY": 60, "FBTC": 30, "QBX": 150
+                    }
+                    bt = coin_block_times.get(primary_coin, 600)
+                    node_health["network_hashrate"] = diff_val * (2**32) / bt
+                else:
+                    node_health["network_hashrate"] = mining.get("networkhashps", 0)
 
         # Get network traffic stats via getnettotals
         net_totals = coin_rpc(primary_coin, "getnettotals")
@@ -4121,6 +4145,25 @@ def fetch_health_data():
     return health_cache
 
 
+def _compute_network_hashrate(difficulty):
+    """Compute network hashrate (H/s).
+
+    Prefers the node's getnetworkhashps RPC value (cached in pool_stats_cache)
+    which uses a moving average over recent blocks and reflects actual network
+    performance.  Falls back to the formula  difficulty * 2^32 / block_time
+    when the RPC value is unavailable.
+    """
+    # Prefer node RPC networkhashps — it uses actual recent block timing
+    rpc_nhps = pool_stats_cache.get("node_networkhashps", 0)
+    if rpc_nhps and rpc_nhps > 0:
+        return rpc_nhps
+
+    if not difficulty or difficulty <= 0:
+        return 0
+    bt = block_reward_cache.get("block_time", 0) or 600
+    return difficulty * (2**32) / bt
+
+
 def record_historical_data():
     """Record current stats to historical data (called periodically)"""
     timestamp = time.time()
@@ -4155,6 +4198,20 @@ def record_historical_data():
     historical_data["power_watts"].append({
         "time": timestamp,
         "value": totals.get("power_watts", 0)
+    })
+
+    # Network difficulty and hashrate (for Statistics chart grid)
+    net_diff = pool_stats_cache.get("network_difficulty", 0)
+    historical_data["network_difficulty"].append({
+        "time": timestamp,
+        "value": net_diff
+    })
+    # Use RPC getnetworkhashps (accurate, uses actual block timing) when available,
+    # fall back to formula (inaccurate when blocks arrive faster/slower than target)
+    net_hashrate = _compute_network_hashrate(net_diff)
+    historical_data["network_hashrate"].append({
+        "time": timestamp,
+        "value": net_hashrate
     })
 
     # Per-miner hashrate tracking (local — no stratum API dependency)
@@ -4231,6 +4288,18 @@ def background_data_collection():
             fetch_pool_stats()
         except Exception as e:
             print(f"[BG] Pool stats fetch error: {e}")
+
+        # Cache the node's getnetworkhashps — uses actual recent block timing
+        # for more accurate network hashrate than the formula (diff * 2^32 / bt)
+        try:
+            coins = get_enabled_coins()
+            primary_coin = coins.get("primary")
+            if primary_coin:
+                nhps = coin_rpc(primary_coin, "getnetworkhashps")
+                if nhps and isinstance(nhps, (int, float)) and nhps > 0:
+                    pool_stats_cache["node_networkhashps"] = float(nhps)
+        except Exception as e:
+            print(f"[BG] Network hashrate RPC error: {e}")
 
         # Refresh miner device cache in background so the /api/miners request handler
         # rarely needs to do a slow synchronous fetch (which can block gunicorn workers).
@@ -6200,23 +6269,23 @@ def fetch_braiins(ip, username="root", password="", timeout=10):
             miner_stats = stats.get("miner_stats", {})
             # Hashrate in gigahash_per_second (GH/s), convert to TH/s
             nominal = miner_stats.get("nominal_hashrate", {})
-            hashrate_ghs = nominal.get("gigahash_per_second", 0)
+            hashrate_ghs = _safe_num(nominal.get("gigahash_per_second", 0))
             if not hashrate_ghs:
                 # Fallback to real_hashrate.last_5m
                 real = miner_stats.get("real_hashrate", {})
                 last5m = real.get("last_5m", {})
-                hashrate_ghs = last5m.get("gigahash_per_second", 0)
-            hashrate_ths = float(hashrate_ghs) / 1000 if hashrate_ghs else 0
+                hashrate_ghs = _safe_num(last5m.get("gigahash_per_second", 0))
+            hashrate_ths = hashrate_ghs / 1000 if hashrate_ghs else 0
 
             # Power: power_stats.approximated_consumption.watt
             power_stats = stats.get("power_stats", {})
             consumption = power_stats.get("approximated_consumption", {})
-            power_watts = consumption.get("watt", 0)
+            power_watts = _safe_num(consumption.get("watt", 0))
 
             # Pool stats
             pool_stats = stats.get("pool_stats", {})
-            accepted = pool_stats.get("accepted_shares", 0)
-            rejected = pool_stats.get("rejected_shares", 0) + pool_stats.get("stale_shares", 0)
+            accepted = _safe_num(pool_stats.get("accepted_shares", 0))
+            rejected = _safe_num(pool_stats.get("rejected_shares", 0)) + _safe_num(pool_stats.get("stale_shares", 0))
 
         # Extract temperatures and fan speeds from cooling
         chip_temp = 0
@@ -6227,14 +6296,14 @@ def fetch_braiins(ip, username="root", password="", timeout=10):
             # BOS+ API v1: highest_temperature.temperature.degree_c
             highest = cooling.get("highest_temperature", {})
             temp_obj = highest.get("temperature", {})
-            degree_c = temp_obj.get("degree_c", 0)
+            degree_c = _safe_num(temp_obj.get("degree_c", 0))
             if degree_c and degree_c > 0:
                 chip_temp = degree_c
                 board_temp = degree_c  # Only highest temp available in this endpoint
 
             # Fans: fans[].rpm
             fans = cooling.get("fans", [])
-            fan_speeds = [f.get("rpm", 0) for f in fans if f.get("rpm")]
+            fan_speeds = [_safe_num(f.get("rpm", 0)) for f in fans if f.get("rpm")]
             if fan_speeds:
                 avg_rpm = sum(fan_speeds) / len(fan_speeds)
                 fan_speed = min(100, int(avg_rpm / 60))  # Rough percentage
@@ -6259,7 +6328,7 @@ def fetch_braiins(ip, username="root", password="", timeout=10):
             model = identity.get("name", "") or identity.get("miner_model", "") or details.get("hostname", "BraiinsOS")
             bos_ver = details.get("bos_version", {})
             version = bos_ver.get("current", "") or bos_ver.get("major", "")
-            uptime = details.get("bosminer_uptime_s", 0) or details.get("system_uptime_s", 0)
+            uptime = _safe_num(details.get("bosminer_uptime_s", 0)) or _safe_num(details.get("system_uptime_s", 0))
 
         return {
             "online": True,
@@ -6406,13 +6475,13 @@ def fetch_vnish(ip, password="admin", timeout=10):
 
         # Extract power from summary.miner.power_usage (verified field path)
         miner_data = summary.get("miner", {})
-        power_watts = miner_data.get("power_usage", 0)
+        power_watts = _safe_num(miner_data.get("power_usage", 0))
 
         # Fallback: try metrics endpoint for power
         if not power_watts:
             metrics = vnish_api_call(ip, "/api/v1/metrics", password=password, timeout=timeout)
             if not metrics.get("error"):
-                power_watts = metrics.get("power_consumption", 0) or metrics.get("power", 0)
+                power_watts = _safe_num(metrics.get("power_consumption", 0)) or _safe_num(metrics.get("power", 0))
 
         # Extract hashrate from CGMiner RPC (port 4028) — more reliable than web API
         hashrate_ths = 0
@@ -6427,25 +6496,25 @@ def fetch_vnish(ip, password="admin", timeout=10):
             cgm_summary = cgminer_command(ip, 4028, "summary", timeout=timeout)
             if "SUMMARY" in cgm_summary:
                 s = cgm_summary["SUMMARY"][0] if cgm_summary["SUMMARY"] else {}
-                ghs = float(s.get("GHS 5s", 0) or s.get("GHS av", 0) or 0)
+                ghs = _safe_num(s.get("GHS 5s", 0)) or _safe_num(s.get("GHS av", 0))
                 if not ghs:
-                    mhs = float(s.get("MHS 5s", 0) or s.get("MHS av", 0) or 0)
+                    mhs = _safe_num(s.get("MHS 5s", 0)) or _safe_num(s.get("MHS av", 0))
                     ghs = mhs / 1000
                 hashrate_ths = ghs / 1000
-                accepted = s.get("Accepted", 0)
-                rejected = s.get("Rejected", 0)
-                uptime = s.get("Elapsed", 0)
+                accepted = _safe_num(s.get("Accepted", 0))
+                rejected = _safe_num(s.get("Rejected", 0))
+                uptime = _safe_num(s.get("Elapsed", 0))
 
             cgm_stats = cgminer_command(ip, 4028, "stats", timeout=timeout)
             if "STATS" in cgm_stats:
                 for s in cgm_stats["STATS"]:
-                    ct = [s.get(f"temp{i}", 0) for i in range(1, 4) if s.get(f"temp{i}", 0) > 0]
+                    ct = [_safe_num(s.get(f"temp{i}", 0)) for i in range(1, 4) if _safe_num(s.get(f"temp{i}", 0)) > 0]
                     if ct:
                         chip_temp = max(ct)
-                    bt = [s.get(f"temp2_{i}", 0) for i in range(1, 4) if s.get(f"temp2_{i}", 0) > 0]
+                    bt = [_safe_num(s.get(f"temp2_{i}", 0)) for i in range(1, 4) if _safe_num(s.get(f"temp2_{i}", 0)) > 0]
                     if bt:
                         board_temp = max(bt)
-                    fans = [s.get(f"fan{i}", 0) for i in range(1, 5) if s.get(f"fan{i}", 0) > 0]
+                    fans = [_safe_num(s.get(f"fan{i}", 0)) for i in range(1, 5) if _safe_num(s.get(f"fan{i}", 0)) > 0]
                     if fans:
                         fan_speeds = fans
         except Exception:
@@ -6455,7 +6524,7 @@ def fetch_vnish(ip, password="admin", timeout=10):
         if not hashrate_ths:
             hr = summary.get("hr_nominal", 0)
             if hr:
-                hashrate_ths = float(hr)
+                hashrate_ths = _safe_num(hr)
 
         # Extract model/version from info endpoint
         model = "Vnish"
@@ -6580,14 +6649,14 @@ def fetch_luxos(ip, port=4028, timeout=5):
         summary_data = summary.get("SUMMARY", [{}])[0]
 
         # Extract hashrate - try GHS first (newer firmware), then MHS (standard CGMiner)
-        ghs = summary_data.get('GHS av', summary_data.get('GHS 5s', 0))
+        ghs = _safe_num(summary_data.get('GHS av', 0)) or _safe_num(summary_data.get('GHS 5s', 0))
         if not ghs:
-            mhs = summary_data.get('MHS av', summary_data.get('MHS 5s', 0))
-            ghs = float(mhs or 0) / 1000  # Convert MH/s to GH/s
-        hashrate_ths = float(ghs or 0) / 1000  # Convert GH/s to TH/s
+            mhs = _safe_num(summary_data.get('MHS av', 0)) or _safe_num(summary_data.get('MHS 5s', 0))
+            ghs = mhs / 1000  # Convert MH/s to GH/s
+        hashrate_ths = ghs / 1000  # Convert GH/s to TH/s
 
         # Power consumption
-        power_watts = summary_data.get('Power', 0) or summary_data.get('power', 0)
+        power_watts = _safe_num(summary_data.get('Power', 0)) or _safe_num(summary_data.get('power', 0))
 
         # Extract temps
         chip_temp = 0
@@ -6595,8 +6664,8 @@ def fetch_luxos(ip, port=4028, timeout=5):
         if not temps_data.get("error"):
             temps_list = temps_data.get("TEMPS", [])
             if temps_list:
-                chip_temps = [t.get("Chip", 0) for t in temps_list if t.get("Chip")]
-                board_temps = [t.get("Board", 0) for t in temps_list if t.get("Board")]
+                chip_temps = [_safe_num(t.get("Chip", 0)) for t in temps_list if t.get("Chip")]
+                board_temps = [_safe_num(t.get("Board", 0)) for t in temps_list if t.get("Board")]
                 chip_temp = max(chip_temps) if chip_temps else 0
                 board_temp = max(board_temps) if board_temps else chip_temp
 
@@ -6605,7 +6674,7 @@ def fetch_luxos(ip, port=4028, timeout=5):
         if not fans_data.get("error"):
             fans_list = fans_data.get("FANS", [])
             if fans_list:
-                speeds = [f.get("RPM", 0) for f in fans_list if f.get("RPM")]
+                speeds = [_safe_num(f.get("RPM", 0)) for f in fans_list if f.get("RPM")]
                 if speeds:
                     fan_speed = min(100, int(sum(speeds) / len(speeds) / 60))
 
@@ -6622,14 +6691,14 @@ def fetch_luxos(ip, port=4028, timeout=5):
             "hashrate_ghs": hashrate_ths * 1000,
             "power_watts": power_watts,
             "temps": {"chip": chip_temp, "board": board_temp},
-            "uptime": summary_data.get("Elapsed", 0),
-            "accepted": summary_data.get("Accepted", 0),
-            "rejected": summary_data.get("Rejected", 0),
+            "uptime": _safe_num(summary_data.get("Elapsed", 0)),
+            "accepted": _safe_num(summary_data.get("Accepted", 0)),
+            "rejected": _safe_num(summary_data.get("Rejected", 0)),
             "best_diff": str(summary_data.get("Best Share", 0)),
             "pool_url": pool_url,
             "model": "LuxOS",
             "fan_speed": fan_speed,
-            "voltage": summary_data.get("Voltage", 0),
+            "voltage": _safe_num(summary_data.get("Voltage", 0)),
             "efficiency": power_watts / hashrate_ths if hashrate_ths > 0 else 0
         }
 
@@ -6665,14 +6734,14 @@ def fetch_epic_http(ip, port=4028, username="root", password="letmein", timeout=
 
         # Extract hashrate
         mining = summary_data.get("Mining", {})
-        ghs = float(mining.get("Speed(GHS)", 0) or mining.get("GHS av", 0) or 0)
+        ghs = _safe_num(mining.get("Speed(GHS)", 0)) or _safe_num(mining.get("GHS av", 0))
         hashrate_ths = ghs / 1000
-        accepted = mining.get("Accepted", 0)
-        rejected = mining.get("Rejected", 0)
+        accepted = _safe_num(mining.get("Accepted", 0))
+        rejected = _safe_num(mining.get("Rejected", 0))
 
         # Uptime
         session = summary_data.get("Session", {})
-        uptime = session.get("Uptime", 0) or session.get("Elapsed", 0)
+        uptime = _safe_num(session.get("Uptime", 0)) or _safe_num(session.get("Elapsed", 0))
 
         # Stratum user
         stratum = summary_data.get("Stratum", {})
@@ -6686,7 +6755,7 @@ def fetch_epic_http(ip, port=4028, username="root", password="letmein", timeout=
         if isinstance(hbs, list):
             chip_temps = []
             for hb in hbs:
-                temp = float(hb.get("Temperature", 0) or hb.get("Chip Temp", 0) or 0)
+                temp = _safe_num(hb.get("Temperature", 0)) or _safe_num(hb.get("Chip Temp", 0))
                 if temp > 0:
                     chip_temps.append(temp)
             if chip_temps:
@@ -6701,7 +6770,7 @@ def fetch_epic_http(ip, port=4028, username="root", password="letmein", timeout=
                 fan_data = fan_resp.json()
                 fans = fan_data.get("Fans", [])
                 if isinstance(fans, list):
-                    rpms = [f.get("RPM", 0) for f in fans if f.get("RPM", 0) > 0]
+                    rpms = [_safe_num(f.get("RPM", 0)) for f in fans if _safe_num(f.get("RPM", 0)) > 0]
                     if rpms:
                         fan_speed = min(100, int(sum(rpms) / len(rpms) / 60))
         except Exception:
@@ -6713,7 +6782,7 @@ def fetch_epic_http(ip, port=4028, username="root", password="letmein", timeout=
             cap_resp = requests.get(f"{base_url}/capabilities", auth=auth, timeout=timeout)
             if cap_resp.status_code == 200:
                 caps = cap_resp.json()
-                power_watts = caps.get("Power Consumption", 0) or caps.get("Power", 0)
+                power_watts = _safe_num(caps.get("Power Consumption", 0)) or _safe_num(caps.get("Power", 0))
         except Exception:
             pass
 
@@ -6770,51 +6839,51 @@ def fetch_axeos(ip, timeout=5):
             stratum = data.get('stratum', {})
             pool_url = stratum.get('used', {}).get('url', '')
             fans_list = data.get('fans', [])
-            fan_rpm = fans_list[0].get('rpm', 0) if fans_list else 0
+            fan_rpm = _safe_num(fans_list[0].get('rpm', 0)) if fans_list else 0
             return {
                 "online": True,
-                "hashrate_ghs": data.get('hashRate', 0),
-                "power_watts": data.get('power', 0),
+                "hashrate_ghs": _safe_num(data.get('hashRate', 0)),
+                "power_watts": _safe_num(data.get('power', 0)),
                 "temps": {
-                    "chip": data.get('asicTemp', 0),   # ASIC die temp
-                    "board": data.get('mcuTemp', 0),   # MCU/board temp
-                    "vr": data.get('vcoreTemp', 0)     # VCore regulator temp
+                    "chip": _safe_num(data.get('asicTemp', 0)),   # ASIC die temp
+                    "board": _safe_num(data.get('mcuTemp', 0)),   # MCU/board temp
+                    "vr": _safe_num(data.get('vcoreTemp', 0))     # VCore regulator temp
                 },
-                "uptime": data.get('uptimeSeconds', 0),
-                "accepted": data.get('sharesAccepted', 0),
-                "rejected": data.get('sharesRejected', 0),
+                "uptime": _safe_num(data.get('uptimeSeconds', 0)),
+                "accepted": _safe_num(data.get('sharesAccepted', 0)),
+                "rejected": _safe_num(data.get('sharesRejected', 0)),
                 "best_diff": data.get('bestDiffEver', '0'),
                 "pool_url": pool_url,
                 "hostname": data.get('hostName', ip),          # capital N in NMAxe API
                 "version": data.get('fwVersion', 'Unknown'),   # NMAxe uses fwVersion not version
                 "fan_speed": fan_rpm,                          # fans[0].rpm
-                "frequency": data.get('freqReq', 0),           # NMAxe uses freqReq not frequency
-                "voltage": data.get('vcoreActual', data.get('vcoreReq', 0))  # core voltage in mV
+                "frequency": _safe_num(data.get('freqReq', 0)),           # NMAxe uses freqReq not frequency
+                "voltage": _safe_num(data.get('vcoreActual', 0)) or _safe_num(data.get('vcoreReq', 0))  # core voltage in mV
             }
 
         # Standard AxeOS format (BitAxe, NerdQAxe, QAxe, etc.)
         # hashRate reported in GH/s directly (e.g., 5051.922 = 5051 GH/s = 5.05 TH/s)
-        hashrate_ghs = data.get('hashRate', 0)
+        hashrate_ghs = _safe_num(data.get('hashRate', 0))
 
         return {
             "online": True,
             "hashrate_ghs": hashrate_ghs,
-            "power_watts": data.get('power', 0),
+            "power_watts": _safe_num(data.get('power', 0)),
             "temps": {
-                "chip": data.get('temp', 0),
-                "board": data.get('temp2', data.get('vrTemp', 0)),  # temp2 is secondary sensor per API docs
-                "vr": data.get('vrTemp', 0)
+                "chip": _safe_num(data.get('temp', 0)),
+                "board": _safe_num(data.get('temp2', 0)) or _safe_num(data.get('vrTemp', 0)),  # temp2 is secondary sensor per API docs
+                "vr": _safe_num(data.get('vrTemp', 0))
             },
-            "uptime": data.get('uptimeSeconds', 0),
-            "accepted": data.get('sharesAccepted', 0),
-            "rejected": data.get('sharesRejected', 0),
+            "uptime": _safe_num(data.get('uptimeSeconds', 0)),
+            "accepted": _safe_num(data.get('sharesAccepted', 0)),
+            "rejected": _safe_num(data.get('sharesRejected', 0)),
             "best_diff": data.get('bestDiff', '0'),
             "pool_url": f"{data.get('stratumURL', '')}:{data['stratumPort']}" if data.get('stratumPort') is not None and str(data.get('stratumPort', '')).strip() else data.get('stratumURL', ''),
             "hostname": data.get('hostname', ip),
             "version": data.get('version', 'Unknown'),
-            "fan_speed": data.get('fanspeed', 0),  # API uses lowercase 'fanspeed' only
-            "frequency": data.get('frequency', 0),
-            "voltage": data.get('coreVoltage', data.get('voltage', 0))
+            "fan_speed": _safe_num(data.get('fanspeed', 0)),  # API uses lowercase 'fanspeed' only
+            "frequency": _safe_num(data.get('frequency', 0)),
+            "voltage": _safe_num(data.get('coreVoltage', 0)) or _safe_num(data.get('voltage', 0))
         }
     except Exception as e:
         return {
@@ -6857,7 +6926,7 @@ def fetch_esp32miner(ip, timeout=5):
             data = response.json()
 
             # ESP32 Miner reports hashrate in H/s (very low - kH/s range)
-            hashrate_hs = data.get("hashRate", data.get("hashrate", 0))
+            hashrate_hs = _safe_num(data.get("hashRate", data.get("hashrate", 0)))
 
             # Convert to GH/s - ESP32 Miner hashrate is typically in H/s
             if hashrate_hs > 1000000:  # Likely in H/s
@@ -6868,18 +6937,19 @@ def fetch_esp32miner(ip, timeout=5):
                 hashrate_ghs = hashrate_hs / 1e9 if hashrate_hs > 100 else hashrate_hs
 
             # ESP32 Miner uses 'valid'/'invalid' for shares
-            accepted = data.get("valid", data.get("sharesAccepted", data.get("valids", 0)))
-            rejected = data.get("invalid", data.get("sharesRejected", data.get("invalids", 0)))
+            accepted = _safe_num(data.get("valid", data.get("sharesAccepted", data.get("valids", 0))))
+            rejected = _safe_num(data.get("invalid", data.get("sharesRejected", data.get("invalids", 0))))
+
 
             return {
                 "online": True,
                 "hashrate_ghs": hashrate_ghs,
-                "power_watts": data.get("power", 2),  # Default 2W for ESP32
+                "power_watts": _safe_num(data.get("power", 2)),  # Default 2W for ESP32
                 "temps": {
-                    "chip": data.get("temp", 0),
-                    "board": data.get("boardTemp", 0)
+                    "chip": _safe_num(data.get("temp", 0)),
+                    "board": _safe_num(data.get("boardTemp", 0))
                 },
-                "uptime": data.get("uptimeSeconds", data.get("uptime", data.get("elapsed", 0))),
+                "uptime": _safe_num(data.get("uptimeSeconds", data.get("uptime", data.get("elapsed", 0)))),
                 "accepted": accepted,
                 "rejected": rejected,
                 "best_diff": data.get("bestDiff", data.get("best_diff", data.get("bestDifficulty", "0"))),
@@ -6902,6 +6972,16 @@ def fetch_esp32miner(ip, timeout=5):
         "rejected": 0,
         "best_diff": "0"
     }
+
+
+def _safe_num(val, default=0):
+    """Convert a value to a number, handling strings from CGMiner API responses."""
+    if isinstance(val, (int, float)):
+        return val
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
 
 
 def cgminer_command(ip, port, command, parameter=None, timeout=5):
@@ -6993,11 +7073,11 @@ def fetch_avalon(ip, port=4028, timeout=5):
         summary_data = summary.get("SUMMARY", [{}])[0]
 
         # Extract hashrate - try GHS first (newer firmware), then MHS (standard CGMiner)
-        ghs = summary_data.get('GHS av', summary_data.get('GHS 5s', 0))
+        ghs = _safe_num(summary_data.get('GHS av', 0)) or _safe_num(summary_data.get('GHS 5s', 0))
         if not ghs:
-            mhs = summary_data.get('MHS av', summary_data.get('MHS 5s', 0))
-            ghs = float(mhs or 0) / 1000  # Convert MH/s to GH/s
-        hashrate_ghs = float(ghs or 0)
+            mhs = _safe_num(summary_data.get('MHS av', 0)) or _safe_num(summary_data.get('MHS 5s', 0))
+            ghs = mhs / 1000  # Convert MH/s to GH/s
+        hashrate_ghs = ghs
 
         # Extract temperatures, fan speed, frequency from stats
         chip_temp = 0
@@ -7111,21 +7191,21 @@ def fetch_avalon(ip, port=4028, timeout=5):
                 # Temperature fields vary by model
                 # Try common field names first
                 if chip_temp == 0:
-                    chip_temp = stat.get("temp", stat.get("temp1", stat.get("TEMP", 0)))
+                    chip_temp = _safe_num(stat.get("temp", stat.get("temp1", stat.get("TEMP", 0))))
                 if board_temp == 0:
-                    board_temp = stat.get("temp2", stat.get("temp_pcb", 0))
+                    board_temp = _safe_num(stat.get("temp2", stat.get("temp_pcb", 0)))
 
                 # Fan speed (percentage or RPM)
                 if fan_speed == 0:
-                    fan_speed = stat.get("fan1", stat.get("Fan Speed In", stat.get("fan", 0)))
+                    fan_speed = _safe_num(stat.get("fan1", stat.get("Fan Speed In", stat.get("fan", 0))))
 
                 # Frequency in MHz
                 if frequency == 0:
-                    frequency = stat.get("frequency", stat.get("Frequency", 0))
+                    frequency = _safe_num(stat.get("frequency", stat.get("Frequency", 0)))
 
                 # Voltage
                 if voltage == 0:
-                    voltage = stat.get("voltage", stat.get("Voltage", 0))
+                    voltage = _safe_num(stat.get("voltage", stat.get("Voltage", 0)))
 
                 # Avalon Q series specific fields (Q004, Q003, etc.)
                 # These miners report temps in format like "TMax[85] TAvg[82]" or individual chip temps
@@ -7223,18 +7303,18 @@ def fetch_avalon(ip, port=4028, timeout=5):
             "fan_speed": fan_speed,
             "frequency": frequency,
             "voltage": voltage,
-            "uptime": summary_data.get('Elapsed', 0),
-            "accepted": summary_data.get('Accepted', 0),
-            "rejected": summary_data.get('Rejected', 0),
-            "stale": summary_data.get('Stale', 0),
+            "uptime": _safe_num(summary_data.get('Elapsed', 0)),
+            "accepted": _safe_num(summary_data.get('Accepted', 0)),
+            "rejected": _safe_num(summary_data.get('Rejected', 0)),
+            "stale": _safe_num(summary_data.get('Stale', 0)),
             "best_diff": str(summary_data.get('Best Share', 0)),
-            "difficulty": summary_data.get('Difficulty Accepted', 0),
+            "difficulty": _safe_num(summary_data.get('Difficulty Accepted', 0)),
             "pool_url": pool_url,
             "pool_user": pool_user,
             "pool_status": pool_status,
-            "hardware_errors": summary_data.get('Hardware Errors', 0),
-            "getworks": summary_data.get('Getworks', 0),
-            "work_utility": summary_data.get('Work Utility', 0)
+            "hardware_errors": _safe_num(summary_data.get('Hardware Errors', 0)),
+            "getworks": _safe_num(summary_data.get('Getworks', 0)),
+            "work_utility": _safe_num(summary_data.get('Work Utility', 0))
         }
     except Exception as e:
         return {
@@ -7320,38 +7400,39 @@ def fetch_antminer(ip, port=4028, timeout=5):
                 # Temperature extraction - Antminer has multiple temp sensors
                 # temp1, temp2, temp3 = chip temps for each hashboard
                 # temp2_1, temp2_2, temp2_3 = PCB temps for each hashboard
+                # NOTE: Stock Antminer CGMiner API may return values as strings
                 for i in range(1, 4):
-                    chip_temp = stat.get(f"temp{i}", 0)
-                    if chip_temp and chip_temp > 0:
+                    chip_temp = _safe_num(stat.get(f"temp{i}", 0))
+                    if chip_temp > 0:
                         chip_temps.append(chip_temp)
-                    pcb_temp = stat.get(f"temp2_{i}", 0)
-                    if pcb_temp and pcb_temp > 0:
+                    pcb_temp = _safe_num(stat.get(f"temp2_{i}", 0))
+                    if pcb_temp > 0:
                         board_temps.append(pcb_temp)
 
                 # Also check for temp_chip and temp_pcb arrays (newer firmware)
                 for i in range(1, 4):
-                    chip_temp = stat.get(f"temp_chip{i}", 0)
-                    if chip_temp and chip_temp > 0 and chip_temp not in chip_temps:
+                    chip_temp = _safe_num(stat.get(f"temp_chip{i}", 0))
+                    if chip_temp > 0 and chip_temp not in chip_temps:
                         chip_temps.append(chip_temp)
 
                 # Inlet/outlet temps (environmental)
-                inlet_temp = stat.get("temp_inlet", stat.get("env_temp", 0))
-                outlet_temp = stat.get("temp_outlet", 0)
+                inlet_temp = _safe_num(stat.get("temp_inlet", stat.get("env_temp", 0)))
+                outlet_temp = _safe_num(stat.get("temp_outlet", 0))
 
                 # Fan speeds (RPM)
                 for i in range(1, 5):
-                    fan = stat.get(f"fan{i}", 0)
-                    if fan and fan > 0:
+                    fan = _safe_num(stat.get(f"fan{i}", 0))
+                    if fan > 0:
                         fan_speeds.append(fan)
 
                 # Power consumption (newer firmware reports this)
-                power_watts = stat.get("Power", stat.get("power", 0))
+                power_watts = _safe_num(stat.get("Power", stat.get("power", 0)))
 
                 # Voltage (mV or V depending on model/firmware)
                 if voltage == 0:
-                    v = stat.get("voltage", stat.get("Voltage", stat.get("psu_voltage", 0)))
-                    if v and float(v) > 0:
-                        voltage = float(v)
+                    v = _safe_num(stat.get("voltage", stat.get("Voltage", stat.get("psu_voltage", 0))))
+                    if v > 0:
+                        voltage = v
 
                 # Chain/hashboard status
                 for i in range(1, 4):
@@ -7455,13 +7536,13 @@ def fetch_whatsminer(ip, port=4028, timeout=5):
         summary_data = summary.get("SUMMARY", [{}])[0]
 
         # Extract hashrate - Whatsminer reports in MH/s or GH/s
-        mhs = summary_data.get('MHS av', summary_data.get('MHS 5s', 0))
-        ghs = summary_data.get('GHS av', summary_data.get('GHS 5s', 0))
+        mhs = _safe_num(summary_data.get('MHS av', 0)) or _safe_num(summary_data.get('MHS 5s', 0))
+        ghs = _safe_num(summary_data.get('GHS av', 0)) or _safe_num(summary_data.get('GHS 5s', 0))
 
-        if ghs and float(ghs) > 0:
-            hashrate_ghs = float(ghs)
+        if ghs and ghs > 0:
+            hashrate_ghs = ghs
         else:
-            hashrate_ghs = float(mhs) / 1000 if mhs else 0
+            hashrate_ghs = mhs / 1000 if mhs else 0
 
         hashrate_ths = hashrate_ghs / 1000
 
@@ -7477,7 +7558,7 @@ def fetch_whatsminer(ip, port=4028, timeout=5):
         # Parse DEVS response for per-device stats
         if "DEVS" in stats:
             for dev in stats["DEVS"]:
-                temp = dev.get("Temperature", 0)
+                temp = _safe_num(dev.get("Temperature", 0))
                 if temp and temp > 0:
                     chip_temps.append(temp)
 
@@ -7491,27 +7572,27 @@ def fetch_whatsminer(ip, port=4028, timeout=5):
 
                 # Temperature sensors
                 for i in range(1, 4):
-                    temp = stat.get(f"temp{i}", 0)
+                    temp = _safe_num(stat.get(f"temp{i}", 0))
                     if temp and temp > 0 and temp not in chip_temps:
                         chip_temps.append(temp)
 
                 # Fan speeds
                 for i in range(1, 5):
-                    fan = stat.get(f"fan{i}", stat.get(f"fan_speed_in{i}", 0))
+                    fan = _safe_num(stat.get(f"fan{i}", stat.get(f"fan_speed_in{i}", 0)))
                     if fan and fan > 0:
                         fan_speeds.append(fan)
 
                 # Power
-                power_watts = stat.get("Power", stat.get("power", 0))
+                power_watts = _safe_num(stat.get("Power", stat.get("power", 0)))
                 if not power_watts:
                     # Some models report power differently
-                    power_watts = stat.get("Power_RT", 0)
+                    power_watts = _safe_num(stat.get("Power_RT", 0))
 
                 # Voltage
                 if voltage == 0:
-                    v = stat.get("voltage", stat.get("Voltage", stat.get("psu_voltage", 0)))
-                    if v and float(v) > 0:
-                        voltage = float(v)
+                    v = _safe_num(stat.get("voltage", stat.get("Voltage", stat.get("psu_voltage", 0))))
+                    if v and v > 0:
+                        voltage = v
 
         # Get pool info
         pool_url = ""
@@ -7537,13 +7618,13 @@ def fetch_whatsminer(ip, port=4028, timeout=5):
                 "speeds": fan_speeds,
                 "avg_rpm": avg_fan_speed
             },
-            "uptime": summary_data.get('Elapsed', 0),
-            "accepted": summary_data.get('Accepted', 0),
-            "rejected": summary_data.get('Rejected', 0),
-            "stale": summary_data.get('Stale', 0),
+            "uptime": _safe_num(summary_data.get('Elapsed', 0)),
+            "accepted": _safe_num(summary_data.get('Accepted', 0)),
+            "rejected": _safe_num(summary_data.get('Rejected', 0)),
+            "stale": _safe_num(summary_data.get('Stale', 0)),
             "best_diff": str(summary_data.get('Best Share', 0)),
-            "difficulty": summary_data.get('Difficulty Accepted', 0),
-            "hardware_errors": summary_data.get('Hardware Errors', 0),
+            "difficulty": _safe_num(summary_data.get('Difficulty Accepted', 0)),
+            "hardware_errors": _safe_num(summary_data.get('Hardware Errors', 0)),
             "pool_url": pool_url,
             "model": model,
             "firmware": firmware,
@@ -7592,14 +7673,14 @@ def fetch_innosilicon(ip, port=4028, timeout=5):
 
         summary_data = summary.get("SUMMARY", [{}])[0]
 
-        # Extract hashrate
-        mhs = summary_data.get('MHS av', summary_data.get('MHS 5s', 0))
-        ghs = summary_data.get('GHS av', summary_data.get('GHS 5s', 0))
+        # Extract hashrate — Innosilicon firmware confirmed to return string-encoded numbers
+        mhs = _safe_num(summary_data.get('MHS av', 0)) or _safe_num(summary_data.get('MHS 5s', 0))
+        ghs = _safe_num(summary_data.get('GHS av', 0)) or _safe_num(summary_data.get('GHS 5s', 0))
 
-        if ghs and float(ghs) > 0:
-            hashrate_ghs = float(ghs)
+        if ghs and ghs > 0:
+            hashrate_ghs = ghs
         else:
-            hashrate_ghs = float(mhs) / 1000 if mhs else 0
+            hashrate_ghs = mhs / 1000 if mhs else 0
 
         hashrate_ths = hashrate_ghs / 1000
 
@@ -7619,26 +7700,26 @@ def fetch_innosilicon(ip, port=4028, timeout=5):
                 if "miner_version" in stat:
                     firmware = stat.get("miner_version", "")
 
-                # Temperatures
+                # Temperatures — Innosilicon returns strings for these
                 for i in range(1, 10):
-                    temp = stat.get(f"temp{i}", 0)
+                    temp = _safe_num(stat.get(f"temp{i}", 0))
                     if temp and temp > 0:
                         chip_temps.append(temp)
 
                 # Also check for board temps
                 for i in range(1, 10):
-                    temp = stat.get(f"temp2_{i}", stat.get(f"temp_pcb{i}", 0))
+                    temp = _safe_num(stat.get(f"temp2_{i}", stat.get(f"temp_pcb{i}", 0)))
                     if temp and temp > 0:
                         board_temps.append(temp)
 
-                # Fan speeds
+                # Fan speeds — Innosilicon returns strings for these
                 for i in range(1, 5):
-                    fan = stat.get(f"fan{i}", 0)
+                    fan = _safe_num(stat.get(f"fan{i}", 0))
                     if fan and fan > 0:
                         fan_speeds.append(fan)
 
-                # Power consumption
-                power_watts = stat.get("Power", stat.get("power", 0))
+                # Power consumption — Innosilicon returns strings for this
+                power_watts = _safe_num(stat.get("Power", stat.get("power", 0)))
 
         # Get pool info
         pool_url = ""
@@ -7667,13 +7748,13 @@ def fetch_innosilicon(ip, port=4028, timeout=5):
                 "speeds": fan_speeds,
                 "avg_rpm": avg_fan_speed
             },
-            "uptime": summary_data.get('Elapsed', 0),
-            "accepted": summary_data.get('Accepted', 0),
-            "rejected": summary_data.get('Rejected', 0),
-            "stale": summary_data.get('Stale', 0),
+            "uptime": _safe_num(summary_data.get('Elapsed', 0)),
+            "accepted": _safe_num(summary_data.get('Accepted', 0)),
+            "rejected": _safe_num(summary_data.get('Rejected', 0)),
+            "stale": _safe_num(summary_data.get('Stale', 0)),
             "best_diff": str(summary_data.get('Best Share', 0)),
-            "difficulty": summary_data.get('Difficulty Accepted', 0),
-            "hardware_errors": summary_data.get('Hardware Errors', 0),
+            "difficulty": _safe_num(summary_data.get('Difficulty Accepted', 0)),
+            "hardware_errors": _safe_num(summary_data.get('Hardware Errors', 0)),
             "pool_url": pool_url,
             "model": model,
             "firmware": firmware
@@ -7751,11 +7832,11 @@ def fetch_goldshell(ip, timeout=5):
                     d = d[0]  # Use first device
                 if isinstance(d, dict):
                     # Hashrate - Goldshell reports in MH/s for Scrypt miners
-                    hashrate = d.get("hashrate", d.get("av_hashrate", 0))
+                    hashrate = _safe_num(d.get("hashrate", d.get("av_hashrate", 0)))
                     if hashrate:
                         # Convert MH/s to GH/s
-                        result["hashrate_ghs"] = float(hashrate) / 1000
-                        result["hashrate_ths"] = float(hashrate) / 1000000
+                        result["hashrate_ghs"] = hashrate / 1000
+                        result["hashrate_ths"] = hashrate / 1000000
 
                     # Temperature - comes as string like "77.3 °C"
                     temp = d.get("temp", "")
@@ -7788,11 +7869,11 @@ def fetch_goldshell(ip, timeout=5):
                             result["fans"]["avg_rpm"] = int(fanspeed)
 
                     # Share counts
-                    result["accepted"] = d.get("accepted", 0)
-                    result["rejected"] = d.get("rejected", 0)
+                    result["accepted"] = _safe_num(d.get("accepted", 0))
+                    result["rejected"] = _safe_num(d.get("rejected", 0))
 
                     # Uptime
-                    result["uptime"] = d.get("time", d.get("uptime", 0))
+                    result["uptime"] = _safe_num(d.get("time", d.get("uptime", 0)))
 
         # Step 2: Get status info (model, hardware)
         try:
@@ -7808,9 +7889,9 @@ def fetch_goldshell(ip, timeout=5):
 
                 # Some models return temperature in status endpoint
                 if "temperature" in status_data and result["temps"]["chip"] == 0:
-                    result["temps"]["chip"] = float(status_data["temperature"])
+                    result["temps"]["chip"] = _safe_num(status_data["temperature"])
                 if "env_temp" in status_data:
-                    result["temps"]["board"] = float(status_data["env_temp"])
+                    result["temps"]["board"] = _safe_num(status_data["env_temp"])
         except Exception:
             pass  # Status endpoint is optional
 
@@ -9469,12 +9550,17 @@ def get_miners():
                 if power is not None:
                     device_groups[group]["power_watts"] += power
 
+        # Compute network hashrate for Statistics chart grid
+        _net_diff = pool_stats.get("network_difficulty", 0)
+        _net_hashrate = _compute_network_hashrate(_net_diff)
+
         return jsonify({
             "miners": miner_cache["miners"],
             "totals": miner_cache["totals"],
             "lifetime": lifetime_stats,
             "block_reward": reward_info,
-            "network_difficulty": pool_stats.get("network_difficulty", 0),
+            "network_difficulty": _net_diff,
+            "network_hashrate": _net_hashrate,
             "last_block_finder": pool_stats.get("last_block_finder"),
             "last_block_height": pool_stats.get("last_block_height"),
             "last_block_time": pool_stats.get("last_block_time"),
@@ -9519,6 +9605,7 @@ def get_miners():
             "lifetime": lifetime_stats,
             "block_reward": block_reward_cache,
             "network_difficulty": cached.get("network_difficulty", 0),
+            "network_hashrate": _compute_network_hashrate(cached.get("network_difficulty", 0)),
             "last_block_finder": cached.get("last_block_finder"),
             "last_block_height": cached.get("last_block_height"),
             "last_block_time": cached.get("last_block_time"),
@@ -9557,6 +9644,7 @@ def refresh_miners():
             "lifetime": lifetime_stats,
             "block_reward": reward_info,
             "network_difficulty": pool_stats.get("network_difficulty", 0),
+            "network_hashrate": _compute_network_hashrate(pool_stats.get("network_difficulty", 0)),
             "last_block_finder": pool_stats.get("last_block_finder"),
             "last_block_height": pool_stats.get("last_block_height"),
             "last_block_time": pool_stats.get("last_block_time"),
@@ -10194,7 +10282,7 @@ def restart_device():
             else:
                 return jsonify({"success": False, "error": f"Device returned status {response.status_code}"})
         # CGMiner-based devices use CGMiner API restart command
-        elif device_type in ["avalon", "antminer", "antminer_scrypt", "whatsminer", "innosilicon", "futurebit", "gekkoscience", "ipollo", "ebang", "epic", "elphapex"]:
+        elif device_type in ["antminer", "antminer_scrypt", "whatsminer", "innosilicon", "futurebit", "gekkoscience", "ipollo", "ebang", "epic", "elphapex"]:
             result = cgminer_command(ip, 4028, "restart", timeout=5)
             if "error" not in result:
                 return jsonify({"success": True, "message": f"Restart command sent to {name}"})
@@ -10706,6 +10794,8 @@ def get_pool_history():
         "connected_miners": filter_by_time(list(historical_data["connected_miners"])),
         "shares_per_second": filter_by_time(list(historical_data["shares_per_second"])),
         "power_watts": filter_by_time(list(historical_data["power_watts"])),
+        "network_difficulty": filter_by_time(list(historical_data["network_difficulty"])),
+        "network_hashrate": filter_by_time(list(historical_data["network_hashrate"])),
         "hours": hours
     })
 
@@ -12427,7 +12517,7 @@ def test_discord_webhook(url: str, test_message: str = None) -> dict:
         "title": "🧪 Spiral Pool Test Notification",
         "description": test_message or "This is a test message from Spiral Dashboard. If you see this, your webhook is configured correctly!",
         "color": 0x00d4ff,  # Cyan color
-        "footer": {"text": f"Spiral Pool v1.1.2 PHI FORGE"},
+        "footer": {"text": f"Spiral Pool v1.2.0 CONVERGENT SPIRAL"},
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
@@ -13403,15 +13493,27 @@ def get_block_leaderboard():
                 return jsonify({"success": False, "error": "Failed to fetch blocks"})
             pool_blocks = resp.json()
 
-        # Count blocks per worker (source field = worker name from stratum auth)
-        leaderboard = {}
+        # Count blocks per miner, consolidating workers that map to the same device.
+        # e.g. "HashForge" and "HashForge.worker1" both resolve to device "HashForge"
+        # and should be merged into a single leaderboard entry.
+        leaderboard = {}       # keyed by grouping key (device_name or worker)
+        worker_to_key = {}     # cache: raw worker -> grouping key
+
         for block in pool_blocks:
             worker = block.get("source", "") or block.get("worker", "") or ""
             if not worker:
                 continue
-            if worker not in leaderboard:
+
+            # Determine grouping key: device_name if we can resolve it, else worker
+            if worker not in worker_to_key:
                 miner_info = get_miner_info_by_worker(worker)
-                leaderboard[worker] = {
+                group_key = (miner_info.get("name") if miner_info else None) or worker
+                worker_to_key[worker] = (group_key, miner_info)
+
+            group_key, miner_info = worker_to_key[worker]
+
+            if group_key not in leaderboard:
+                leaderboard[group_key] = {
                     "worker": worker,
                     "blocks_found": 0,
                     "rewards_by_coin": {},
@@ -13422,16 +13524,16 @@ def get_block_leaderboard():
                     "model": miner_info.get("model") if miner_info else None
                 }
 
-            leaderboard[worker]["blocks_found"] += 1
+            leaderboard[group_key]["blocks_found"] += 1
             coin = block.get("coin", "").upper() or "BTC"
-            rewards = leaderboard[worker]["rewards_by_coin"]
+            rewards = leaderboard[group_key]["rewards_by_coin"]
             rewards[coin] = rewards.get(coin, 0) + block.get("reward", 0)
 
             block_time = block.get("created", "")
-            if not leaderboard[worker]["first_block"] or block_time < leaderboard[worker]["first_block"]:
-                leaderboard[worker]["first_block"] = block_time
-            if not leaderboard[worker]["last_block"] or block_time > leaderboard[worker]["last_block"]:
-                leaderboard[worker]["last_block"] = block_time
+            if not leaderboard[group_key]["first_block"] or block_time < leaderboard[group_key]["first_block"]:
+                leaderboard[group_key]["first_block"] = block_time
+            if not leaderboard[group_key]["last_block"] or block_time > leaderboard[group_key]["last_block"]:
+                leaderboard[group_key]["last_block"] = block_time
 
         # Sort by blocks found (descending)
         sorted_leaderboard = sorted(

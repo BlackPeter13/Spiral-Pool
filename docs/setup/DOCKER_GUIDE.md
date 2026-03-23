@@ -6,24 +6,22 @@ Complete guide for running Spiral Pool in Docker containers. Covers Linux Docker
 
 ## What Docker Supports
 
-Docker supports **V1 single-coin solo mining** only:
+Docker supports **V1 + V2 Stratum** in both single-coin and multi-coin mode:
 
-- One cryptocurrency per deployment
-- Stratum V1 protocol (plain + TLS encrypted connections)
-- 14 supported configurations: DGB, BTC, BCH, BC2, NMC, SYS, XMY, FBTC, QBX, LTC, DOGE, DGB-SCRYPT, PEP, CAT
+- **Single-coin mode:** One coin per deployment via `POOL_MODE=single` + `--profile <coin>`
+- **Multi-coin mode:** All enabled coins in one deployment via `POOL_MODE=multi` + `--profile multi`
+- **Stratum V1** (plain + TLS encrypted connections)
+- **Stratum V2** (SV2 binary protocol with Noise NX encryption) — opt-in via `STRATUM_V2_ENABLED=true`
+- All 14 coins: DGB, BTC, BCH, BC2, NMC, SYS, XMY, FBTC, QBX, LTC, DOGE, DGB-SCRYPT, PEP, CAT
+- Merge mining in multi-coin mode: SHA-256d (BTC+NMC, BTC+FBTC, BTC+SYS, BTC+XMY) and Scrypt (LTC+DOGE, LTC+PEP)
 - Dashboard, Sentinel monitoring, Prometheus, and Grafana included
-- Self-signed TLS certificates auto-generated
+- Self-signed TLS certificates auto-generated (V1 TLS); Noise keys generated in memory (V2)
 
-**Partially supported in Docker (experimental, not validated for production):**
+**Optional: Database HA (experimental, not validated for production):**
 
-- Database HA (Patroni/etcd/HAProxy/Redis) via `docker-compose.ha.yml` overlay — automatic PostgreSQL failover
+- PostgreSQL high availability via `docker-compose.ha.yml` overlay (Patroni/etcd/HAProxy/Redis)
 
-**Not supported in Docker** (requires native `sudo ./install.sh`):
-
-- V2 Enhanced Stratum (SV2 binary protocol with Noise encryption)
-- Multi-coin mining (14 coins simultaneously)
-- Merge mining (BTC+NMC, BTC+FBTC, BTC+SYS, BTC+XMY, LTC+DOGE, LTC+PEP)
-- Full HA with VIP failover (Keepalived) and multi-node stratum
+> **Note:** VIP failover (Keepalived) and multi-node stratum clustering are native-install features designed for bare-metal HA deployments. Docker is designed for single-node operation — if you need multi-node HA, use native installation (`sudo ./install.sh`).
 
 ---
 
@@ -91,7 +89,7 @@ wsl --install -d Ubuntu
 
 ---
 
-## Quick Start (3 Steps)
+## Quick Start — Single-Coin Mode
 
 ### Step 1: Configure
 
@@ -153,7 +151,7 @@ The stratum automatically detects which coin's RPC password to use based on `POO
 docker compose --profile dgb up -d
 ```
 
-Available profiles:
+Available single-coin profiles:
 
 | Profile | Coin | Algorithm |
 |---------|------|-----------|
@@ -162,7 +160,7 @@ Available profiles:
 | `bch` | Bitcoin Cash | SHA-256d |
 | `bc2` | Bitcoin II | SHA-256d |
 | `nmc` | Namecoin | SHA-256d |
-| `sys` | Syscoin (daemon sync only — mining requires native install, see note) | SHA-256d |
+| `sys` | Syscoin (merge-mining only — use multi-coin mode, see below) | SHA-256d |
 | `xmy` | Myriadcoin | SHA-256d |
 | `fbtc` | Fractal Bitcoin | SHA-256d |
 | `qbx` | Q-BitX | SHA-256d |
@@ -172,7 +170,77 @@ Available profiles:
 | `pep` | PepeCoin | Scrypt |
 | `cat` | Catcoin | Scrypt |
 
-> **Syscoin note:** Syscoin is merge-mining only (requires BTC parent chain) and cannot solo mine. Docker does not support merge mining. The `sys` profile syncs the Syscoin daemon only — actual Syscoin mining requires native installation (`sudo ./install.sh`).
+> **Syscoin note:** Syscoin is merge-mining only (requires BTC parent chain) and cannot solo mine. Use multi-coin mode with `ENABLE_BTC=true` and `ENABLE_SYS=true` plus merge mining enabled. The single-coin `sys` profile syncs the Syscoin daemon only — it cannot mine without a BTC parent.
+
+---
+
+## Quick Start — Multi-Coin Mode
+
+Multi-coin mode runs multiple coins in a single Docker deployment. It also enables merge mining.
+
+### Step 1: Configure
+
+```bash
+cd docker
+cp .env.example .env
+```
+
+Edit `.env`:
+
+```bash
+# 1. Set multi-coin mode
+POOL_MODE=multi
+
+# 2. Enable each coin you want to mine and set its wallet address
+ENABLE_DGB=true
+DGB_POOL_ADDRESS=YOUR_DGB_WALLET_ADDRESS
+
+ENABLE_BTC=true
+BTC_POOL_ADDRESS=YOUR_BTC_WALLET_ADDRESS
+
+ENABLE_LTC=true
+LTC_POOL_ADDRESS=YOUR_LTC_WALLET_ADDRESS
+
+# ... enable as many coins as you need
+```
+
+### Step 2: Configure Merge Mining (Optional)
+
+To merge-mine auxiliary chains alongside a parent chain:
+
+```bash
+# Enable merge mining
+MERGE_MINING_ENABLED=true
+
+# Which algorithm(s): sha256d, scrypt, or both
+MERGE_MINING_ALGO=both
+
+# SHA-256d aux chains (parent: BTC, or DGB if BTC disabled)
+MERGE_MINING_AUX_CHAINS_SHA256D=NMC,SYS,XMY,FBTC
+
+# Scrypt aux chains (parent: LTC)
+MERGE_MINING_AUX_CHAINS_SCRYPT=DOGE,PEP
+```
+
+**Merge mining topology:**
+
+```
+BTC ──┬── NMC  (Namecoin)         LTC ──┬── DOGE (Dogecoin)
+      ├── SYS  (Syscoin)                └── PEP  (PepeCoin)
+      ├── XMY  (Myriad)
+      └── FBTC (Fractal Bitcoin)
+```
+
+> You must also enable the parent and aux coins (`ENABLE_BTC=true`, `ENABLE_NMC=true`, etc.) and provide wallet addresses for each.
+
+### Step 3: Generate Passwords &amp; Start
+
+```bash
+./generate-secrets.sh
+docker compose --profile multi up -d
+```
+
+The `multi` profile starts all enabled coin daemons plus shared services (stratum, PostgreSQL, dashboard, sentinel, Prometheus, Grafana). The entrypoint generates a V2 multi-coin config automatically from your `.env` settings.
 
 ---
 
@@ -193,22 +261,24 @@ After the pool starts (allow 5-10 minutes for blockchain daemon initialization):
 
 ### Port Reference
 
-| Coin | Stratum V1 | Stratum TLS |
-|------|-----------|-------------|
-| DigiByte | 3333 | 3335 |
-| DigiByte-Scrypt | 3336 | 3338 |
-| Bitcoin | 4333 | 4335 |
-| Bitcoin Cash | 5333 | 5335 |
-| Bitcoin II | 6333 | 6335 |
-| Litecoin | 7333 | 7335 |
-| Dogecoin | 8335 | 8342 |
-| PepeCoin | 10335 | 10337 |
-| Catcoin | 12335 | 12337 |
-| Namecoin | 14335 | 14337 |
-| Syscoin | 15335 | 15337 |
-| Myriadcoin | 17335 | 17337 |
-| Fractal BTC | 18335 | 18337 |
-| Q-BitX | 20335 | 20337 |
+| Coin | Stratum V1 | Stratum V2 (Noise) | Stratum TLS |
+|------|-----------|---------------------|-------------|
+| DigiByte | 3333 | 3334 | 3335 |
+| DigiByte-Scrypt | 3336 | 3337 | 3338 |
+| Bitcoin | 4333 | 4334 | 4335 |
+| Bitcoin Cash | 5333 | 5334 | 5335 |
+| Bitcoin II | 6333 | 6334 | 6335 |
+| Litecoin | 7333 | 7334 | 7335 |
+| Dogecoin | 8335 | 8337 | 8342 |
+| PepeCoin | 10335 | 10336 | 10337 |
+| Catcoin | 12335 | 12336 | 12337 |
+| Namecoin | 14335 | 14336 | 14337 |
+| Syscoin | 15335 | 15336 | 15337 |
+| Myriadcoin | 17335 | 17336 | 17337 |
+| Fractal BTC | 18335 | 18336 | 18337 |
+| Q-BitX | 20335 | 20336 | 20337 |
+
+> V2 ports are only active when `STRATUM_V2_ENABLED=true` is set in `.env`. V2 uses the Noise NX protocol (`secp256k1 + ChaCha20-Poly1305 + SHA-256`) — encryption keys are generated in memory at startup, no certificate files needed.
 
 ### Miner Configuration Example (cgminer/bfgminer)
 
@@ -229,20 +299,21 @@ For TLS-encrypted connections:
 ### View Logs
 
 ```bash
-# All services
+# Single-coin mode (replace dgb with your profile)
 docker compose --profile dgb logs -f
-
-# Specific service
 docker compose --profile dgb logs -f stratum
-docker compose --profile dgb logs -f digibyte
-docker compose --profile dgb logs -f dashboard
-docker compose --profile dgb logs -f sentinel
+
+# Multi-coin mode
+docker compose --profile multi logs -f
+docker compose --profile multi logs -f stratum
+docker compose --profile multi logs -f bitcoin      # specific daemon
 ```
 
 ### Check Status
 
 ```bash
-docker compose --profile dgb ps
+docker compose --profile dgb ps       # single-coin
+docker compose --profile multi ps     # multi-coin
 ```
 
 ### Stop All Services
@@ -325,6 +396,26 @@ XMPP_PASSWORD=your_password
 XMPP_RECIPIENT=recipient@server.com
 ```
 
+### ntfy (Push Notifications)
+
+```bash
+NTFY_URL=https://ntfy.sh/your-topic
+NTFY_TOKEN=                              # optional — for private topics
+```
+
+Self-hosted ntfy and ntfy.sh both supported. No account needed for public topics.
+
+### Email (SMTP)
+
+```bash
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=you@gmail.com
+SMTP_PASSWORD=your-app-password
+SMTP_FROM=you@gmail.com
+SMTP_TO=you@gmail.com
+```
+
 ### Alert Theme
 
 ```bash
@@ -361,6 +452,28 @@ SPIRAL_METRICS_TOKEN=your_secret_token
 
 Configure Prometheus to use the token in `docker/config/prometheus/prometheus.yml`.
 
+### Stratum Difficulty
+
+Defaults work for most setups. Override for ASIC farms or specific hardware:
+
+```bash
+STRATUM_DIFF_INITIAL=5000              # Starting difficulty for unrecognized miners
+STRATUM_DIFF_MIN=0.001                 # Lowest vardiff can drop (0.001 supports ESP32 lottery miners)
+STRATUM_DIFF_MAX=1000000000000         # Highest vardiff can reach (1T supports S21 on BTC)
+STRATUM_VARDIFF_TARGET_TIME=4          # Target seconds between shares
+```
+
+### AsicBoost / Version Rolling
+
+Required for S19/S21/Vnish firmware. Enabled by default:
+
+```bash
+STRATUM_VERSION_ROLLING=true
+STRATUM_VERSION_ROLLING_MASK=536862720   # Standard BIP320 mask
+```
+
+Set `STRATUM_VERSION_ROLLING=false` only if you need to disable AsicBoost for debugging.
+
 ### Dashboard Authentication
 
 Enabled by default. Configure in `.env`:
@@ -388,7 +501,7 @@ DASHBOARD_SESSION_LIFETIME=24    # hours
 
 ### "POOL_COIN must be set" error
 
-Edit `.env` and ensure `POOL_COIN` is uncommented and set to a valid coin name.
+This occurs in single-coin mode (`POOL_MODE=single`). Edit `.env` and ensure `POOL_COIN` is uncommented and set to a valid coin name. In multi-coin mode (`POOL_MODE=multi`), `POOL_COIN` is not required — enable coins with `ENABLE_<COIN>=true` instead.
 
 ### "DB_PASSWORD must be set" error
 
@@ -424,34 +537,38 @@ docker compose --profile dgb up -d      # Fresh start
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Docker Network                        │
-│                                                          │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐              │
-│  │  Daemon   │  │ Stratum  │  │ Dashboard│   Port 1618  │
-│  │ (1 coin)  │──│  Server  │──│   (UI)   │──────────────┤
-│  │           │  │          │  └──────────┘              │
-│  └──────────┘  │          │  ┌──────────┐              │
-│                │          │──│ Sentinel │              │
-│  ┌──────────┐  │          │  │ (alerts) │              │
-│  │PostgreSQL│──│          │  └──────────┘              │
-│  │          │  │  :4000   │                             │
-│  └──────────┘  └──────────┘  ┌──────────┐              │
-│                              │Prometheus│   Port 9090  │
-│                              │          │──────────────┤
-│                              └──────────┘              │
-│                              ┌──────────┐              │
-│                              │ Grafana  │   Port 3000  │
-│                              │          │──────────────┤
-│                              └──────────┘              │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                    Docker Network                         │
+│                                                           │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐               │
+│  │ Daemon 1 │  │ Stratum  │  │ Dashboard│   Port 1618   │
+│  │ (e.g.DGB)│──│  Server  │──│   (UI)   │───────────────┤
+│  ├──────────┤  │          │  └──────────┘               │
+│  │ Daemon 2 │──│          │  ┌──────────┐               │
+│  │ (e.g.BTC)│  │          │──│ Sentinel │               │
+│  ├──────────┤  │          │  │ (alerts) │               │
+│  │ Daemon N │──│          │  └──────────┘               │
+│  │ (multi)  │  │          │                              │
+│  └──────────┘  │          │                              │
+│  ┌──────────┐  │  :4000   │                              │
+│  │PostgreSQL│──│          │  ┌──────────┐               │
+│  │          │  └──────────┘  │Prometheus│   Port 9090   │
+│  └──────────┘                │          │───────────────┤
+│                              └──────────┘               │
+│                              ┌──────────┐               │
+│                              │ Grafana  │   Port 3000   │
+│                              │          │───────────────┤
+│                              └──────────┘               │
+└──────────────────────────────────────────────────────────┘
 ```
+
+Single-coin mode runs one daemon; multi-coin mode runs one daemon per enabled coin.
 
 ### Services
 
 | Service | Purpose | Container Name |
 |---------|---------|---------------|
-| Daemon | Blockchain node (one per deployment) | `spiralpool-<coin>` |
+| Daemon(s) | Blockchain node(s) — one per coin in single-coin, multiple in multi-coin | `spiralpool-<coin>` |
 | Stratum | Mining pool server (Stratum V1 + TLS) | `spiralpool-stratum` |
 | PostgreSQL | Database for shares, blocks, stats | `spiralpool-postgres` |
 | Dashboard | Web UI at port 1618 | `spiralpool-dashboard` |
@@ -491,7 +608,7 @@ The stratum automatically connects to HAProxy instead of standalone PostgreSQL. 
 
 ### Limitations
 
-Database HA does **not** provide stratum VIP failover (Keepalived) or multi-node stratum instances. For full HA with VIP failover, use native installation (`sudo ./install.sh`).
+Database HA provides automatic PostgreSQL failover only. VIP failover (Keepalived) and multi-node stratum clustering are native-install features for bare-metal HA deployments.
 
 ---
 
@@ -547,10 +664,12 @@ Point your ASIC at your Windows LAN IP with the standard stratum port (e.g. `192
 
 ## Upgrading to Native Installation
 
-When you're ready for production mining with full features:
+Docker is at full feature parity for single-node deployments — single-coin, multi-coin, merge mining, and Stratum V1/V2 all work. Native installation is only needed for multi-node HA with VIP failover (Keepalived).
+
+To migrate:
 
 1. Set up a dedicated Ubuntu 24.04 LTS server
 2. Run `sudo ./install.sh` for native installation
-3. Native install supports all features: V2 Stratum, multi-coin, merge mining, HA
+3. Copy blockchain data from Docker volumes to avoid re-syncing (see [OPERATIONS.md](OPERATIONS.md))
 
 See [OPERATIONS.md](OPERATIONS.md) for the full native installation guide.

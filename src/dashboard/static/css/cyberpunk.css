@@ -44,6 +44,12 @@
     --glow-purple: 0 0 15px rgba(167, 139, 250, 0.2);
     --glow-green: 0 0 15px rgba(74, 222, 128, 0.2);
 
+    /* Statistics chart grid colors (theme-overridable) */
+    --chart-pool-hashrate: var(--neon-orange);
+    --chart-network-hashrate: var(--neon-blue);
+    --chart-difficulty: var(--neon-purple);
+    --chart-workers: var(--neon-green);
+
     /* Fonts */
     --font-display: 'Orbitron', sans-serif;
     --font-body: 'Rajdhani', sans-serif;

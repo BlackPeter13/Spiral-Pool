@@ -4,25 +4,7 @@
 
 ## Purpose
 
-This document describes intentional security architecture decisions in Spiral Pool's design and provides transparency about code-level security controls verified through static analysis.
-
-**This document provides transparency about design choices. It is not a security audit, vulnerability disclosure, or endorsement. The mitigations described below represent the project's best-effort approach; they are not warranties or guarantees. See LICENSE and TERMS.md for the complete "AS IS" disclaimer.**
-
-## Design Philosophy
-
-Spiral Pool is **non-custodial infrastructure software** that:
-- Manages cryptocurrency node processes
-- Constructs block templates with miner wallet addresses for direct coinbase payout
-- Configures network interfaces for high availability
-- Orchestrates system services
-- Provides optional privacy features (Tor)
-
-The pool operator never takes custody or control of miner funds. Block rewards flow directly from the blockchain to the miner's wallet via the coinbase transaction.
-
-These capabilities require system-level access by design. The architecture prioritizes:
-1. **Transparency** - All system interactions are documented
-2. **Operator control** - Configuration determines behavior
-3. **Defense in depth** - Multiple security layers recommended
+This document provides transparency about intentional security architecture decisions and code-level security controls verified through static analysis. For vulnerability reporting and incident response, see [SECURITY.md](SECURITY.md). For the complete "AS IS" disclaimer, see [LICENSE](LICENSE) and [TERMS.md](TERMS.md).
 
 ## Architecture Decisions
 
@@ -299,5 +281,5 @@ Operators should review this document and conduct their own security assessment 
 
 ---
 
-*Spiral Pool v1.1.2 - Security Architecture Decisions*
+*Spiral Pool v1.2.0 - Security Architecture Decisions*
 *Made with 💙 from Canada 🍁 — ☮️✌️Peace and Love to the World 🌎 ❤️*

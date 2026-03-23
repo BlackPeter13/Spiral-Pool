@@ -356,7 +356,7 @@ func (s *Server) handlePools(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	hashrate, err := db.GetPoolHashrate(ctx, 10)
+	hashrate, err := db.GetPoolHashrate(ctx, 30)
 	if err != nil {
 		s.logger.Warnw("Failed to get pool hashrate for /api/pools", "error", err)
 	}
@@ -411,7 +411,7 @@ func (s *Server) handlePools(w http.ResponseWriter, r *http.Request) {
 
 	response := PoolsResponse{
 		Software: "spiral-stratum",
-		Version:  "1.1.2-PHI_FORGE",
+		Version:  "1.2.0-CONVERGENT_SPIRAL",
 		Pools: []PoolInfo{
 			{
 				ID: s.poolCfg.ID,
@@ -573,7 +573,7 @@ func (s *Server) handlePoolInfo(w http.ResponseWriter, r *http.Request, poolID s
 		http.Error(w, "Database unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	hashrate, err := db.GetPoolHashrate(ctx, 10)
+	hashrate, err := db.GetPoolHashrate(ctx, 30)
 	if err != nil {
 		s.logger.Warnw("Failed to get pool hashrate for pool info", "pool", poolID, "error", err)
 	}
@@ -610,7 +610,7 @@ func (s *Server) handlePoolStats(w http.ResponseWriter, r *http.Request, poolID 
 		http.Error(w, "Database unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	hashrate, err := db.GetPoolHashrate(ctx, 10)
+	hashrate, err := db.GetPoolHashrate(ctx, 30)
 	if err != nil {
 		s.logger.Warnw("Failed to get pool hashrate for pool stats", "pool", poolID, "error", err)
 	}
@@ -758,7 +758,7 @@ func (s *Server) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	hashrate, err := db.GetPoolHashrate(ctx, 10)
+	hashrate, err := db.GetPoolHashrate(ctx, 30)
 	if err != nil {
 		s.logger.Warnw("Failed to get pool hashrate for admin stats", "error", err)
 	}

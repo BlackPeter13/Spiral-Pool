@@ -4,8 +4,8 @@
 # Optimized for fast initial blockchain sync and reliable mining operations
 # NOTE: Fractal Bitcoin uses Bitcoin Core binaries (bitcoind/bitcoin-cli)
 # aliased as fractald/fractal-cli
-# Docker runs Fractal as a solo coin. For merge mining with Bitcoin,
-# use native installation: sudo ./install.sh
+# Fractal Bitcoin supports merge mining with Bitcoin (AuxPoW).
+# In Docker: set POOL_MODE=multi with MERGE_MINING_ENABLED=true in .env
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # NETWORK SETTINGS

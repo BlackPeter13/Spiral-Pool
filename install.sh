@@ -10,7 +10,7 @@
 # ║                                                                            ║
 # ║   Spiral Pool Contributors                                                 ║
 # ║                                                                            ║
-# ║   Version: 1.1.2                                                           ║
+# ║   Version: 1.2.0                                                         ║
 # ║   License: BSD-3-Clause (see LICENSE file)                                 ║
 # ║                                                                            ║
 # ╚════════════════════════════════════════════════════════════════════════════╝
@@ -35,7 +35,7 @@ SCRIPT_DIR_EARLY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "$SCRIPT_DIR_EARLY/VERSION" ]]; then
     VERSION=$(tr -d '[:space:]' < "$SCRIPT_DIR_EARLY/VERSION")
 else
-    VERSION="1.1.2"
+    VERSION="1.2.0"
 fi
 INSTALL_DIR="/spiralpool"
 DIGIBYTE_VERSION="8.26.2"
@@ -14881,9 +14881,9 @@ POOL_C=$(sc "$POOL_STATUS"); POOL_I=$(si "$POOL_STATUS"); POOL_P=$(printf '%-8s'
 DASH_C=$(sc "$DASH_STATUS"); DASH_I=$(si "$DASH_STATUS"); DASH_P=$(printf '%-8s' "$DASH_STATUS")
 SENT_C=$(sc "$SENT_STATUS"); SENT_I=$(si "$SENT_STATUS"); SENT_P=$(printf '%-8s' "$SENT_STATUS")
 
-# Column helpers — cmd padded to 24 chars, desc to 16 chars for grid alignment
-C() { printf '%-24s' "$1"; }
-D() { printf '%-16s' "$1"; }
+# Column helpers — cmd padded to 26 chars, desc to 15 chars for grid alignment
+C() { printf '%-26s' "$1"; }
+D() { printf '%-15s' "$1"; }
 
 echo ""
 echo -e "${CYAN}  █████████             ███                      ████     ███████████                    ████${NC}"
@@ -14898,7 +14898,7 @@ echo -e "${CYAN}             ░███${NC}"
 echo -e "${CYAN}             █████${NC}"
 echo -e "${CYAN}            ░░░░░${NC}"
 echo -e "                                 ${MAGENTA}Multi-Algorithm Solo Mining Pool${NC}"
-echo -e "                                     ${DIM}V1.1.2 — PHI FORGE EDITION${NC}"
+echo -e "                                     ${DIM}V1.2.0 — CONVERGENT SPIRAL EDITION${NC}"
 echo ""
 echo -e "  ${POOL_C}${POOL_I}${NC} Stratum    ${POOL_C}${POOL_P}${NC}   ${DASH_C}${DASH_I}${NC} Dashboard   ${DASH_C}${DASH_P}${NC}   ${SENT_C}${SENT_I}${NC} Sentinel   ${SENT_C}${SENT_P}${NC}"
 echo -e "  ${DIM}Uptime:${NC} ${GREEN}${UPTIME}${NC}   ${DIM}Load:${NC} ${GREEN}${LOAD}${NC}   ${DIM}Mem:${NC} ${GREEN}${MEM_USED}/${MEM_TOTAL}${NC}   ${DIM}Disk:${NC} ${GREEN}${DISK_USED}${NC}"
@@ -20484,7 +20484,7 @@ build_stratum() {
     }
 
     # Read version for ldflags injection (matches upgrade.sh behavior)
-    local BUILD_VERSION="1.1.2"
+    local BUILD_VERSION="1.2.0"
     if [[ -f "$SCRIPT_DIR/VERSION" ]]; then
         BUILD_VERSION=$(tr -d '[:space:]' < "$SCRIPT_DIR/VERSION")
     fi
@@ -28577,11 +28577,11 @@ echo -e "    Worker:  ${WHITE}$NEW_ADDRESS.worker_name${NC}"
 echo ""
 WALLETEOF
 
-    # V1.1.2-PHI_FORGE: Create backup command
+    # V1.2.0-CONVERGENT_SPIRAL: Create backup command
     sudo tee /usr/local/bin/spiralpool-backup > /dev/null << 'BACKUPEOF'
 #!/bin/bash
 #
-# Spiral Pool Backup Utility - V1.1.2-PHI_FORGE
+# Spiral Pool Backup Utility - V1.2.0-CONVERGENT_SPIRAL
 # Creates encrypted, compressed backups of wallet, database, and config
 #
 
@@ -28626,7 +28626,7 @@ log_success() { echo -e "${GREEN}[$(date '+%H:%M:%S')] ✓${NC} $1"; }
 show_help() {
     echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${NC}${WHITE}       SPIRAL POOL BACKUP UTILITY - V1.1.2-PHI_FORGE${NC}${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}${WHITE}       SPIRAL POOL BACKUP UTILITY - V1.2.0-CONVERGENT_SPIRAL${NC}${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo "Usage: spiralpool-backup [OPTIONS]"
@@ -28975,7 +28975,7 @@ create_manifest() {
 
     cat > "${TEMP_DIR}/manifest.json" << MANIFEST
 {
-    "version": "1.1.2",
+    "version": "1.2.0",
     "created": "$(date -Iseconds)",
     "hostname": "$(hostname)",
     "components": {
@@ -29242,7 +29242,7 @@ mkdir -p "$TEMP_DIR"
 
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║${NC}${WHITE}              SPIRAL POOL BACKUP - V1.1.2-PHI_FORGE${NC}${CYAN}║${NC}"
+echo -e "${CYAN}║${NC}${WHITE}              SPIRAL POOL BACKUP - V1.2.0-CONVERGENT_SPIRAL${NC}${CYAN}║${NC}"
 echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -29295,11 +29295,11 @@ echo "  To restore: spiralpool-restore ${OUTPUT_FILE}"
 echo ""
 BACKUPEOF
 
-    # V1.1.2-PHI_FORGE: Create restore command
+    # V1.2.0-CONVERGENT_SPIRAL: Create restore command
     sudo tee /usr/local/bin/spiralpool-restore > /dev/null << 'RESTOREEOF'
 #!/bin/bash
 #
-# Spiral Pool Restore Utility - V1.1.2-PHI_FORGE
+# Spiral Pool Restore Utility - V1.2.0-CONVERGENT_SPIRAL
 # Restores backups created by spiralpool-backup
 #
 
@@ -29346,7 +29346,7 @@ log_success() { echo -e "${GREEN}[$(date '+%H:%M:%S')] ✓${NC} $1"; }
 show_help() {
     echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${NC}${WHITE}         SPIRAL POOL RESTORE UTILITY - V1.1.2-PHI_FORGE${NC}${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}${WHITE}         SPIRAL POOL RESTORE UTILITY - V1.2.0-CONVERGENT_SPIRAL${NC}${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo "Usage: spiralpool-restore BACKUP_FILE [OPTIONS]"
@@ -29668,7 +29668,7 @@ fi
 
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║${NC}${WHITE}           SPIRAL POOL RESTORE - V1.1.2-PHI_FORGE${NC}${CYAN}║${NC}"
+echo -e "${CYAN}║${NC}${WHITE}           SPIRAL POOL RESTORE - V1.2.0-CONVERGENT_SPIRAL${NC}${CYAN}║${NC}"
 echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -32936,6 +32936,8 @@ EXPORTEOF
     # ownership drifts (e.g. backup cron runs as a different user)
     if command -v setfacl &>/dev/null; then
         sudo setfacl -R -m u:"$POOL_USER":rx /spiralpool/backups 2>/dev/null || true
+        # Default ACL: new files/dirs inherit rx for pool user automatically
+        sudo setfacl -R -d -m u:"$POOL_USER":rx /spiralpool/backups 2>/dev/null || true
     fi
 
     # Determine scripts source directory (scripts/ or scripts/linux/)
@@ -35334,7 +35336,7 @@ print_completion() {
     echo -e "${CYAN}            ░░░░░${NC}"
     echo ""
     echo -e "                                     ${GREEN}✓ Installation Completed${NC}"
-    echo -e "                                     ${DIM}V1.1.2 - PHI FORGE${NC}"
+    echo -e "                                     ${DIM}V1.2.0 - CONVERGENT SPIRAL${NC}"
     echo ""
 }
 

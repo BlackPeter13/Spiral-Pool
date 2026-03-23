@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 Spiral Pool Contributors
 """
 ╔═════════════════════════════════════════════════════════════════════════════╗
-║  Spiral Sentinel v1.1.2 - PHI FORGE EDITION                                 ║
+║  Spiral Sentinel v1.2.0 - CONVERGENT SPIRAL EDITION                                 ║
 ║  Autonomous SHA-256 Solo Mining Monitor (DGB/BTC/BCH/BC2)                   ║
 ║  Self-Healing + Share Monitoring (No Pool Software Dependency)              ║
 ╠═════════════════════════════════════════════════════════════════════════════╣
@@ -28,8 +28,8 @@
 ║  • Whatsminer API: whatsminer.com                                           ║
 ╚═════════════════════════════════════════════════════════════════════════════╝
 """
-__version__ = "1.1.2-PHI_FORGE"
-__codename__ = "PHI_FORGE"
+__version__ = "1.2.0-CONVERGENT_SPIRAL"
+__codename__ = "CONVERGENT_SPIRAL"
 
 import copy, json, socket, sys, time, os, urllib.request, urllib.error, ssl, random, ipaddress, re, threading, http.server
 from urllib.parse import urlparse, quote as url_quote
@@ -5374,7 +5374,7 @@ def reload_miners():
                 "old_count": old_count,
                 "new_count": new_count,
                 "success": True,
-                "sentinel_version": "V1.1.2-PHI_FORGE"
+                "sentinel_version": "V1.2.0-CONVERGENT_SPIRAL"
             }
             _atomic_json_save(MINER_RELOAD_ACK, ack_data)
             logger.debug(f"Wrote reload ACK: {MINER_RELOAD_ACK}")
@@ -5393,7 +5393,7 @@ def reload_miners():
                 "timestamp_iso": datetime.now(timezone.utc).isoformat(),
                 "success": False,
                 "error": "Failed to reload miner configuration",
-                "sentinel_version": "V1.1.2-PHI_FORGE"
+                "sentinel_version": "V1.2.0-CONVERGENT_SPIRAL"
             }
             _atomic_json_save(MINER_RELOAD_ACK, ack_data)
         except (PermissionError, OSError):
@@ -8085,14 +8085,27 @@ def fetch_network_stats(coin=None):
 
         elif coin in ("QBX", "QBITX"):
             # Q-BitX - SHA256d, 150 second block time
-            # No external API available — use pool API then local RPC fallback
+            # No external API available — use RPC getnetworkhashps (actual block timing)
+            # then pool API / formula fallback
+            qbx_rpc_port = coin_config.get("rpc_port", 8344) if coin_config else 8344
+
+            # Method 1: getnetworkhashps RPC — uses moving average over recent blocks
+            nhps = _rpc_call("127.0.0.1", qbx_rpc_port, "getnetworkhashps")
+            if nhps and isinstance(nhps, (int, float)) and nhps > 0:
+                # Still need difficulty for ETB/odds calculations
+                mining = _rpc_call("127.0.0.1", qbx_rpc_port, "getmininginfo")
+                diff = float(mining.get("difficulty", 0)) if mining else 0
+                return {"network_phs": nhps / 1e15, "difficulty": diff, "algorithm": "sha256d"}
+
+            # Method 2: Pool API + formula fallback
             pool_stats = fetch_pool_stats_by_symbol(coin)
             pool_data = pool_stats.get("poolStats", {}) if pool_stats else {}
             if pool_data.get("networkDifficulty"):
                 diff = float(pool_data.get("networkDifficulty", 0))
                 if diff > 0:
                     return {"network_phs": (diff * (2**32) / 150) / 1e15, "difficulty": diff, "algorithm": "sha256d"}
-            qbx_rpc_port = coin_config.get("rpc_port", 8344) if coin_config else 8344
+
+            # Method 3: getmininginfo RPC + formula fallback
             rpc_result = _rpc_call("127.0.0.1", qbx_rpc_port, "getmininginfo")
             if rpc_result and "difficulty" in rpc_result:
                 diff = float(rpc_result["difficulty"])
@@ -10111,7 +10124,7 @@ def calc_odds(net_phs, fleet_ths, coin=None):
     dpb = 1 / (blocks_per_day * clamped / 100) if clamped > 0 else float('inf')
     return {"share_pct": share, "daily_odds_pct": daily * 100, "weekly_odds_pct": weekly * 100, "days_per_block": dpb}
 
-# === PROFITABILITY TRACKER (v1.1.2 — NOT ACTIVE) ===
+# === PROFITABILITY TRACKER (v1.2.0 — NOT ACTIVE) ===
 # This module computes per-coin profitability rankings within each algorithm family.
 # It is NOT wired to any API endpoint or report loop yet. To activate in a future
 # release, expose compute_profitability_rankings() via a /api/profitability route.
@@ -12286,18 +12299,8 @@ def create_report_embed(net_phs, fleet_ths, odds, md, diff=None, temps=None, pri
                     age_str = f"{int(age_secs // 3600)}h ago"
                 else:
                     age_str = f"{age_secs / 86400:.1f}d ago"
-                # Get backup size and count
-                size_str = "?"
+                # Get backup count
                 backup_count = 0
-                try:
-                    import subprocess as _sp
-                    _du = _sp.run(["du", "-sh", "/spiralpool/backups"], capture_output=True, text=True, timeout=5)
-                    if _du.returncode == 0 and _du.stdout.strip():
-                        size_str = _du.stdout.split()[0]
-                    elif _du.stderr and "Permission denied" in _du.stderr:
-                        size_str = "no access (run: sudo setfacl -R -m u:spiralpool:rx /spiralpool/backups)"
-                except Exception:
-                    pass
                 try:
                     backup_count = len([d for d in os.listdir("/spiralpool/backups")
                                         if d.startswith("daily-") and os.path.isdir(f"/spiralpool/backups/{d}")])
@@ -12305,7 +12308,7 @@ def create_report_embed(net_phs, fleet_ths, odds, md, diff=None, temps=None, pri
                     pass
                 status_em = "🟢" if age_secs < 86400 * CONFIG.get("backup_stale_days", 2) else "🔴"
                 bv_lines.append(f"{status_em} Last: `{last_str}` ({age_str})")
-                bv_lines.append(f"💾 Size: `{size_str}` ({backup_count} snapshots)")
+                bv_lines.append(f"💾 Snapshots: `{backup_count}`")
             else:
                 bv_lines.append("🔴 No backups found")
             # Next scheduled run from cron expression
@@ -17395,7 +17398,7 @@ def monitor_loop(state):
     logger.info("=" * 65)
     logger.info(f"  Spiral Sentinel v{__version__}")
     logger.info("  Autonomous Solo Mining Monitor")
-    logger.info("  PHI FORGE EDITION")
+    logger.info("  CONVERGENT SPIRAL EDITION")
     logger.info("=" * 65)
     logger.info(f"Interval: {CHECK_INTERVAL}s | Alerts: {'ON' if ALERTS_ENABLED else 'OFF'} | Health: {'ON' if HEALTH_MONITORING_ENABLED else 'OFF'}")
 
@@ -19607,7 +19610,7 @@ def show_help():
     help_text = f"""
 Spiral Sentinel v{__version__}
 Autonomous Solo Mining Monitor
-PHI FORGE EDITION
+CONVERGENT SPIRAL EDITION
 
 Supported: SHA-256d (DGB, BTC, BCH, BC2, NMC, SYS, XMY, FBTC)
            Scrypt   (LTC, DOGE, PEP, CAT)
