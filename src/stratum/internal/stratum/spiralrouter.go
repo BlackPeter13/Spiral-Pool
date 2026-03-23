@@ -178,10 +178,10 @@ func (p MinerProfile) Model() string {
 var DefaultProfiles = map[MinerClass]MinerProfile{
 	MinerClassUnknown: {
 		Class:           MinerClassUnknown,
-		InitialDiff:     500,   // Mid-range default, vardiff adjusts quickly
-		MinDiff:         500,   // Same as InitialDiff - prevents vardiff dropping below optimal (was 100)
-		MaxDiff:         50000, // High ceiling for unknown - vardiff will find optimal
-		TargetShareTime: 1,     // 1 share per second target
+		InitialDiff:     500,     // Mid-range start, vardiff adjusts quickly
+		MinDiff:         100,     // Low floor — allows small miners to settle
+		MaxDiff:         1000000, // 1M ceiling — 2x S19 Pro class (500k), lets vardiff find optimal
+		TargetShareTime: 1,       // 1 share per second target
 	},
 	MinerClassLottery: {
 		Class:           MinerClassLottery,
@@ -1217,12 +1217,11 @@ func (r *SpiralRouter) GetProfile(class MinerClass) MinerProfile {
 		return profile
 	}
 	// Ultimate fallback - should never reach here if profiles are initialized correctly
-	// Using conservative MaxDiff=50000 to match DefaultProfiles[MinerClassUnknown]
 	return MinerProfile{
 		Class:           MinerClassUnknown,
 		InitialDiff:     500,
-		MinDiff:         500,
-		MaxDiff:         50000, // Was 1000000 - caused runaway difficulty!
+		MinDiff:         100,
+		MaxDiff:         1000000, // 1M — wide range lets vardiff find optimal for any miner
 		TargetShareTime: 1,
 	}
 }
@@ -1291,12 +1290,11 @@ func (r *SpiralRouter) GetProfileForAlgorithm(class MinerClass, algorithm Algori
 	}
 
 	// Ultimate fallback - should never reach here if profiles are initialized correctly
-	// Using conservative MaxDiff=50000 to match DefaultProfiles[MinerClassUnknown]
 	return MinerProfile{
 		Class:           MinerClassUnknown,
 		InitialDiff:     500,
-		MinDiff:         500,
-		MaxDiff:         50000, // Was 1000000 - caused runaway difficulty!
+		MinDiff:         100,
+		MaxDiff:         1000000, // 1M — wide range lets vardiff find optimal for any miner
 		TargetShareTime: 1,
 	}
 }

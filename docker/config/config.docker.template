@@ -32,13 +32,17 @@ stratum:
     invalidSharesThreshold: 5
     banDuration: "1h"
   difficulty:
+    initial: ${STRATUM_DIFF_INITIAL}
     varDiff:
       enabled: true
-      minDiff: 0.001
-      maxDiff: 10000000
-      targetTime: 4
+      minDiff: ${STRATUM_DIFF_MIN}
+      maxDiff: ${STRATUM_DIFF_MAX}
+      targetTime: ${STRATUM_VARDIFF_TARGET_TIME}
       retargetTime: 60
       variancePercent: 30
+  versionRolling:
+    enabled: ${STRATUM_VERSION_ROLLING}
+    mask: ${STRATUM_VERSION_ROLLING_MASK}
 
 daemon:
   host: "${DAEMON_HOST}"

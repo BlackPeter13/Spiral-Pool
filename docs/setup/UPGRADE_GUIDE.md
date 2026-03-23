@@ -1,4 +1,4 @@
-# Upgrading to Spiral Pool v1.1.1 (Phi Forge)
+# Upgrading to Spiral Pool v1.1.2 (Phi Forge)
 
 ## Is a full reinstall required?
 
@@ -329,13 +329,13 @@ Miners connect to the appropriate stratum port for their hardware algorithm. The
 spiralctl status
 ```
 
-The version line should show `1.1.1`. If Sentinel is running:
+The version line should show `1.1.2`. If Sentinel is running:
 
 ```bash
 sudo journalctl -u spiralsentinel -n 20
 ```
 
-Look for `Spiral Sentinel v1.1.1-PHI_FORGE` followed by `PHI FORGE EDITION` in the startup log.
+Look for `Spiral Sentinel v1.1.2-PHI_FORGE` followed by `PHI FORGE EDITION` in the startup log.
 
 ---
 
@@ -415,4 +415,4 @@ sudo ./upgrade.sh --check   # Check GitHub for latest version
 
 ---
 
-*Spiral Pool — Phi Forge 1.1.1 — Built on what came before. Growing toward phi.*
+*Spiral Pool — Phi Forge 1.1.2 — Built on what came before. Growing toward phi.*

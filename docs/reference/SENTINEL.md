@@ -205,7 +205,7 @@ Permissions are set to `0600` on every load. Environment variables override conf
 
 Bypass list: `block_found`, `startup_summary`, `temp_critical`, `6h_report`, `weekly_report`, `monthly_earnings`, `quarterly_report`
 
-### New Alert Types (v1.1.1)
+### New Alert Types (v1.1.2)
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -775,7 +775,7 @@ Default port: `9191` (configurable via `sentinel_health_port` in `config.json`).
 ### `GET /health`
 
 ```json
-{"alive": true, "uptime_s": 3600, "version": "1.1.1-PHI_FORGE"}
+{"alive": true, "uptime_s": 3600, "version": "1.1.2-PHI_FORGE"}
 ```
 
 ### `GET /cooldowns`
@@ -793,4 +793,4 @@ The endpoint is loopback-only and restarts automatically after errors with a 30-
 
 ---
 
-*Spiral Sentinel &mdash; Phi Forge 1.1.1*
+*Spiral Sentinel &mdash; Phi Forge 1.1.2*
