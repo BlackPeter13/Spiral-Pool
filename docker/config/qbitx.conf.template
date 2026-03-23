@@ -3,8 +3,7 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 # Optimized for fast initial blockchain sync and reliable mining operations
 # NOTE: Q-BitX is a SHA-256d Bitcoin fork with post-quantum address support
-# Docker runs Q-BitX as a solo coin — no merge mining support in Docker mode.
-# For merge mining, use native installation: sudo ./install.sh
+# Q-BitX is a standalone SHA-256d coin (not merge-mineable).
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # NETWORK SETTINGS

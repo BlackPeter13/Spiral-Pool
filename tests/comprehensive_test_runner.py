@@ -25,18 +25,32 @@ from pathlib import Path
 from typing import Dict, List, Any
 
 # Import test agents
-from scenario_simulation_agent import (
-    ScenarioRunner,
-    BaselineHealthScenarios,
-    MinerFailureRecoveryScenarios,
-    ThermalPerformanceScenarios,
-    NetworkHashrateScenarios,
-    BlockEarningsScenarios,
-    ReportingTimeScenarios,
-    QuietHoursMaintenanceScenarios,
-    MultiCoinProfileScenarios,
-)
-from e2e_verification_agent import E2EVerificationAgent, run_all_e2e_tests
+try:
+    from .scenario_simulation_agent import (
+        ScenarioRunner,
+        BaselineHealthScenarios,
+        MinerFailureRecoveryScenarios,
+        ThermalPerformanceScenarios,
+        NetworkHashrateScenarios,
+        BlockEarningsScenarios,
+        ReportingTimeScenarios,
+        QuietHoursMaintenanceScenarios,
+        MultiCoinProfileScenarios,
+    )
+    from .e2e_verification_agent import E2EVerificationAgent, run_all_e2e_tests
+except ImportError:
+    from scenario_simulation_agent import (
+        ScenarioRunner,
+        BaselineHealthScenarios,
+        MinerFailureRecoveryScenarios,
+        ThermalPerformanceScenarios,
+        NetworkHashrateScenarios,
+        BlockEarningsScenarios,
+        ReportingTimeScenarios,
+        QuietHoursMaintenanceScenarios,
+        MultiCoinProfileScenarios,
+    )
+    from e2e_verification_agent import E2EVerificationAgent, run_all_e2e_tests
 
 
 class ComprehensiveTestRunner:

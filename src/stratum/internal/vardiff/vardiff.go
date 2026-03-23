@@ -80,7 +80,7 @@ type SessionState struct {
 //
 // Valid difficulty ranges:
 //   - ESP32/lottery miners (300 KH/s): MinDiff ~0.001
-//   - GPU miners: MinDiff ~1-100
+//   - Low-power miners: MinDiff ~1-100
 //   - ASICs: MinDiff ~100-10000+
 //
 // Fractional difficulty IS valid and required for very low hashrate devices.

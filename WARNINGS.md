@@ -84,72 +84,18 @@ When stratum ports **are** forwarded to accept external miners (e.g., rented has
 
 **WARNING: CLOUD DEPLOYMENT IS SUPPORTED BUT CARRIES SERIOUS RISKS — YOU MUST ACKNOWLEDGE THEM DURING INSTALLATION**
 
-Spiral Pool can be installed on cloud-based VPS instances. The installer detects cloud providers (AWS EC2, Google Cloud, Azure, DigitalOcean, Hetzner, Vultr, OVHcloud, Linode/Akamai, Scaleway, UpCloud, Alibaba Cloud, Tencent Cloud, and others) and requires explicit written acknowledgment of all risks before proceeding. Installation will be aborted if you do not accept.
+Spiral Pool can be installed on cloud-based VPS instances. The installer detects 100+ cloud providers and requires explicit written acknowledgment of all risks before proceeding. Cloud deployments apply additional hardening automatically (SSH restricted to operator IP, dashboard closed, HA disabled).
 
-Cloud deployments apply additional hardening automatically: SSH is restricted to your operator IP only, port 1618 (dashboard) is not opened externally, and the post-install summary shows SSH tunnel instructions instead of a direct URL. See [CLOUD_OPERATIONS.md](docs/setup/CLOUD_OPERATIONS.md) for the full cloud operations guide.
+**Key risks — see [CLOUD_OPERATIONS.md](docs/setup/CLOUD_OPERATIONS.md) for full details:**
 
-#### Security Risks
+- **Provider access:** The cloud provider has unrestricted access to your server's memory, disk, and network traffic — including private keys, wallet credentials, and database contents
+- **Provider ToS violations:** Most major providers prohibit mining-related workloads — violations can result in immediate account termination and permanent data loss
+- **Bandwidth billing:** Blockchain synchronization generates hundreds of gigabytes of egress; multi-coin deployments multiply costs
+- **No HA support:** Keepalived VRRP is blocked by cloud hypervisors — VIP failover silently fails
 
-| Risk | Description |
-|------|-------------|
-| **No physical control** | You do not own the hardware, hypervisor, or network infrastructure |
-| **Provider access** | The cloud provider has unrestricted access to your server's memory, disk, and network traffic — including private keys, wallet credentials, and database contents |
-| **Snapshotting** | Cloud instances can be snapshotted, cloned, or inspected by the hosting provider without your knowledge or consent |
-| **No data confidentiality** | Shared infrastructure provides no guarantee of data confidentiality or physical security |
-| **Side-channel attacks** | Shared hardware exposes you to side-channel attacks and noisy-neighbor resource contention |
+**Recommended deployment targets:** Bare metal servers or VMs on hypervisors you own and operate. Cloud deployments receive community support only.
 
-**Why this matters for mining pools:**
-- Wallet private keys stored on cloud infrastructure are accessible to the hosting provider
-- Cryptocurrency daemon RPC credentials are stored in plaintext configuration files on disk
-- Database contents (shares, block data, payout records) are not encrypted at rest by default
-- Network traffic between stratum and daemons contains sensitive operational data
-
-#### Provider Terms of Service Risk
-
-**WARNING: RUNNING A CRYPTOCURRENCY MINING POOL MAY VIOLATE YOUR CLOUD PROVIDER'S ACCEPTABLE USE POLICY**
-
-Most major cloud providers explicitly prohibit cryptocurrency mining or mining-related workloads in their Acceptable Use Policy (AUP) or Terms of Service (ToS). This includes AWS, Google Cloud, Azure, DigitalOcean, Hetzner, Vultr, OVHcloud, and others. Violations may result in:
-
-- **Immediate account termination without notice**
-- **All data on the instance permanently lost** (no recovery, no appeal period)
-- **Forfeiture of account balance / prepaid credits**
-- **Potential civil or legal action** depending on provider terms
-
-Note: Spiral Pool runs the stratum protocol server and blockchain node. Even if your miners are physically elsewhere, operating pool infrastructure (block template construction, share validation, block submission) may be classified as mining-related by your provider's AUP enforcement team.
-
-**YOU ARE SOLELY RESPONSIBLE** for reading and complying with your cloud provider's Terms of Service and Acceptable Use Policy before deploying. Spiral Pool and its contributors accept no liability for account terminations, data loss, or legal consequences arising from ToS violations.
-
-#### Bandwidth and Billing Risk
-
-**WARNING: CLOUD DEPLOYMENTS CAN INCUR LARGE UNEXPECTED BANDWIDTH CHARGES**
-
-Cloud providers charge for outbound (egress) network traffic. Blockchain synchronization and ongoing stratum/P2P traffic can generate hundreds of gigabytes of egress per month. Approximate initial sync egress by coin:
-
-| Coin | Initial Sync Egress | Estimated Cost (at $0.09/GB) |
-|------|--------------------|-----------------------------|
-| Bitcoin (BTC) | ~600 GB | ~$54 |
-| Bitcoin Cash (BCH) | ~250 GB | ~$23 |
-| Litecoin (LTC) | ~120 GB | ~$11 |
-| Dogecoin (DOGE) | ~90 GB | ~$8 |
-| DigiByte (DGB) | ~45 GB | ~$4 |
-| Q-BitX (QBX) | ~5 GB | ~$0.45 |
-
-Ongoing P2P traffic (mempool propagation, peer sync) adds further egress continuously. Multi-coin deployments multiply these costs. Actual egress rates and provider pricing vary — check your provider's pricing page before installing.
-
-**YOU ARE SOLELY RESPONSIBLE** for monitoring your cloud billing and understanding your provider's network pricing. Spiral Pool and its contributors accept no liability for unexpected billing charges.
-
-#### Account Termination = Data Loss
-
-If your cloud provider terminates your account (for ToS violations or any other reason), all pool data — blockchain state, PostgreSQL shares database, miner history, configuration — is permanently lost. There is no appeal process that will recover instance data after termination.
-
-**STRONGLY RECOMMENDED:** Configure automated off-instance backups (S3, object storage, or remote server) before your pool accumulates significant data. See `spiralctl data backup` and the backup section in [OPERATIONS.md](docs/setup/OPERATIONS.md).
-
-#### Supported Deployment Targets (Preferred)
-
-- Bare metal servers under your physical control
-- Virtual machines running on hypervisors **you own and operate** (e.g., your own Proxmox, VMware ESXi, or KVM host)
-
-**Cloud deployments receive COMMUNITY SUPPORT ONLY.** Issues arising from cloud-specific configurations may not be investigated by the core team. See [CLOUD_OPERATIONS.md](docs/setup/CLOUD_OPERATIONS.md) for cloud-specific guidance.
+**YOU ARE SOLELY RESPONSIBLE** for reading your provider's Terms of Service, monitoring bandwidth billing, and all consequences of cloud deployment. See [CLOUD_OPERATIONS.md](docs/setup/CLOUD_OPERATIONS.md) for the complete cloud operations guide.
 
 ### ARM Architecture
 
@@ -259,7 +205,7 @@ The authors and contributors:
 - Provide this feature AS-IS with absolutely **no warranty** of any kind
 - Are **not responsible** for any legal consequences arising from your use of Tor
 
-**By enabling or using the Tor functionality, you acknowledge that you have reviewed applicable laws in your jurisdiction, accept full responsibility for your use of the Tor feature, and confirm that you will use this feature only for lawful purposes.** See also TERMS.md Section 5A.
+**By enabling or using the Tor functionality, you acknowledge that you have reviewed applicable laws in your jurisdiction, accept full responsibility for your use of the Tor feature, and confirm that you will use this feature only for lawful purposes.** See [TERMS.md Section 5A](TERMS.md) for the binding legal acknowledgment.
 
 ### Export Control
 
@@ -296,7 +242,7 @@ Spiral Pool is designed for **one operator** running **their own mining hardware
 - Pay participating miners based on contributed hashrate (PPLNS, PPS, etc.)
 - Track or record what any external miner is owed
 
-**If participants are unaware that rewards go entirely to the operator, this may constitute fraud under applicable law. You are solely responsible for transparency with any miners you invite to connect.**
+**If participants are unaware that rewards go entirely to the operator, this may constitute fraud under applicable law. You are solely responsible for transparency with any miners you invite to connect.** See [TERMS.md Section 5E](TERMS.md) for the binding legal acknowledgment.
 
 ### Money Transmission / Money Services Business
 
@@ -486,7 +432,7 @@ This software:
 - Does NOT recover lost or stolen cryptocurrency
 - Sends rewards to whatever address you configure
 
-**VERIFY ALL WALLET ADDRESSES BEFORE DEPLOYMENT.**
+**VERIFY ALL WALLET ADDRESSES BEFORE DEPLOYMENT.** Cloud operators: see [CLOUD_OPERATIONS.md — Wallet Security on Cloud](docs/setup/CLOUD_OPERATIONS.md#wallet-security-on-cloud) for additional risks related to auto-generated wallets on provider infrastructure.
 
 ### Tax and Reporting Obligations
 
@@ -551,5 +497,5 @@ By deploying Spiral Pool, you acknowledge that:
 
 ---
 
-*Spiral Pool v1.1.2 - Specific Hazard Warnings*
+*Spiral Pool v1.2.0 - Specific Hazard Warnings*
 *Made with 💙 from Canada 🍁 — ☮️✌️Peace and Love to the World 🌎 ❤️*

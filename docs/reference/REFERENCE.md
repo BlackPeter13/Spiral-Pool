@@ -184,7 +184,7 @@ Source: `src/stratum/internal/stratum/spiralrouter.go:373-441`
 | Class | Devices | Hashrate | InitialDiff | MinDiff | MaxDiff | Target |
 |-------|---------|----------|-------------|---------|---------|--------|
 | Unknown | (unrecognized devices) | Varies | 8,000 | 128 | 2,048,000 | 10s |
-| Lottery | CPU/GPU | ~100 H/s-17 KH/s | 0.1 | 0.001 | 16 | 60s |
+| Lottery | ESP32/Low-power | ~100 H/s-17 KH/s | 0.1 | 0.001 | 16 | 60s |
 | Low | Goldshell Mini DOGE | ~183-838 MH/s | 28,000 | 8,000 | 128,000 | 10s |
 | Mid | Antminer L3+, Goldshell LT Lite, FluMiner L2 | ~498 MH/s-3.3 GH/s | 38,000 | 16,000 | 256,000 | 5s |
 | High | LT5 Pro, DG Home | ~2.9-8.4 GH/s | 180,000 | 64,000 | 512,000 | 4s |
@@ -445,4 +445,4 @@ See [SECURITY_MODEL.md](../architecture/SECURITY_MODEL.md) for full details with
 
 ---
 
-*Spiral Pool — Phi Forge 1.1.2*
+*Spiral Pool — Convergent Spiral 1.2.0*

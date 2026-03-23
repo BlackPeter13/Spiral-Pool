@@ -353,7 +353,7 @@ var (
 		{1e12, "TH/s"}, // Terahash (large pools)
 		{1e9, "GH/s"},  // Gigahash (modern ASICs like L7)
 		{1e6, "MH/s"},  // Megahash (typical ASIC range)
-		{1e3, "KH/s"},  // Kilohash (GPU mining)
+		{1e3, "KH/s"},  // Kilohash (low-power ASIC / lottery miners)
 		{1, "H/s"},     // Base unit
 	}
 )

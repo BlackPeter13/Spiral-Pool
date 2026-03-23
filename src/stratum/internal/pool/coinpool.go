@@ -2468,8 +2468,8 @@ func (cp *CoinPool) GetHashrate() float64 {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Use 10-minute window for hashrate calculation
-	hashrate, err := cp.db.GetPoolHashrate(ctx, 10)
+	// Use 30-minute window for hashrate calculation (smoother, matches ~12 QBX blocks)
+	hashrate, err := cp.db.GetPoolHashrate(ctx, 30)
 	if err != nil {
 		cp.logger.Warnw("Failed to get pool hashrate from database", "error", err)
 		return 0

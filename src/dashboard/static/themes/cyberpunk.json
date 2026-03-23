@@ -25,7 +25,11 @@
     "status-offline": "#e05252",
     "status-warning": "#facc15",
     "border-primary": "rgba(0, 212, 255, 0.2)",
-    "border-accent": "rgba(145, 117, 240, 0.2)"
+    "border-accent": "rgba(145, 117, 240, 0.2)",
+    "chart-pool-hashrate": "#fb923c",
+    "chart-network-hashrate": "#3b9dff",
+    "chart-difficulty": "#9175f0",
+    "chart-workers": "#4ade80"
   },
   "gradients": {
     "primary": "linear-gradient(135deg, #3b9dff 0%, #0284c7 100%)",

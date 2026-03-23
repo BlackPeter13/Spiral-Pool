@@ -161,7 +161,7 @@ Miner Connects
            | miss
            v
 +----------------------------------+
-|  Tier 2: User-Agent Matching     |  <-- 280+ regex patterns for known
+|  Tier 2: User-Agent Matching     |  <-- 47 verified regex patterns for
 |  (primary classification)        |      mining hardware & firmware
 |                                  |
 |  Match against pattern database  |
@@ -1088,4 +1088,4 @@ Source: `internal/config/v2.go` (production), `internal/config/config.go` (V1 le
 
 ---
 
-*Spiral Pool — Phi Forge 1.1.2*
+*Spiral Pool — Convergent Spiral 1.2.0*

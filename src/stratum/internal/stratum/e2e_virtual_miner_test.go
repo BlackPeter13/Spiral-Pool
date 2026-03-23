@@ -70,26 +70,26 @@ type TestMinerClass struct {
 }
 
 // TestMinerClasses defines all miner types to test
+// Uses REAL stratum user-agent strings (confirmed from firmware source code).
 // Expected difficulty values must match DefaultProfiles in spiralrouter.go:
 //   - Lottery: 0.001
 //   - Low: 580 (500 GH/s × 5s / 2^32, optimized for 5s target share time)
 //   - Mid: 1165 (5 TH/s × 1s / 2^32, optimized for 1s target share time)
-//   - High: 3260 (14 TH/s × 1s / 2^32, optimized for 1s target share time)
 //   - Pro: 25600 (110 TH/s × 1s / 2^32, optimized for 1s target share time)
-//   - Unknown: 500 (default)
+//   - Unknown: 500 (default, used for cgminer/bfgminer which cover huge hashrate ranges)
 var TestMinerClasses = []TestMinerClass{
-	{"ESP32Miner", "NerdMiner/1.0", 0.001, 500e3},             // 500 KH/s - Lottery
-	{"ESP32Miner", "esp32-miner/2.0", 0.001, 200e3},          // 200 KH/s - Lottery
-	{"BitAxeUltra", "BitAxe Ultra/1.0", 580, 500e9},          // 500 GH/s - Low
-	{"NMaxe", "nmaxe/1.0", 580, 500e9},                       // 500 GH/s - Low
-	{"BitAxeGamma", "bitaxe gamma/1.1", 1165, 400e9},         // 400 GH/s - Mid (bitaxe gamma -> Mid)
-	{"NerdQAxe", "NerdQAxe++/2.0", 1165, 3e12},               // 3 TH/s - Mid
-	{"BitAxeHex", "BitAxe Hex/1.0", 1165, 6e12},              // 6 TH/s - Mid
-	{"AntminerS9", "Antminer S9/1.0", 3260, 14e12},           // 14 TH/s - High
-	{"AvalonNano", "Avalon Nano 3S/1.0", 1538, 6.6e12},       // 6.6 TH/s - AvalonNano class (tailored for Nano series)
-	{"AntminerS19", "Antminer S19 Pro/1.0", 25600, 110e12},   // 110 TH/s - Pro
-	{"WhatsminerM50", "Whatsminer M50S/1.0", 25600, 126e12},  // 126 TH/s - Pro
-	{"UnknownMiner", "CustomMiner/1.0", 500, 1e12},           // Unknown -> default
+	{"NerdMinerV2", "NerdMinerV2/1.5.3", 0.001, 500e3},           // 500 KH/s - Lottery (confirmed UA from BitMaker-hub)
+	{"ESP32Miner", "esp32-miner/2.0", 0.001, 200e3},              // 200 KH/s - Lottery
+	{"BitAxeBM1366", "bitaxe/BM1366/v2.9.31", 580, 500e9},        // 500 GH/s - Low (confirmed UA from ESP-Miner)
+	{"BitAxeBM1368", "bitaxe/BM1368/v2.9.31", 580, 500e9},        // 500 GH/s - Low
+	{"BitAxeBM1370", "bitaxe/BM1370/v2.9.31", 580, 400e9},        // 400 GH/s - Low (single BM1370)
+	{"NerdQAxe", "NerdQAxe++/BM1370/v1.0.36", 1165, 5e12},        // 5 TH/s - Mid (confirmed UA from WantClue)
+	{"JingleMiner", "JingleMiner", 1165, 3e12},                   // 3 TH/s - Mid
+	{"BitmainMiner", "bmminer/2.0.0", 25600, 110e12},             // 110 TH/s - Pro (confirmed: all Bitmain sends bmminer)
+	{"MicroBTMiner", "btminer/3.0.1", 25600, 126e12},             // 126 TH/s - Pro (confirmed: all MicroBT sends btminer)
+	{"BraiinsOS", "Braiins OS 24.04", 25600, 110e12},             // 110 TH/s - Pro (confirmed from test fixtures)
+	{"CGMiner", "cgminer/4.11.1", 500, 6.6e12},                   // Unknown (Avalon/GekkoScience - huge range, vardiff handles it)
+	{"UnknownMiner", "CustomMiner/1.0", 500, 1e12},               // Unknown -> default
 }
 
 // =============================================================================
@@ -127,16 +127,16 @@ func TestSpiralRouterEdgeCases(t *testing.T) {
 		expectedName string
 		shouldBeHigh bool // Should difficulty be >= 500 (mid-range threshold)
 	}{
-		{"", "Unknown", false},                              // Empty user-agent -> Unknown -> 500 (below 1000 threshold)
-		{"   ", "Unknown", false},                           // Whitespace only -> Unknown -> 500
-		{"BITAXE ULTRA/1.0", "BitAxe Ultra", false},         // Uppercase -> Low -> 116
-		{"  NerdMiner/1.0  ", "ESP32 Miner", false},           // Whitespace padding -> Lottery
-		{"Some Random Miner", "Unknown", false},             // Unknown defaults to 500
-		{"avalon", "Avalon", true},                          // Generic Avalon - MinerClassMid (diff 11650)
-		{"AvalonMiner 1246", "AvalonMiner 12xx+", true},     // Avalon 12 series -> High -> 25000
-		{"bitmain Antminer S19j Pro", "Antminer S19", true}, // Case insensitive -> Pro -> 25600
-		{"nminer123", "NMiner", false},                      // Matches NMiner pattern (lottery tier)
-		{"xnminer", "Unknown", false},                       // Should NOT match NMiner (prefix) -> Unknown -> 500
+		{"", "Unknown", false},                                    // Empty user-agent -> Unknown -> 500
+		{"   ", "Unknown", false},                                 // Whitespace only -> Unknown -> 500
+		{"BITAXE/BM1366/V2.9.31", "BitAxe (BM1366)", false},      // Uppercase -> Low -> 580
+		{"  NerdMinerV2/1.5.3  ", "NerdMiner V2", false},          // Whitespace padding -> Lottery
+		{"Some Random Miner", "Unknown", false},                   // Unknown defaults to 500
+		{"bmminer/2.0.0", "Bitmain (bmminer)", true},             // Bitmain -> Pro -> 25600
+		{"btminer/3.0.1", "MicroBT (btminer)", true},             // MicroBT -> Pro -> 25600
+		{"Braiins OS 24.04", "Braiins OS", true},                 // Braiins -> Pro -> 25600
+		{"NerdQAxe++/BM1370/v1.0.36", "NerdQAxe++", true},        // NerdQAxe++ -> Mid -> 1165
+		{"cgminer/4.11.1", "cgminer", false},                     // cgminer -> Unknown -> 500
 	}
 
 	for _, tc := range edgeCases {
@@ -245,8 +245,8 @@ func TestDifficultyNotGlobalConfig(t *testing.T) {
 		ExtraNonce2Size: 4,
 	}
 
-	// Subscribe as BitAxe
-	subscribeMsg := `{"id":1,"method":"mining.subscribe","params":["BitAxe Ultra/1.0"]}`
+	// Subscribe as BitAxe (real UA from ESP-Miner firmware)
+	subscribeMsg := `{"id":1,"method":"mining.subscribe","params":["bitaxe/BM1366/v2.9.31"]}`
 	handler.HandleMessage(session, []byte(subscribeMsg))
 
 	// Authorize
@@ -291,7 +291,7 @@ func TestShareSubmissionUsesSessionDifficulty(t *testing.T) {
 		ExtraNonce2Size: 4,
 	}
 
-	handler.HandleMessage(session, []byte(`{"id":1,"method":"mining.subscribe","params":["BitAxe Ultra/1.0"]}`))
+	handler.HandleMessage(session, []byte(`{"id":1,"method":"mining.subscribe","params":["bitaxe/BM1366/v2.9.31"]}`))
 	handler.HandleMessage(session, []byte(`{"id":2,"method":"mining.authorize","params":["DWallet.worker","x"]}`))
 
 	// Submit share
@@ -851,9 +851,9 @@ func TestSessionAtomicOperations(t *testing.T) {
 func BenchmarkE2ESpiralRouterDetection(b *testing.B) {
 	router := NewSpiralRouter()
 	userAgents := []string{
-		"BitAxe Ultra/1.0",
-		"NerdMiner/1.0",
-		"Antminer S19 Pro/1.0",
+		"bitaxe/BM1366/v2.9.31",
+		"NerdMinerV2/1.5.3",
+		"bmminer/2.0.0",
 		"Unknown Miner/1.0",
 	}
 

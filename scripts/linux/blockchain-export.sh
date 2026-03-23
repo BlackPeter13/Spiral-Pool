@@ -5,7 +5,7 @@
 
 #
 # Spiral Pool Blockchain Export (Push)
-# Version: 1.1.2
+# Version: 1.2
 # License: BSD-3-Clause
 #
 # PURPOSE:
@@ -38,7 +38,7 @@ set -euo pipefail
 # CONFIGURATION
 # ============================================================================
 
-SCRIPT_VERSION="1.1.2"
+SCRIPT_VERSION="1.2.0"
 SCRIPT_NAME="$(basename "$0")"
 
 POOL_USER="${POOL_USER:-spiraluser}"

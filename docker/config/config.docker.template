@@ -5,10 +5,10 @@
 # IMPORTANT: YAML structure must match Go struct hierarchy in config.go.
 # Top-level keys: pool, stratum, daemon, database, api, metrics, logging, sentinel
 #
-# NOTE: Docker supports V1 single-coin solo mining only.
-# For full features (V2 Enhanced Stratum, multi-coin, merge mining),
-# use native installation: sudo ./install.sh
-# V1 Stratum with TLS (stratum+ssl://) IS supported in Docker.
+# NOTE: This template is used for single-coin mode (POOL_MODE=single).
+# For multi-coin mode, the entrypoint generates V2 config programmatically.
+# V1 Stratum with TLS (stratum+ssl://) and V2 Enhanced Stratum (SV2 binary
+# protocol with Noise encryption) are both supported in Docker.
 
 logging:
   level: info
@@ -16,8 +16,7 @@ logging:
 
 stratum:
   listen: "0.0.0.0:${STRATUM_PORT}"
-  # NOTE: listenV2 is not used in Docker (V1 config mode). V2 Enhanced Stratum
-  # requires native installation with V2 multi-coin config format.
+  listenV2: "${STRATUM_LISTEN_V2}"
   tls:
     enabled: true
     listenTLS: "0.0.0.0:${STRATUM_PORT_TLS}"
@@ -94,6 +93,6 @@ redis:
     addr: "${REDIS_DEDUP_ADDR}"
     password: "${REDIS_DEDUP_PASSWORD}"
 
-# Merge mining is NOT supported in Docker mode.
-# For merge mining (BTC+NMC, BTC+FBTC, BTC+SYS, BTC+XMY, LTC+DOGE, LTC+PEP),
-# use native installation: sudo ./install.sh
+# Merge mining is available in multi-coin mode (POOL_MODE=multi).
+# This template is for single-coin mode only.
+# For multi-coin + merge mining, set POOL_MODE=multi in .env.

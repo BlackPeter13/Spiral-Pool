@@ -63,7 +63,7 @@ All tests are designed to run with `go test -race` and should produce zero data 
 
 | File | Focus |
 |------|-------|
-| `handlers_test.go` | REST API handler correctness; includes `POST /api/admin/kick` tests (v1.1.2) |
+| `handlers_test.go` | REST API handler correctness; includes `POST /api/admin/kick` tests (v1.2.0) |
 | `security_test.go` | API authentication, authorization |
 | `workers_test.go` | Worker stats API endpoints |
 
@@ -533,6 +533,33 @@ go test -v -race -run "TestChaos_ZMQ_RecoveryDoubleSpawnRace" ./internal/daemon/
 # Run all 10 chaos tests together
 go test -v -race -run "TestChaos_" -timeout 120s ./internal/...
 ```
+
+---
+
+## Dashboard Tests (Python)
+
+The dashboard (`src/dashboard/dashboard.py`) has standalone Python tests in `tests/`.
+
+### `_safe_num()` Proof Test
+
+`tests/test_safe_num.py` — 48 tests proving that `_safe_num()` wrapping is safe across all 11 miner fetch functions.
+
+```bash
+# Run standalone (no pytest required)
+python tests/test_safe_num.py
+
+# Or via pytest
+python -m pytest tests/test_safe_num.py -v
+```
+
+| Category | Tests | What It Proves |
+|----------|-------|----------------|
+| Passthrough | 9 | `int`/`float` inputs returned unchanged — zero regression for working APIs |
+| String conversion | 6 | `"1500"` → `1500.0` — fixes Innosilicon/stock Antminer crash |
+| Garbage handling | 7 | `None`, `""`, `"N/A"`, dicts, lists → safe default `0` |
+| Arithmetic | 8 | Division, comparison, `int()`, `sum()`, `max()`, truthiness all work on output |
+| Real API patterns | 13 | `or`-fallback chains, `dict.get()`, full Innosilicon simulation, normal API passthrough |
+| List comprehension | 1 | Mixed string/int/zero filtering — exact pattern from vnish/whatsminer/innosilicon loops |
 
 ---
 

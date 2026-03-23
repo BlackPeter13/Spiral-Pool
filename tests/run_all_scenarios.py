@@ -1470,21 +1470,28 @@ class MultiCoinExtendedScenarios:
     def __init__(self, agent: ScenarioSimulationAgent):
         self.agent = agent
         self.coins = {
-            "DGB": {"algorithm": "sha256d", "port": 3333},
             "BTC": {"algorithm": "sha256d", "port": 4333},
             "BCH": {"algorithm": "sha256d", "port": 5333},
+            "DGB": {"algorithm": "sha256d", "port": 3333},
             "BC2": {"algorithm": "sha256d", "port": 6333},
+            "NMC": {"algorithm": "sha256d", "port": 10333},
+            "SYS": {"algorithm": "sha256d", "port": 11333},
+            "XMY": {"algorithm": "sha256d", "port": 12333},
+            "FBTC": {"algorithm": "sha256d", "port": 13333},
+            "QBX": {"algorithm": "sha256d", "port": 20335},
             "LTC": {"algorithm": "scrypt", "port": 7333},
             "DOGE": {"algorithm": "scrypt", "port": 8335},
-            "XVG": {"algorithm": "scrypt", "port": 9335},
+            "DGB-SCRYPT": {"algorithm": "scrypt", "port": 14333},
+            "PEP": {"algorithm": "scrypt", "port": 15333},
+            "CAT": {"algorithm": "scrypt", "port": 16333},
         }
 
-    def scenario_all_12_coins_supported(self) -> Dict:
-        """All 12 supported coins configurable."""
+    def scenario_all_14_coins_supported(self) -> Dict:
+        """All 14 supported coins configurable."""
         return {
             "supported_coins": list(self.coins.keys()),
             "count": len(self.coins),
-            "pass": len(self.coins) >= 11
+            "pass": len(self.coins) >= 14
         }
 
     def scenario_coin_port_assignment(self) -> Dict:

@@ -2,8 +2,8 @@
 # MYRIADCOIN CORE - SPIRAL POOL CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════════
 # Optimized for fast initial blockchain sync and reliable mining operations
-# Docker runs Myriadcoin as a solo coin. For merge mining with Bitcoin,
-# use native installation: sudo ./install.sh
+# Myriadcoin supports merge mining with Bitcoin (AuxPoW).
+# In Docker: set POOL_MODE=multi with MERGE_MINING_ENABLED=true in .env
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # NETWORK SETTINGS

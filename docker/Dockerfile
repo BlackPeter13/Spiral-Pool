@@ -5,7 +5,7 @@
 # ║                                                                            ║
 # ║                       SPIRAL POOL - DOCKER IMAGE                           ║
 # ║                                                                            ║
-# ║              Multi-Coin Solo Mining Pool (Single-Coin Mode)                ║
+# ║          Multi-Coin Solo Mining Pool (Single + Multi-Coin Mode)            ║
 # ║                                                                            ║
 # ║   Spiral Pool Contributors                                                 ║
 # ║                                                                            ║
@@ -17,7 +17,7 @@ FROM ubuntu:24.04
 
 LABEL maintainer="Spiral Miner"
 LABEL description="Spiral Pool - Multi-Coin Solo Mining Pool"
-LABEL version="1.1.0"
+LABEL version="1.2.0"
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive

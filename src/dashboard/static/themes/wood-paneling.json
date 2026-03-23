@@ -2,36 +2,40 @@
   "name": "Wood Paneling",
   "id": "wood-paneling",
   "author": "Spiral Pool",
-  "version": "1.1.2",
-  "description": "Polished walnut and honey-gold — warm lamplight on aged oak",
+  "version": "1.2.0",
+  "description": "Rich walnut and mahogany — warm study with copper fixtures",
   "category": "Nature",
   "colors": {
-    "bg-primary": "#120e05",
-    "bg-secondary": "#1c1608",
-    "bg-card": "#28200e",
-    "bg-card-hover": "#352a14",
-    "neon-blue": "#c89040",
-    "neon-cyan": "#e8b830",
-    "neon-purple": "#b07828",
-    "neon-pink": "#d4983c",
-    "neon-orange": "#f5a818",
-    "neon-yellow": "#f0d050",
-    "neon-green": "#98b840",
-    "neon-red": "#c84028",
-    "text-primary": "#f5ead0",
-    "text-secondary": "#c8a860",
-    "text-muted": "#7a6030",
-    "status-online": "#98b840",
-    "status-offline": "#c84028",
-    "status-warning": "#f5a818",
-    "border-primary": "rgba(200, 144, 64, 0.22)",
-    "border-accent": "rgba(232, 184, 48, 0.28)"
+    "bg-primary": "#110b07",
+    "bg-secondary": "#1a120a",
+    "bg-card": "#241a10",
+    "bg-card-hover": "#2e2016",
+    "neon-blue": "#c47a50",
+    "neon-cyan": "#d4956a",
+    "neon-purple": "#8b5e3c",
+    "neon-pink": "#a8644a",
+    "neon-orange": "#c86830",
+    "neon-yellow": "#deb070",
+    "neon-green": "#6b8a4e",
+    "neon-red": "#a83828",
+    "text-primary": "#ede4d6",
+    "text-secondary": "#b8a088",
+    "text-muted": "#6e5840",
+    "status-online": "#6b8a4e",
+    "status-offline": "#a83828",
+    "status-warning": "#c8862e",
+    "border-primary": "rgba(140, 95, 60, 0.25)",
+    "border-accent": "rgba(196, 122, 80, 0.30)",
+    "chart-pool-hashrate": "#c86830",
+    "chart-network-hashrate": "#c47a50",
+    "chart-difficulty": "#8b5e3c",
+    "chart-workers": "#6b8a4e"
   },
   "gradients": {
-    "primary": "linear-gradient(135deg, #c89040 0%, #a07028 100%)",
-    "secondary": "linear-gradient(135deg, #e8b830 0%, #b07828 100%)",
-    "accent": "linear-gradient(135deg, #f5a818 0%, #c88010 100%)",
-    "card": "linear-gradient(180deg, rgba(51, 34, 12, 0.95) 0%, rgba(37, 26, 8, 1) 100%)"
+    "primary": "linear-gradient(135deg, #8b5e3c 0%, #6b4428 100%)",
+    "secondary": "linear-gradient(135deg, #c47a50 0%, #8b5e3c 100%)",
+    "accent": "linear-gradient(135deg, #c86830 0%, #984818 100%)",
+    "card": "linear-gradient(180deg, rgba(42, 28, 16, 0.95) 0%, rgba(26, 18, 10, 1) 100%)"
   },
   "fonts": {
     "display": "'Libre Baskerville', serif",
@@ -39,7 +43,7 @@
     "mono": "'Source Code Pro', monospace"
   },
   "effects": {
-    "glowIntensity": 0.12,
+    "glowIntensity": 0.08,
     "animationSpeed": 0.7,
     "borderRadius": "8px",
     "useGlitchEffect": false,
@@ -48,5 +52,5 @@
     "useNeonGlow": false,
     "backgroundStyle": "checkerboard"
   },
-  "customCSS": "/* Wood Paneling - Polished Walnut */\n@import url('https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;700&family=Source+Sans+3:wght@300;400;600&family=Source+Code+Pro&display=swap');\n\n.cyber-glow {\n  background: \n    radial-gradient(ellipse 600px 400px at 30% 10%, rgba(245, 168, 24, 0.1), transparent),\n    radial-gradient(ellipse 500px 350px at 70% 90%, rgba(200, 144, 64, 0.07), transparent);\n}\n\n.cyber-particles { display: none; }\n\n.stat-card {\n  border: 1px solid rgba(200, 144, 64, 0.22);\n  background: rgba(51, 34, 12, 0.9);\n}\n\n.stat-card::before {\n  background: linear-gradient(90deg, #c89040, #e8b830, #f5a818);\n  height: 2px;\n}\n\n.stat-card:hover {\n  border-color: rgba(232, 184, 48, 0.4);\n  box-shadow: 0 4px 20px rgba(245, 168, 24, 0.15);\n}\n\n.stat-value {\n  text-shadow: none;\n}\n\n.celebration-title {\n  color: #f0d050 !important;\n  text-shadow: 0 0 20px rgba(240, 208, 80, 0.5);\n}\n\n.miner-card, .health-card, .lifetime-card {\n  background: rgba(51, 34, 12, 0.7);\n  border: 1px solid rgba(200, 144, 64, 0.14);\n}\n\n.miner-card:hover {\n  border-color: rgba(232, 184, 48, 0.3);\n}"
+  "customCSS": "/* Wood Paneling - Walnut & Mahogany */\n@import url('https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;700&family=Source+Sans+3:wght@300;400;600&family=Source+Code+Pro&display=swap');\n\n.cyber-glow {\n  background: \n    radial-gradient(ellipse 600px 400px at 30% 10%, rgba(140, 95, 60, 0.08), transparent),\n    radial-gradient(ellipse 500px 350px at 70% 90%, rgba(100, 68, 40, 0.06), transparent);\n}\n\n.cyber-particles { display: none; }\n\n.stat-card {\n  border: 1px solid rgba(140, 95, 60, 0.22);\n  background: rgba(36, 26, 16, 0.92);\n}\n\n.stat-card::before {\n  background: linear-gradient(90deg, #8b5e3c, #c47a50, #c86830);\n  height: 2px;\n}\n\n.stat-card:hover {\n  border-color: rgba(196, 122, 80, 0.4);\n  box-shadow: 0 4px 20px rgba(140, 95, 60, 0.15);\n}\n\n.stat-value {\n  text-shadow: none;\n}\n\n.celebration-title {\n  color: #deb070 !important;\n  text-shadow: 0 0 20px rgba(222, 176, 112, 0.4);\n}\n\n.miner-card, .health-card, .lifetime-card {\n  background: rgba(36, 26, 16, 0.75);\n  border: 1px solid rgba(140, 95, 60, 0.14);\n}\n\n.miner-card:hover {\n  border-color: rgba(196, 122, 80, 0.3);\n}"
 }

@@ -32,13 +32,22 @@ from enum import Enum
 from collections import defaultdict
 
 # Import base classes
-from scenario_simulation_agent import (
-    SimulatedTime,
-    ScenarioSimulationAgent,
-    SimulatedMiner,
-    MinerStatus,
-    AlertRecord,
-)
+try:
+    from .scenario_simulation_agent import (
+        SimulatedTime,
+        ScenarioSimulationAgent,
+        SimulatedMiner,
+        MinerStatus,
+        AlertRecord,
+    )
+except ImportError:
+    from scenario_simulation_agent import (
+        SimulatedTime,
+        ScenarioSimulationAgent,
+        SimulatedMiner,
+        MinerStatus,
+        AlertRecord,
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1317,18 +1326,25 @@ class MultiCoinExtendedScenarios:
     def __init__(self, agent: ScenarioSimulationAgent):
         self.agent = agent
         self.coins = {
-            "DGB": CoinConfig("DGB", "sha256d", {"stratum": 3333}),
             "BTC": CoinConfig("BTC", "sha256d", {"stratum": 4333}),
             "BCH": CoinConfig("BCH", "sha256d", {"stratum": 5333}),
+            "DGB": CoinConfig("DGB", "sha256d", {"stratum": 3333}),
             "BC2": CoinConfig("BC2", "sha256d", {"stratum": 6333}),
+            "NMC": CoinConfig("NMC", "sha256d", {"stratum": 10333}),
+            "SYS": CoinConfig("SYS", "sha256d", {"stratum": 11333}),
+            "XMY": CoinConfig("XMY", "sha256d", {"stratum": 12333}),
+            "FBTC": CoinConfig("FBTC", "sha256d", {"stratum": 13333}),
+            "QBX": CoinConfig("QBX", "sha256d", {"stratum": 20335}),
             "LTC": CoinConfig("LTC", "scrypt", {"stratum": 7333}),
             "DOGE": CoinConfig("DOGE", "scrypt", {"stratum": 8335}),
-            "XVG": CoinConfig("XVG", "scrypt", {"stratum": 9335}),
+            "DGB-SCRYPT": CoinConfig("DGB-SCRYPT", "scrypt", {"stratum": 14333}),
+            "PEP": CoinConfig("PEP", "scrypt", {"stratum": 15333}),
+            "CAT": CoinConfig("CAT", "scrypt", {"stratum": 16333}),
         }
         self.active_coins: List[str] = ["DGB"]
 
-    def scenario_all_12_coins_supported(self):
-        """Verify all 12 supported coins are configurable."""
+    def scenario_all_14_coins_supported(self):
+        """Verify all 14 supported coins are configurable."""
         supported = list(self.coins.keys())
 
         return {
@@ -1336,7 +1352,7 @@ class MultiCoinExtendedScenarios:
             "count": len(supported),
             "sha256_coins": [c for c, cfg in self.coins.items() if cfg.algorithm == "sha256d"],
             "scrypt_coins": [c for c, cfg in self.coins.items() if cfg.algorithm == "scrypt"],
-            "pass": len(supported) >= 11
+            "pass": len(supported) >= 14
         }
 
     def scenario_coin_port_assignment(self):

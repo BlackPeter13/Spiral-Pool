@@ -13,53 +13,33 @@ func TestVerifyAllMinerProfiles(t *testing.T) {
 	// Test with DGB block time (15 seconds) - fast chain
 	router := NewSpiralRouterWithBlockTime(15)
 
-	// All user agents to test
+	// All user agents to test — using REAL firmware UA strings
+	// (hardware model names are never sent in stratum UA strings)
 	testCases := []struct {
 		userAgent     string
 		expectedClass string
 	}{
-		// Lottery class
-		{"nerdminer/1.0", "lottery"},
+		// Lottery class (ESP32 miners)
+		{"NerdMinerV2/1.5.3", "lottery"},
 		{"ESP32Miner/1.0", "lottery"},
 		{"NMiner/1.0", "lottery"},
 
-		// Low class (BitAxe, NMAxe)
-		{"bitaxe/2.0", "low"},
-		{"BitAxe Ultra", "low"},
-		{"nmaxe/1.0", "low"},
-		{"NMAxe Pro", "low"},
+		// Low class (BitAxe BM1366/BM1368)
+		{"bitaxe/BM1366/v2.9.31", "low"},
+		{"bitaxe/BM1368/v2.5.0", "low"},
 
-		// Mid class
-		{"BitAxe Gamma", "mid"},
+		// Mid class (NerdQAxe, NerdOctaxe — BM1370+)
+		{"NerdQAxe++/BM1370/v1.0.36", "mid"},
 		{"nerdqaxe/1.0", "mid"},
-		{"BitAxe Hex", "mid"},
-		{"NerdOctaxe", "mid"},
 
-		// High class
-		{"Antminer S9", "high"},
-		{"Antminer S15", "high"},
+		// Pro class (Bitmain/MicroBT/Braiins firmware UAs)
+		{"bmminer/2.0.0", "pro"},
+		{"btminer/3.0.1", "pro"},
+		{"Braiins OS 24.04", "pro"},
 
-		// Pro class
-		{"Antminer S19", "pro"},
-		{"Antminer S21", "pro"},
-		{"Whatsminer M50", "pro"},
-		{"Whatsminer M60", "pro"},
-
-		// Avalon classes
-		{"Avalon Nano", "avalon_nano"},
-		{"Avalon Nano 3S", "avalon_nano"},
-		{"AvalonMiner 621", "avalon_legacy_low"},
-		{"Avalon6", "avalon_legacy_low"},
-		{"AvalonMiner 741", "avalon_legacy_mid"},
-		{"AvalonMiner 841", "avalon_legacy_mid"},
-		{"AvalonMiner 1047", "avalon_mid"},
-		{"AvalonMiner 921", "avalon_mid"},
-		{"AvalonMiner 1246", "avalon_high"},
-		{"AvalonMiner 1346", "avalon_high"},
-		{"AvalonMiner 1466", "avalon_pro"},
-		{"AvalonMiner 1566", "avalon_pro"},
-		{"Avalon Mini 3", "avalon_home"},
-		{"Canaan Avalon Q", "avalon_home"},
+		// Generic mining clients (reclassified to unknown in v1.1.3)
+		{"cgminer/4.11.1", "unknown"},
+		{"bfgminer/5.5.0", "unknown"},
 
 		// Unknown
 		{"SomeRandomMiner/1.0", "unknown"},
@@ -199,8 +179,25 @@ func TestVerifyScryptMinerDetectionAndProfiles(t *testing.T) {
 	router := NewSpiralRouterWithBlockTime(150)
 	router.SetAlgorithm(AlgorithmScrypt)
 
-	// All known Scrypt miner user-agents with expected class and difficulty ranges.
-	// Difficulty formula: D = hashrate × targetTime / 65536
+	// Scrypt miner firmware user-agents with expected class and difficulty ranges.
+	//
+	// VERIFIED firmware UA sources:
+	//   - Antminer L-series (L3+, L7, L9): sends "cgminer/X.X.X" — NOT bmminer.
+	//     Source: bitmaintech/cgminer-ltc, bitmaintech/ltc_frimware (builds cgminer)
+	//   - Goldshell (Mini DOGE, LT, DG): sends "cgminer/X.X.X" (cgminer-based firmware)
+	//     Source: goldshellminer/firmware, cgminer API compatibility
+	//   - iBeLink (BM-L3): likely "cgminer/X.X.X" (cgminer compatible)
+	//   - FutureBit Apollo LTC: sends "bfgminer/X.X.X"
+	//     Source: jstefanop/bfgminer futurebit_driver branch
+	//   - Vnish (L3+, L7): supports Scrypt, exact UA unverified (may send vnish or cgminer)
+	//     Source: vnish.group/en/antminer-l3-l3-2, vnish-firmware.com L7 page
+	//
+	// NOT Scrypt-capable (DO NOT include):
+	//   - bmminer: SHA-256d only (S9/T9/S19/S21). Source: bitmaintech/bmminer-mix
+	//   - btminer: MicroBT makes NO Scrypt miners (all Whatsminer = SHA-256d)
+	//   - Braiins OS: SHA-256d only (no L-series support). Source: braiins.com/os-firmware
+	//   - ESP32/BitAxe/NerdQAxe: SHA-256d BM-series chips, cannot compute Scrypt
+	//   - sgminer: GPU miner — pool does not support GPU mining
 	testCases := []struct {
 		userAgent     string
 		expectedClass string
@@ -209,74 +206,30 @@ func TestVerifyScryptMinerDetectionAndProfiles(t *testing.T) {
 		description   string  // Miner model and hashrate for logging
 	}{
 		// ================================================================
-		// ANTMINER L SERIES (Bitmain Scrypt ASICs)
+		// UNKNOWN CLASS — cgminer-based firmware (vardiff finds optimal)
+		// Covers: Antminer L3+/L7/L9, Goldshell all models, iBeLink
+		// All send "cgminer/X.X.X" — class=unknown, vardiff ramps to correct diff
 		// ================================================================
-		{"Antminer L9", "pro", 200000, 400000, "L9 ~16 GH/s"},
-		{"antminer l9/1.0", "pro", 200000, 400000, "L9 ~16 GH/s"},
-		{"Antminer L7", "pro", 200000, 400000, "L7 ~9.5 GH/s"},
-		{"antminer l7/2.0", "pro", 200000, 400000, "L7 ~9.5 GH/s"},
-		{"Antminer L3+", "low", 20000, 40000, "L3+ ~504 MH/s"},
-		{"antminer l3/1.0", "low", 20000, 40000, "L3+ ~504 MH/s"},
+		{"cgminer/4.10.1", "unknown", 5000, 15000, "cgminer (Antminer L3+/L7/L9, Goldshell, iBeLink)"},
+		{"cgminer/4.12.0", "unknown", 5000, 15000, "cgminer (alternate version)"},
 
 		// ================================================================
-		// GOLDSHELL (Scrypt ASICs — Mini DOGE, LT, DG series)
+		// UNKNOWN CLASS — bfgminer (FutureBit Apollo LTC ~100-135 MH/s)
+		// Source: jstefanop/bfgminer futurebit_driver branch [HIGH confidence]
 		// ================================================================
-		{"Goldshell DG Max", "pro", 200000, 400000, "DG Max ~6.5 GH/s"},
-		{"goldshell lt6", "high", 100000, 250000, "LT6 ~3.35 GH/s (High, not Pro — Scrypt Pro MinDiff > D_optimal)"},
-		{"Goldshell LT5 Pro", "high", 100000, 250000, "LT5 Pro ~2.45 GH/s"},
-		{"goldshell lt5", "high", 100000, 250000, "LT5 ~2 GH/s"},
-		{"Goldshell LT Lite", "mid", 25000, 60000, "LT Lite ~1.6 GH/s"},
-		{"Goldshell Mini DOGE III+", "low", 20000, 40000, "Mini DOGE III+ ~810 MH/s"},
-		{"goldshell mini doge iii", "low", 20000, 40000, "Mini DOGE III ~700 MH/s"},
-		{"Goldshell Mini DOGE II", "low", 20000, 40000, "Mini DOGE II ~420 MH/s"},
-		{"goldshell mini doge pro", "low", 20000, 40000, "Mini DOGE Pro ~205 MH/s"},
-		{"Goldshell Mini DOGE", "low", 20000, 40000, "Mini DOGE ~185 MH/s"},
-		{"goldshell byte", "low", 20000, 40000, "BYTE ~230 MH/s"},
-		{"goldshell", "mid", 25000, 60000, "Generic Goldshell"},
+		{"bfgminer/5.4.0", "unknown", 5000, 15000, "bfgminer (FutureBit Apollo LTC)"},
 
 		// ================================================================
-		// ELPHAPEX (Scrypt ASICs — DG series)
+		// PRO CLASS — Vnish aftermarket firmware (L3+, L7 confirmed)
+		// Exact UA unverified — may send "vnish" or modified "cgminer"
+		// Source: vnish.group (Scrypt support confirmed, UA string LOW confidence)
 		// ================================================================
-		{"Elphapex DG2+", "pro", 200000, 400000, "DG2+ ~20.5 GH/s"},
-		{"elphapex dg2", "pro", 200000, 400000, "DG2 ~20.5 GH/s"},
-		{"Elphapex DG2 Mini", "high", 100000, 250000, "DG2 Mini ~2.4 GH/s"},
-		{"Elphapex DG Hydro", "pro", 200000, 400000, "DG Hydro ~20 GH/s"},
-		{"Elphapex DG1+", "pro", 200000, 400000, "DG1+ ~14 GH/s"},
-		{"elphapex dg1 lite", "pro", 200000, 400000, "DG1 Lite ~11 GH/s"},
-		{"Elphapex DG1", "pro", 200000, 400000, "DG1 ~11 GH/s"},
-		{"Elphapex DG Home", "high", 100000, 250000, "DG Home ~2.1 GH/s"},
-		{"elphapex", "high", 100000, 250000, "Generic Elphapex"},
+		{"vnish/1.2.3", "pro", 200000, 400000, "Vnish (aftermarket firmware for L3+/L7)"},
 
 		// ================================================================
-		// FLUMINER L SERIES (Scrypt)
+		// UNKNOWN — completely unknown miner
 		// ================================================================
-		{"FluMiner L3", "pro", 200000, 400000, "L3 ~9.5 GH/s"},
-		{"fluminer l1 pro", "pro", 200000, 400000, "L1 Pro ~6 GH/s"},
-		{"FluMiner L1", "pro", 200000, 400000, "L1 ~5.3 GH/s"},
-
-		// ================================================================
-		// IBELINK (Scrypt)
-		// ================================================================
-		{"iBeLink BM-L3", "high", 100000, 250000, "BM-L3 ~3.2 GH/s"},
-
-		// ================================================================
-		// VOLCMINER, HAMMER MINER (Scrypt)
-		// ================================================================
-		{"volcminer", "pro", 200000, 400000, "Generic VolcMiner"},
-		{"hammer miner", "low", 20000, 40000, "Hammer ~105 MH/s"},
-
-		// ================================================================
-		// GENERIC / UNKNOWN (should get Scrypt Unknown profile)
-		// ================================================================
-		{"cgminer/4.12.0", "mid", 25000, 60000, "cgminer (generic)"},
-		{"bfgminer/5.5.0", "mid", 25000, 60000, "bfgminer (generic)"},
-		{"SomeRandomMiner/1.0", "unknown", 5000, 15000, "Unknown miner"},
-
-		// ================================================================
-		// LOTTERY (ESP32 / tiny miners on Scrypt)
-		// ================================================================
-		{"nerdminer/1.0", "lottery", 0.05, 0.5, "ESP32 on Scrypt"},
-		{"ESP32Miner/1.0", "lottery", 0.05, 0.5, "ESP32 on Scrypt"},
+		{"SomeRandomMiner/1.0", "unknown", 5000, 15000, "Unknown Scrypt miner"},
 	}
 
 	for _, tc := range testCases {
@@ -359,38 +312,40 @@ func TestVerifyScryptVsSHA256dProfileSeparation(t *testing.T) {
 
 // TestVerifyScryptAlgorithmSwitch verifies that SetAlgorithm correctly switches
 // the active profiles from SHA-256d to Scrypt and back.
+// Uses cgminer UA since that's what real Scrypt ASICs send (Antminer L-series,
+// Goldshell, iBeLink all use cgminer-based firmware).
 func TestVerifyScryptAlgorithmSwitch(t *testing.T) {
 	router := NewSpiralRouterWithBlockTime(150)
 
+	// cgminer is classified as Unknown — vardiff finds optimal for any ASIC
 	// Default: SHA-256d
-	sha256Diff := router.GetInitialDifficulty("Antminer L7")
-	t.Logf("SHA-256d mode: L7 InitialDiff = %.2f", sha256Diff)
+	sha256Diff := router.GetInitialDifficulty("cgminer/4.10.1")
+	t.Logf("SHA-256d mode: cgminer InitialDiff = %.2f (Unknown class)", sha256Diff)
 
 	// Switch to Scrypt
 	router.SetAlgorithm(AlgorithmScrypt)
-	scryptDiff := router.GetInitialDifficulty("Antminer L7")
-	t.Logf("Scrypt mode:   L7 InitialDiff = %.2f", scryptDiff)
+	scryptDiff := router.GetInitialDifficulty("cgminer/4.10.1")
+	t.Logf("Scrypt mode:   cgminer InitialDiff = %.2f (Unknown class)", scryptDiff)
 
-	// Scrypt diff should be much higher (L7 is Pro class)
-	// SHA-256d Pro: ~25600, Scrypt Pro: ~290000
+	// Scrypt diff should be higher than SHA-256d for the same class
+	// SHA-256d Unknown: ~500, Scrypt Unknown: ~8000
 	if scryptDiff <= sha256Diff {
-		t.Errorf("After SetAlgorithm(Scrypt), L7 diff (%.2f) should be > SHA-256d diff (%.2f)",
+		t.Errorf("After SetAlgorithm(Scrypt), diff (%.2f) should be > SHA-256d diff (%.2f)",
 			scryptDiff, sha256Diff)
 	}
 
-	// Verify the ratio is roughly in the right ballpark (not exactly 65536x due to
-	// different TargetShareTimes between SHA-256d Pro (1s) and Scrypt Pro (2s))
+	// Verify the ratio is in a reasonable range
 	ratio := scryptDiff / sha256Diff
 	if ratio < 5 || ratio > 100 {
-		t.Errorf("Scrypt/SHA-256d ratio = %.1f, expected 5-100x (different target times)", ratio)
+		t.Errorf("Scrypt/SHA-256d ratio = %.1f, expected 5-100x (different diff scales)", ratio)
 	}
-	t.Logf("Ratio: %.1fx (accounts for different TargetShareTime)", ratio)
+	t.Logf("Ratio: %.1fx (Scrypt uses 65536 hashes/diff vs SHA-256d 2^32)", ratio)
 
 	// Switch back to SHA-256d
 	router.SetAlgorithm(AlgorithmSHA256d)
-	backToSha := router.GetInitialDifficulty("Antminer L7")
+	backToSha := router.GetInitialDifficulty("cgminer/4.10.1")
 	if backToSha != sha256Diff {
-		t.Errorf("After switching back to SHA-256d, L7 diff (%.2f) != original (%.2f)", backToSha, sha256Diff)
+		t.Errorf("After switching back to SHA-256d, diff (%.2f) != original (%.2f)", backToSha, sha256Diff)
 	}
-	t.Logf("Back to SHA-256d: L7 InitialDiff = %.2f ✓", backToSha)
+	t.Logf("Back to SHA-256d: cgminer InitialDiff = %.2f ✓", backToSha)
 }
