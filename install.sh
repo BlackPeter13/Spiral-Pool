@@ -19802,6 +19802,7 @@ append_merge_mining_to_config() {
     local parents=""
     case "$MERGE_MINING_PARENT" in
         BTC)     parents="BTC" ;;
+        DGB)     parents="DGB" ;;
         LTC)     parents="LTC" ;;
         BTC,LTC) parents="BTC LTC" ;;
         *)       log_warn "Unknown merge mining parent: $MERGE_MINING_PARENT"; return 0 ;;
@@ -19811,7 +19812,7 @@ append_merge_mining_to_config() {
         local aux_chains=""
         local aux_yaml=""
 
-        if [[ "$parent" == "BTC" ]]; then
+        if [[ "$parent" == "BTC" ]] || [[ "$parent" == "DGB" ]]; then
             # Determine which aux chains for SHA-256d
             if [[ "$MERGE_MINING_PARENT" == "BTC,LTC" ]]; then
                 aux_chains="$MERGE_MINING_AUX_CHAINS_SHA256D"
@@ -20030,9 +20031,9 @@ append_merge_mining_v1_to_config() {
     # Determine parent type from SOLO_COIN
     local parent_algo=""
     case "$SOLO_COIN" in
-        BTC) parent_algo="sha256d" ;;
-        LTC) parent_algo="scrypt" ;;
-        *)   log_warn "Single-coin $SOLO_COIN does not support merge mining"; return 0 ;;
+        BTC|DGB) parent_algo="sha256d" ;;
+        LTC)     parent_algo="scrypt" ;;
+        *)       log_warn "Single-coin $SOLO_COIN does not support merge mining"; return 0 ;;
     esac
 
     if [[ "$parent_algo" == "sha256d" ]]; then
