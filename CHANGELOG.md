@@ -19,6 +19,8 @@ Versioning follows `MAJOR.MINOR.PATCH` — patch releases are applied in-place o
 
 - **MOTD not updating on upgrade** — `update_motd()` in upgrade.sh used `cat >` to write to `/etc/update-motd.d/`, which silently fails without root. Now uses `sudo tee` matching install.sh.
 - **Dashboard section ordering** — Lifetime Statistics section now renders below Statistics (charts) instead of above it
+- **Flaky stress test** — `TestRapidFireHeightUpdates` widened stale RPC tolerance from 0 to 1; on slow CI runners a goroutine can slip through the cancellation window
+- All version strings, documentation, themes, and config files bumped to 1.2.1
 
 ---
 
