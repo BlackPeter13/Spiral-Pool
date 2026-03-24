@@ -7523,8 +7523,11 @@ docker_main() {
     # Check for existing installation and allow upgrade
     detect_existing_docker_install
 
-    # Select coin mode (reuses existing function)
-    select_coin_mode
+    # Select coin mode (reuses existing function, loop for 'b' back navigation)
+    while true; do
+        select_coin_mode
+        [[ $? -eq 1 ]] && continue || break
+    done
 
     # Validate requirements
     validate_docker_disk_requirements
@@ -7643,6 +7646,9 @@ select_install_mode() {
                 echo -e "  ${DIM}    (You'll choose which coin(s) to mine next)${NC}"
                 break
                 ;;
+            b|B)
+                echo -e "  ${DIM}Already at the first step${NC}"
+                ;;
             *)
                 echo -e "  ${RED}Please enter 1 or 2${NC}"
                 ;;
@@ -7656,114 +7662,133 @@ select_install_mode() {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 select_coin_mode() {
-    clear
-    log_step "Mining Configuration"
-
-    # STEP 1: Ask about merge mining FIRST
-    echo ""
-    echo -e "${WHITE}Would you like to enable Merge Mining (AuxPoW)?${NC}"
-    echo ""
-    echo ""
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    echo -e "  ${YELLOW}MERGE MINING${NC} allows you to mine a parent blockchain AND auxiliary"
-    echo -e "  blockchains simultaneously using the SAME mining work."
-    echo ""
-    echo -e "  ${WHITE}How It Works:${NC}"
-    echo -e "    • Submit work to multiple blockchains simultaneously"
-    echo -e "    • Uses same mining computation for parent and aux chains"
-    echo ""
-    echo -e "  ${WHITE}Supported Merge Mining Configurations:${NC}"
-    echo -e "  ┌─────────────────────────────────────────────────────────────────────┐"
-    echo -e "  │  ${CYAN}SHA-256d:${NC}  Bitcoin (BTC) + NMC, SYS, XMY, FBTC aux chains       │"
-    echo -e "  │  ${CYAN}Scrypt:${NC}    Litecoin (LTC) + DOGE, PEP aux chains                │"
-    echo -e "  └─────────────────────────────────────────────────────────────────────┘"
-    echo ""
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    echo -e "  ${RED}⚠  IMPORTANT DISCLAIMER:${NC}"
-    echo ""
-    echo -e "  ${WHITE}Merge mining requires syncing MULTIPLE full blockchains:${NC}"
-    echo -e "    • Parent chain (BTC ~600GB or LTC ~180GB)"
-    echo -e "    • PLUS each auxiliary chain you enable (5-80GB each)"
-    echo ""
-    echo -e "  ${WHITE}This means:${NC}"
-    echo -e "    • Increased disk space requirements"
-    echo -e "    • Longer initial sync time (days to weeks)"
-    echo -e "    • Higher RAM usage"
-    echo -e "    • Mining will NOT start until ALL chains are synced (≥99.9%)"
-    echo ""
-    echo ""
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    echo ""
-
+    local _coin_step=1
     while true; do
-        prompt_input "Enable merge mining? (y/n) [default: n]: "; read merge_choice
-        merge_choice=${merge_choice:-n}
-        case "${merge_choice,,}" in
-            y|yes)
-                # User wants merge mining - go to merge mining parent selection
-                MERGE_MINING_REQUESTED="true"
-                select_merge_mining_parent
-                return
-                ;;
-            n|no)
-                # User doesn't want merge mining - ask solo vs multi
-                MERGE_MINING_REQUESTED="false"
-                break
-                ;;
-            *)
-                echo -e "  ${RED}Please enter y or n${NC}"
-                ;;
+        case $_coin_step in
+        1)
+            # STEP 1: Ask about merge mining FIRST
+            clear
+            log_step "Mining Configuration"
+
+            echo ""
+            echo -e "${WHITE}Would you like to enable Merge Mining (AuxPoW)?${NC}"
+            echo ""
+            echo ""
+            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo ""
+            echo -e "  ${YELLOW}MERGE MINING${NC} allows you to mine a parent blockchain AND auxiliary"
+            echo -e "  blockchains simultaneously using the SAME mining work."
+            echo ""
+            echo -e "  ${WHITE}How It Works:${NC}"
+            echo -e "    • Submit work to multiple blockchains simultaneously"
+            echo -e "    • Uses same mining computation for parent and aux chains"
+            echo ""
+            echo -e "  ${WHITE}Supported Merge Mining Configurations:${NC}"
+            echo -e "  ┌─────────────────────────────────────────────────────────────────────┐"
+            echo -e "  │  ${CYAN}SHA-256d:${NC}  Bitcoin (BTC) or DigiByte (DGB) + NMC, SYS, XMY, FBTC│"
+            echo -e "  │  ${CYAN}Scrypt:${NC}    Litecoin (LTC) + DOGE, PEP aux chains                │"
+            echo -e "  └─────────────────────────────────────────────────────────────────────┘"
+            echo ""
+            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo ""
+            echo -e "  ${RED}⚠  IMPORTANT DISCLAIMER:${NC}"
+            echo ""
+            echo -e "  ${WHITE}Merge mining requires syncing MULTIPLE full blockchains:${NC}"
+            echo -e "    • Parent chain (BTC ~600GB, DGB ~60GB, or LTC ~180GB)"
+            echo -e "    • PLUS each auxiliary chain you enable (5-80GB each)"
+            echo ""
+            echo -e "  ${WHITE}This means:${NC}"
+            echo -e "    • Increased disk space requirements"
+            echo -e "    • Longer initial sync time (days to weeks)"
+            echo -e "    • Higher RAM usage"
+            echo -e "    • Mining will NOT start until ALL chains are synced (≥99.9%)"
+            echo ""
+            echo ""
+            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo ""
+            echo -e "  ${DIM}Enter 'b' at any prompt to go back to the previous step${NC}"
+            echo ""
+
+            while true; do
+                prompt_input "Enable merge mining? (y/n/b) [default: n]: "; read merge_choice
+                merge_choice=${merge_choice:-n}
+                case "${merge_choice,,}" in
+                    y|yes)
+                        MERGE_MINING_REQUESTED="true"
+                        select_merge_mining_parent
+                        if [[ $? -eq 1 ]]; then continue; fi  # back from parent selection
+                        return 0
+                        ;;
+                    n|no)
+                        MERGE_MINING_REQUESTED="false"
+                        _coin_step=2
+                        break
+                        ;;
+                    b)
+                        return 1  # back to install mode
+                        ;;
+                    *)
+                        echo -e "  ${RED}Please enter y, n, or b${NC}"
+                        ;;
+                esac
+            done
+            ;;
+        2)
+            # STEP 2: If no merge mining, ask about solo vs multi-coin
+            clear
+
+            echo ""
+            echo -e "${WHITE}Do you want to run a Solo mining pool or a Multi-Coin mining pool?${NC}"
+            echo ""
+            echo ""
+            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo ""
+            echo -e "  ${GREEN}1)${NC} ${WHITE}Solo Mining Pool${NC} ${GREEN}(Single Blockchain)${NC}"
+            echo ""
+            echo -e "     Mine one cryptocurrency at a time."
+            echo -e "     Simpler setup, lower resource requirements."
+            echo ""
+            echo ""
+            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo ""
+            echo -e "  ${GREEN}2)${NC} ${WHITE}Multi-Coin Mining Pool${NC} ${YELLOW}(Multiple Blockchains)${NC}"
+            echo ""
+            echo -e "     Mine multiple cryptocurrencies simultaneously on different ports."
+            echo -e "     Requires more disk space and RAM for each blockchain."
+            echo ""
+            echo ""
+            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo ""
+
+            while true; do
+                prompt_input "Enter choice (1, 2, or b=back): "; read pool_type
+                case $pool_type in
+                    1)
+                        COIN_MODE="single"
+                        select_solo_coin_no_merge
+                        if [[ $? -eq 1 ]]; then continue; fi  # back from coin selection
+                        echo ""
+                        return 0
+                        ;;
+                    2)
+                        COIN_MODE="multi"
+                        select_multi_coins
+                        if [[ $? -eq 1 ]]; then continue; fi  # back from coin selection
+                        echo ""
+                        return 0
+                        ;;
+                    b|B)
+                        _coin_step=1
+                        break
+                        ;;
+                    *)
+                        echo -e "  ${RED}Please enter 1, 2, or b${NC}"
+                        ;;
+                esac
+            done
+            ;;
         esac
     done
-
-    clear
-
-    # STEP 2: If no merge mining, ask about solo vs multi-coin
-    echo ""
-    echo -e "${WHITE}Do you want to run a Solo mining pool or a Multi-Coin mining pool?${NC}"
-    echo ""
-    echo ""
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    echo -e "  ${GREEN}1)${NC} ${WHITE}Solo Mining Pool${NC} ${GREEN}(Single Blockchain)${NC}"
-    echo ""
-    echo -e "     Mine one cryptocurrency at a time."
-    echo -e "     Simpler setup, lower resource requirements."
-    echo ""
-    echo ""
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    echo -e "  ${GREEN}2)${NC} ${WHITE}Multi-Coin Mining Pool${NC} ${YELLOW}(Multiple Blockchains)${NC}"
-    echo ""
-    echo -e "     Mine multiple cryptocurrencies simultaneously on different ports."
-    echo -e "     Requires more disk space and RAM for each blockchain."
-    echo ""
-    echo ""
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-
-    while true; do
-        prompt_input "Enter choice (1 or 2): "; read pool_type
-        case $pool_type in
-            1)
-                COIN_MODE="single"
-                select_solo_coin_no_merge
-                break
-                ;;
-            2)
-                COIN_MODE="multi"
-                select_multi_coins
-                break
-                ;;
-            *)
-                echo -e "  ${RED}Please enter 1 or 2${NC}"
-                ;;
-        esac
-    done
-    echo ""
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -7837,7 +7862,7 @@ select_merge_mining_parent() {
     echo ""
 
     while true; do
-        prompt_input "Enter choice (1, 2, 3, or 4): "; read parent_choice
+        prompt_input "Enter choice (1-4, or b=back): "; read parent_choice
 
         # Reset all coins to false before enabling selected ones
         # This fixes bug where DGB (default=true) stayed enabled in merge mining mode
@@ -7857,6 +7882,9 @@ select_merge_mining_parent() {
         ENABLE_FBTC="false"
 
         case $parent_choice in
+            b|B)
+                return 1  # back to merge mining y/n
+                ;;
             1)
                 # Bitcoin (SHA-256d) merge mining only
                 COIN_MODE="multi"
@@ -7873,6 +7901,7 @@ select_merge_mining_parent() {
                 echo ""
                 # Select which SHA-256d aux chains to enable
                 select_aux_chains "BTC" "sha256d"
+                if [[ $? -eq 1 ]]; then select_merge_mining_parent; return $?; fi
                 break
                 ;;
             2)
@@ -7891,6 +7920,7 @@ select_merge_mining_parent() {
                 echo ""
                 # Select which Scrypt aux chains to enable
                 select_aux_chains "LTC" "scrypt"
+                if [[ $? -eq 1 ]]; then select_merge_mining_parent; return $?; fi
                 break
                 ;;
             3)
@@ -7909,6 +7939,7 @@ select_merge_mining_parent() {
                 echo ""
                 # Select which SHA-256d aux chains to enable
                 select_aux_chains "DGB" "sha256d"
+                if [[ $? -eq 1 ]]; then select_merge_mining_parent; return $?; fi
                 break
                 ;;
             4)
@@ -7936,7 +7967,7 @@ select_merge_mining_parent() {
                 break
                 ;;
             *)
-                echo -e "  ${RED}Please enter 1, 2, 3, or 4${NC}"
+                echo -e "  ${RED}Please enter 1-4 or b${NC}"
                 ;;
         esac
     done
@@ -7968,7 +7999,7 @@ select_aux_chains_dual() {
             [[ "$sel_fbtc" == "true" ]] && echo -e "    ${GREEN}[✓]${NC} 4) Fractal Bitcoin (FBTC) ~10 GB" || echo -e "    ${DIM}[ ]${NC} 4) Fractal Bitcoin (FBTC) ~10 GB"
             echo -e "  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
             echo ""
-            echo -e "  Enter number to toggle, ${GREEN}a${NC}=select all, ${YELLOW}c${NC}=confirm, ${RED}q${NC}=cancel"
+            echo -e "  Enter number to toggle, ${GREEN}a${NC}=select all, ${YELLOW}c${NC}=confirm, ${RED}q${NC}=cancel, ${WHITE}b${NC}=back"
             prompt_input "Choice: "; read aux_choice
 
             case "$aux_choice" in
@@ -7987,7 +8018,7 @@ select_aux_chains_dual() {
                     fi
                     break
                     ;;
-                q|Q)
+                b|B|q|Q)
                     echo -e "  ${WHITE}SHA-256d merge mining cancelled${NC}"
                     ENABLE_BTC="false"
                     # Downgrade from dual to LTC-only (Scrypt selection runs next)
@@ -8025,7 +8056,7 @@ select_aux_chains_dual() {
             [[ "$sel_pep" == "true" ]] && echo -e "    ${GREEN}[✓]${NC} 2) PepeCoin (PEP)   ~15 GB" || echo -e "    ${DIM}[ ]${NC} 2) PepeCoin (PEP)   ~15 GB"
             echo -e "  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
             echo ""
-            echo -e "  Enter number to toggle, ${GREEN}a${NC}=select all, ${YELLOW}c${NC}=confirm, ${RED}q${NC}=cancel"
+            echo -e "  Enter number to toggle, ${GREEN}a${NC}=select all, ${YELLOW}c${NC}=confirm, ${RED}q${NC}=cancel, ${WHITE}b${NC}=back"
             prompt_input "Choice: "; read aux_choice
 
             case "$aux_choice" in
@@ -8041,7 +8072,7 @@ select_aux_chains_dual() {
                     fi
                     break
                     ;;
-                q|Q)
+                b|B|q|Q)
                     echo -e "  ${WHITE}Scrypt merge mining cancelled${NC}"
                     ENABLE_LTC="false"
                     if [[ "$ENABLE_BTC" == "false" ]]; then
@@ -8122,7 +8153,11 @@ select_solo_coin_no_merge() {
     echo ""
 
     while true; do
-        prompt_input "Enter choice (1-14): "; read coin_choice
+        prompt_input "Enter choice (1-14, or b=back): "; read coin_choice
+
+        case "$coin_choice" in
+            b|B) return 1 ;;  # back to solo/multi selection
+        esac
 
         # Reset all coins to false before enabling the selected one
         # This fixes bug where DGB (default=true) stayed enabled when selecting other coins
@@ -8327,7 +8362,7 @@ select_aux_chains() {
             [[ "$sel_fbtc" == "true" ]] && echo -e "    ${GREEN}[✓]${NC} 4) Fractal Bitcoin (FBTC) ~10 GB" || echo -e "    ${DIM}[ ]${NC} 4) Fractal Bitcoin (FBTC) ~10 GB"
             echo -e "  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
             echo ""
-            echo -e "  Enter number to toggle, ${GREEN}a${NC}=select all, ${YELLOW}c${NC}=confirm, ${RED}q${NC}=cancel"
+            echo -e "  Enter number to toggle, ${GREEN}a${NC}=select all, ${YELLOW}c${NC}=confirm, ${RED}q${NC}=cancel, ${WHITE}b${NC}=back"
             prompt_input "Choice: "; read aux_choice
 
             case "$aux_choice" in
@@ -8347,10 +8382,13 @@ select_aux_chains() {
                     fi
                     break
                     ;;
+                b|B)
+                    return 1  # back to parent selection
+                    ;;
                 q|Q)
                     MERGE_MINING_ENABLED="false"
                     echo -e "  ${WHITE}Merge mining cancelled${NC}"
-                    return
+                    return 0
                     ;;
                 *)
                     echo -e "  ${RED}Invalid choice${NC}"
@@ -8388,7 +8426,7 @@ select_aux_chains() {
             [[ "$sel_pep" == "true" ]] && echo -e "    ${GREEN}[✓]${NC} 2) PepeCoin (PEP)   ~15 GB" || echo -e "    ${DIM}[ ]${NC} 2) PepeCoin (PEP)   ~15 GB"
             echo -e "  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
             echo ""
-            echo -e "  Enter number to toggle, ${GREEN}a${NC}=select all, ${YELLOW}c${NC}=confirm, ${RED}q${NC}=cancel"
+            echo -e "  Enter number to toggle, ${GREEN}a${NC}=select all, ${YELLOW}c${NC}=confirm, ${RED}q${NC}=cancel, ${WHITE}b${NC}=back"
             prompt_input "Choice: "; read aux_choice
 
             case "$aux_choice" in
@@ -8405,10 +8443,13 @@ select_aux_chains() {
                     fi
                     break
                     ;;
+                b|B)
+                    return 1  # back to parent selection
+                    ;;
                 q|Q)
                     MERGE_MINING_ENABLED="false"
                     echo -e "  ${WHITE}Merge mining cancelled${NC}"
-                    return
+                    return 0
                     ;;
                 *)
                     echo -e "  ${RED}Invalid choice${NC}"
@@ -8546,9 +8587,10 @@ select_multi_coins() {
         echo -e "  ${CYAN}Estimated: ~${est_disk} GB disk, ${est_ram}+ GB RAM${NC}"
         echo ""
 
-        prompt_input "Toggle (1-14) or 'd' to confirm: "; read toggle_choice
+        prompt_input "Toggle (1-14), 'd'=confirm, 'b'=back: "; read toggle_choice
 
         case "$toggle_choice" in
+            b|B) return 1 ;;  # back to solo/multi selection
             1) [[ "$sel_btc" == "true" ]] && sel_btc="false" || sel_btc="true" ;;
             2) [[ "$sel_bch" == "true" ]] && sel_bch="false" || sel_bch="true" ;;
             3) [[ "$sel_bc2" == "true" ]] && sel_bc2="false" || sel_bc2="true" ;;
@@ -9005,9 +9047,12 @@ select_ha_mode() {
     echo ""
 
     while true; do
-        prompt_input "Enter choice (1-3) [default: 1]: "; read ha_choice
+        prompt_input "Enter choice (1-3, or b=back) [default: 1]: "; read ha_choice
         ha_choice=${ha_choice:-1}
         case $ha_choice in
+            b|B)
+                return 1  # back to coin selection
+                ;;
             1)
                 HA_MODE="standalone"
                 HA_ENABLED="false"
@@ -14962,7 +15007,7 @@ echo ""
 echo -e "  ${CYAN}▶  spiralctl help${NC}   —  Full command reference & man page"
 echo -e "${CYAN}━━━ SUPPORTED COINS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "  ${GREEN}SHA-256d:${NC}  BTC  BCH  BC2  DGB  QBX    ${GREEN}Scrypt:${NC}  LTC  DOGE  DGB-S  PEP  CAT"
-echo -e "  ${GREEN}AuxPoW:${NC}   BTC+NMC  BTC+FBTC  BTC+SYS  BTC+XMY  LTC+DOGE  LTC+PEP"
+echo -e "  ${GREEN}AuxPoW:${NC}   BTC+NMC  BTC+FBTC  BTC+SYS  BTC+XMY  DGB+NMC  LTC+DOGE  LTC+PEP"
 echo -e "${CYAN}━━━ WEB INTERFACES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 if [[ -n "$CLOUD_DETECTED" ]]; then
 echo -e "  ${YELLOW}Dashboard${NC}  ssh -L 1618:localhost:1618 ${ADMIN_USER}@${CLOUD_SERVER_IP:-YOUR_SERVER_IP}  then  http://localhost:1618"
@@ -36068,17 +36113,28 @@ main() {
 
     # VM Native installation continues below
     detect_existing_native_install
-    select_install_mode
 
-    # Use CLI coin config if provided, otherwise interactive selection
-    if [[ "$CLI_MODE" != "interactive" ]]; then
-        apply_cli_coin_config
-    else
-        select_coin_mode
-    fi
-
-    # High Availability mode selection
-    select_ha_mode
+    # Interactive selection loop with 'b' for back navigation
+    local _step=1
+    while true; do
+        case $_step in
+            1) select_install_mode;   _step=2 ;;
+            2)
+                if [[ "$CLI_MODE" != "interactive" ]]; then
+                    apply_cli_coin_config; _step=3
+                else
+                    select_coin_mode
+                    if [[ $? -eq 1 ]]; then _step=1; continue; fi
+                    _step=3
+                fi
+                ;;
+            3)
+                select_ha_mode
+                if [[ $? -eq 1 ]]; then _step=2; continue; fi
+                break
+                ;;
+        esac
+    done
 
     collect_configuration
 
