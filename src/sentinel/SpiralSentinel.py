@@ -12434,6 +12434,8 @@ def create_block_embed(block_num, prices=None, bri=None, found_by=None, miner_de
     block_info_lines = []
     if block_num:
         block_info_lines.append(f"**Chain Height:** `{block_num:,}`")
+    if block_hash:
+        block_info_lines.append(f"**Block Hash:** `{block_hash[:16]}...`")
     if pool_block_num:
         block_info_lines.append(f"**Pool Block:** `#{pool_block_num}`")
     block_info_lines.append(f"**Reward:** {reward_str}")
@@ -12505,6 +12507,7 @@ def create_block_embed(block_num, prices=None, bri=None, found_by=None, miner_de
 
     # Explorer link — makes the embed title clickable in Discord; also shown as a field for Telegram/ntfy
     explorer_url = get_block_explorer_url(coin, block_hash)
+    logger.info(f"BLOCK EMBED DEBUG: height={block_num}, hash={block_hash}, explorer_url={explorer_url}")
     if explorer_url:
         fields.append({
             "name": "🔍 View Block",
@@ -16434,7 +16437,15 @@ class MonitorState:
                 # handle missed blocks correctly via the normal path below.
                 if _fresh_start:
                     self.seen_pool_block_hashes.add(block_hash)
-                    logger.info(f"Fresh state: seeding block {block.get('blockHeight', '?')} as seen (no alert)")
+                    # Initialize pool_blocks_found counter from existing blocks so the
+                    # counter matches the pool's actual block count on fresh state.
+                    # Only count blocks from our wallet (pending/confirmed).
+                    block_miner_seed = block.get("miner", "")
+                    block_status_seed = block.get("status", "").lower()
+                    if block_status_seed in ["pending", "confirmed"]:
+                        if not wallet or not block_miner_seed or block_miner_seed.startswith(wallet):
+                            self.pool_blocks_found += 1
+                    logger.info(f"Fresh state: seeding block {block.get('blockHeight', '?')} as seen (no alert), pool_blocks_found={self.pool_blocks_found}")
                     continue
 
                 # Check if this block belongs to our wallet/workers
@@ -18634,6 +18645,8 @@ def monitor_loop(state):
                     if _time_since and odds.get("expected_days"):
                         expected_secs = odds["expected_days"] * 86400
                         _effort = (_time_since / expected_secs * 100) if expected_secs > 0 else None
+                    _miner_block_hash = f.get("hash")
+                    logger.info(f"MINER-REPORTED BLOCK ALERT: miner={f['miner']}, hash={_miner_block_hash}, new={f.get('new')}, total={f.get('total')}")
                     send_alert("block_found", create_block_embed(
                         None, prices, bri, f["miner"],
                         miner_details=miner_details,
@@ -18641,7 +18654,7 @@ def monitor_loop(state):
                         coin_symbol=primary_coin,
                         time_since_last=_time_since,
                         effort_pct=_effort,
-                        block_hash=f.get("hash"),
+                        block_hash=_miner_block_hash,
                         network_hashrate=net_phs,
                         difficulty=diff,
                         observed_hashrate_hs=fleet_ths * 1e12,
@@ -18680,18 +18693,22 @@ def monitor_loop(state):
                         "power": power.get(mname, 0),
                         "found_block": mname.lower() == worker.lower()
                     }
+                _pool_block_hash = block.get("hash")
+                _pool_block_height = block["height"]
+                _pool_explorer = get_block_explorer_url(block.get("coin", primary_coin), _pool_block_hash)
+                logger.info(f"POOL BLOCK ALERT: height={_pool_block_height}, hash={_pool_block_hash}, explorer={_pool_explorer}, worker={worker}")
                 send_alert("block_found", create_block_embed(
-                    block["height"], prices, bri, worker,
+                    _pool_block_height, prices, bri, worker,
                     miner_details=miner_details,
                     pool_block_num=state.pool_blocks_found,
                     coin_symbol=block.get("coin", primary_coin),
-                    block_hash=block.get("hash"),
+                    block_hash=_pool_block_hash,
                     network_hashrate=net_phs,
                     difficulty=diff,
                     observed_hashrate_hs=fleet_ths * 1e12,
                 ), state)
                 trigger_block_celebration(miner_details)
-                logger.info(f"POOL BLOCK #{state.pool_blocks_found} by {sanitize_log_input(worker)} (height {block['height']})!")
+                logger.info(f"POOL BLOCK #{state.pool_blocks_found} by {sanitize_log_input(worker)} (height {_pool_block_height})!")
 
             # ═══════════════════════════════════════════════════════════════════════════════
             # P0 AUDIT FIX: ORPHAN DETECTION - Check for orphaned blocks every cycle
