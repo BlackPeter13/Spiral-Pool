@@ -9197,28 +9197,6 @@ def get_coin_volatility_description(symbol):
     }
     return descriptions.get(symbol.upper(), "Network hashrate")
 
-def fetch_block_reward():
-    """
-    Fetch block reward for the currently active coin (legacy function for backwards compatibility).
-    DEPRECATED: Use fetch_block_reward_for_coin(coin_symbol) instead with explicit coin.
-    """
-    # Try to detect active coin from environment or config
-    try:
-        import os
-        active_coin = os.getenv("ACTIVE_COIN")
-        if not active_coin:
-            # Try to get first enabled coin from config
-            primary = get_primary_coin()
-            if primary:
-                active_coin = primary
-            else:
-                logger.error("No coins configured and ACTIVE_COIN not set")
-                return None
-        return fetch_block_reward_for_coin(active_coin)
-    except Exception as e:
-        logger.error(f"Could not determine active coin for block reward: {e}")
-        return None
-
 def _get_block_height_from_pool(coin_symbol):
     """Get block height from pool API for a coin.
 
