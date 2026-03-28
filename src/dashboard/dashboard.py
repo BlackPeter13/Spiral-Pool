@@ -19,7 +19,7 @@ ASIC Miner API Protocol References (protocol documentation, not derived code):
 See LICENSE file for full BSD-3-Clause license terms.
 """
 
-__version__ = "1.2.3-CONVERGENT_SPIRAL"
+__version__ = "2.0.0-PHI_HASH_REACTOR"
 
 import os
 import json
@@ -787,12 +787,15 @@ def sanitize_string(value: str, max_length: int = 256) -> str:
 
 
 def csv_safe(value) -> str:
-    """Prevent CSV injection by escaping formula-trigger characters.
+    """Prevent CSV injection and properly quote fields for RFC 4180 compliance.
     When a CSV cell starts with =, +, -, @, tab, or CR, spreadsheet apps
-    may interpret it as a formula — prefix with ' to neutralize."""
+    may interpret it as a formula — prefix with ' to neutralize.
+    Fields containing commas, quotes, or newlines are double-quoted."""
     s = str(value)
     if s and s[0] in ('=', '+', '-', '@', '\t', '\r'):
-        return "'" + s
+        s = "'" + s
+    if '"' in s or ',' in s or '\n' in s or '\r' in s:
+        return '"' + s.replace('"', '""') + '"'
     return s
 
 # Default configuration
@@ -3527,6 +3530,10 @@ def load_multi_coin_config():
                                 MULTI_COIN_NODES[symbol]['rpc_user'] = daemon.get('user', '')
                                 MULTI_COIN_NODES[symbol]['rpc_password'] = daemon.get('password', '')
                             MULTI_COIN_NODES[symbol]['enabled'] = coin_cfg.get('enabled', False)
+                            # Store wallet address for config.yaml fallback in setup
+                            addr = coin_cfg.get('address', '')
+                            if addr:
+                                MULTI_COIN_NODES[symbol]['wallet_address'] = addr
 
                     # If any coin still has no RPC creds, inherit from top-level daemon config
                     top_daemon = config.get('daemon', {})
@@ -3610,6 +3617,10 @@ def load_multi_coin_config():
                     MULTI_COIN_NODES[detected_coin]['rpc_user'] = daemon.get('user', '')
                     MULTI_COIN_NODES[detected_coin]['rpc_password'] = daemon.get('password', '')
                     MULTI_COIN_NODES[detected_coin]['enabled'] = True
+                    # Store wallet address for config.yaml fallback in setup
+                    pool_addr = config.get('pool', {}).get('address', '')
+                    if pool_addr:
+                        MULTI_COIN_NODES[detected_coin]['wallet_address'] = pool_addr
                     print(f"Loaded single-coin ({detected_coin}) config from {POOL_CONFIG_PATH}")
                     return True
 
@@ -3779,6 +3790,7 @@ def fetch_coin_node_health(symbol):
         "network_hashrate": 0,
         "mempool_size": 0,
         "size_on_disk_gb": 0,
+        "pruned": False,
         "uptime": 0,
         "stratum_ports": node['stratum_ports'],
         "data_dir": node['data_dir']
@@ -3808,6 +3820,7 @@ def fetch_coin_node_health(symbol):
             health["headers"] = bc_info.get("headers", 0)
             health["sync_progress"] = round(bc_info.get("verificationprogress", 0) * 100, 2)
             health["size_on_disk_gb"] = round(bc_info.get("size_on_disk", 0) / 1024 / 1024 / 1024, 2)
+            health["pruned"] = bc_info.get("pruned", False)
             # For multi-algo coins (DGB), getblockchaininfo "difficulty" is
             # whichever algo mined the last block - NOT the SHA256 difficulty.
             # Use get_sha256_difficulty() which queries getdifficulty for the
@@ -4055,6 +4068,7 @@ def fetch_health_data():
             else:
                 node_health["sync_progress"] = round(bc_info.get("verificationprogress", 0) * 100, 2)
             node_health["size_on_disk_gb"] = round(bc_info.get("size_on_disk", 0) / 1024 / 1024 / 1024, 2)
+            node_health["pruned"] = bc_info.get("pruned", False)
             # For multi-algo coins (DGB), getblockchaininfo "difficulty" is
             # whichever algo mined the last block - NOT the SHA256 difficulty.
             sha256_diff = get_sha256_difficulty(primary_coin)
@@ -4142,6 +4156,19 @@ def fetch_health_data():
     health_cache["nodes"] = all_nodes_health
     health_cache["multi_coin_mode"] = len(enabled_coins) > 1
 
+    # Check Sentinel for wallet address validation issues (red banner on dashboard)
+    try:
+        sentinel_url = app.config.get("SENTINEL_URL", "http://localhost:9191")
+        sentinel_resp = requests.get(f"{sentinel_url}/health", timeout=3)
+        if sentinel_resp.ok:
+            sentinel_data = sentinel_resp.json()
+            if sentinel_data.get("wallet_issues"):
+                health_cache["wallet_issues"] = sentinel_data["wallet_issues"]
+            else:
+                health_cache.pop("wallet_issues", None)
+    except Exception:
+        pass  # Sentinel unreachable — don't show stale warnings
+
     return health_cache
 
 
@@ -4214,8 +4241,16 @@ def record_historical_data():
         "value": net_hashrate
     })
 
-    # Per-miner hashrate tracking (local — no stratum API dependency)
+    # Fleet average temperature (from miner cache)
     miners = miner_cache.get("miners", {})
+    temps = [m.get("temps", {}).get("chip", 0) for m in miners.values() if m.get("temps", {}).get("chip", 0) > 0]
+    avg_temp = sum(temps) / len(temps) if temps else 0
+    historical_data["temperatures"].append({
+        "time": timestamp,
+        "value": round(avg_temp, 1)
+    })
+
+    # Per-miner hashrate tracking (local — no stratum API dependency)
     for name, data in miners.items():
         if name not in historical_data["per_miner_hashrate"]:
             historical_data["per_miner_hashrate"][name] = deque(maxlen=HISTORY_MAX_POINTS)
@@ -5432,6 +5467,61 @@ def identify_miner(ip, timeout=5):
                         print(f"[SCAN] Goldshell hashrate fetch error for {ip}: {e}")
         except Exception as e:
             print(f"[SCAN] Goldshell identification error for {ip}: {e}")
+
+    # BraiinsOS auto-scan: probe /api/v1/auth/login with default creds (root / empty password)
+    # Only attempt if port 80 is open but AxeOS/Goldshell didn't match
+    if not result["found"] and quick_port_check(ip, 80, 1.0):
+        try:
+            auth_resp = requests.post(
+                f"http://{ip}/api/v1/auth/login",
+                json={"username": "root", "password": ""},
+                timeout=timeout,
+                headers={"User-Agent": "SpiralPool-Scanner/1.0"}
+            )
+            if auth_resp.status_code == 200:
+                auth_data = auth_resp.json()
+                if auth_data.get("token"):
+                    result["found"] = True
+                    result["type"] = "braiins"
+                    result["name"] = f"BraiinsOS_{ip.split('.')[-1]}"
+                    result["model"] = "BraiinsOS Miner"
+                    print(f"[SCAN] Found BraiinsOS miner at {ip} (default credentials)")
+            elif auth_resp.status_code == 401:
+                # Auth endpoint exists but default creds failed — still BraiinsOS
+                result["found"] = True
+                result["type"] = "braiins"
+                result["name"] = f"BraiinsOS_{ip.split('.')[-1]}"
+                result["model"] = "BraiinsOS Miner (credentials required)"
+                print(f"[SCAN] Found BraiinsOS miner at {ip} (requires manual credential setup)")
+        except Exception:
+            pass  # Not BraiinsOS — continue
+
+    # Vnish auto-scan: probe /api/v1/unlock with default password ("admin")
+    if not result["found"] and quick_port_check(ip, 80, 1.0):
+        try:
+            vnish_resp = requests.post(
+                f"http://{ip}/api/v1/unlock",
+                json={"pw": "admin"},
+                timeout=timeout,
+                headers={"User-Agent": "SpiralPool-Scanner/1.0"}
+            )
+            if vnish_resp.status_code == 200:
+                vnish_data = vnish_resp.json()
+                if vnish_data.get("token"):
+                    result["found"] = True
+                    result["type"] = "vnish"
+                    result["name"] = f"Vnish_{ip.split('.')[-1]}"
+                    result["model"] = "Vnish Firmware Miner"
+                    print(f"[SCAN] Found Vnish miner at {ip} (default credentials)")
+            elif vnish_resp.status_code == 401 or vnish_resp.status_code == 403:
+                # Unlock endpoint exists but default password failed — still Vnish
+                result["found"] = True
+                result["type"] = "vnish"
+                result["name"] = f"Vnish_{ip.split('.')[-1]}"
+                result["model"] = "Vnish Firmware Miner (credentials required)"
+                print(f"[SCAN] Found Vnish miner at {ip} (requires manual credential setup)")
+        except Exception:
+            pass  # Not Vnish — continue
 
     # Check port 4028 — used by both ePIC (HTTP REST) and CGMiner (TCP socket)
     port_4028_open = not result["found"] and quick_port_check(ip, 4028, 2.5)
@@ -7078,6 +7168,7 @@ def fetch_avalon(ip, port=4028, timeout=5):
             mhs = _safe_num(summary_data.get('MHS av', 0)) or _safe_num(summary_data.get('MHS 5s', 0))
             ghs = mhs / 1000  # Convert MH/s to GH/s
         hashrate_ghs = ghs
+        # Will be overridden by MM ID0 GHSavg if available (Nano 3 / Q series)
 
         # Extract temperatures, fan speed, frequency from stats
         chip_temp = 0
@@ -7137,6 +7228,14 @@ def fetch_avalon(ip, port=4028, timeout=5):
                     freq_match = re.search(r'Freq\[([0-9.]+)\]', mm_id0)
                     if freq_match and frequency == 0:
                         frequency = float(freq_match.group(1))
+
+                    # Extract GHSavg from MM ID0 (Nano 3 / Q series report hashrate here,
+                    # NOT in the summary command's GHS av field)
+                    ghsavg_match = re.search(r'GHSavg\[([0-9.]+)\]', mm_id0)
+                    if ghsavg_match:
+                        mm_ghs = float(ghsavg_match.group(1))
+                        if mm_ghs > 0:
+                            hashrate_ghs = mm_ghs
 
                     # Extract PS (Power Supply info) - format: PS[0 0 27447 4 0 3626 132]
                     # Values: [0]=?, [1]=?, [2]=voltage_mV, [3]=?, [4]=?, [5]=?, [6]=power_watts
@@ -9148,19 +9247,59 @@ def get_server_mode():
             "primary_coin": sorted(detected_coins)[0] if detected_coins else None
         })
 
-    except requests.exceptions.Timeout:
+    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, Exception) as e:
+        # Stratum not reachable — fall back to config.yaml so setup page
+        # can still show coins/wallets before the pool finishes syncing
+        load_multi_coin_config()
+        fallback_coins = []
+        fallback_config = []
+        fallback_merge = None
+        COIN_WHITELIST = {"DGB", "BTC", "BCH", "BC2", "LTC", "DOGE", "DGB-SCRYPT",
+                          "PEP", "CAT", "NMC", "SYS", "XMY", "FBTC", "QBX"}
+        for symbol, node in MULTI_COIN_NODES.items():
+            if node.get('enabled', False) and symbol in COIN_WHITELIST:
+                fallback_coins.append(symbol)
+                fallback_config.append({
+                    "symbol": symbol,
+                    "wallet_address": node.get('wallet_address', ''),
+                    "pool_id": "",
+                    "stratum_port": node.get('stratum_ports', {}).get('v1', 0)
+                })
+                mm = node.get('merge_mining')
+                if isinstance(mm, dict) and mm.get('enabled'):
+                    aux_chains = [c for c in mm.get('aux_chains', []) if c in COIN_WHITELIST]
+                    if aux_chains:
+                        fallback_merge = {"enabled": True, "parent_coin": symbol, "aux_chains": aux_chains}
+                        for aux in aux_chains:
+                            if aux not in fallback_coins:
+                                fallback_coins.append(aux)
+                                aux_node = MULTI_COIN_NODES.get(aux, {})
+                                fallback_config.append({
+                                    "symbol": aux,
+                                    "wallet_address": aux_node.get('wallet_address', ''),
+                                    "pool_id": "",
+                                    "stratum_port": aux_node.get('stratum_ports', {}).get('v1', 0)
+                                })
+        if fallback_coins:
+            if fallback_merge:
+                fallback_mode = "merge"
+            elif len(fallback_coins) > 1:
+                fallback_mode = "multi"
+            else:
+                fallback_mode = "solo"
+            return jsonify({
+                "success": True,
+                "detected_mode": fallback_mode,
+                "detected_coins": fallback_coins,
+                "coins_config": fallback_config,
+                "merge_mining": fallback_merge,
+                "pool_count": len(fallback_coins),
+                "primary_coin": sorted(fallback_coins)[0],
+                "source": "config"
+            })
         return jsonify({
             "success": False,
-            "error": "Stratum server timeout",
-            "detected_mode": None,
-            "detected_coins": [],
-            "coins_config": [],
-            "merge_mining": None
-        })
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e),
+            "error": "Stratum server not available and no coins configured",
             "detected_mode": None,
             "detected_coins": [],
             "coins_config": [],
@@ -9550,6 +9689,47 @@ def get_miners():
                 if power is not None:
                     device_groups[group]["power_watts"] += power
 
+        # Build fleet group aggregation (user-defined groups from miner_groups.json)
+        fleet_groups = {}
+        if miner_groups:
+            for group_name, group_data in miner_groups.items():
+                fg = {
+                    "name": group_name,
+                    "type": group_data.get("type", "custom"),
+                    "count": 0,
+                    "online_count": 0,
+                    "hashrate_ths": 0,
+                    "power_watts": 0,
+                    "miners": [],
+                }
+                for miner_id in group_data.get("miners", []):
+                    # Match by display name first, then by IP
+                    matched_name = None
+                    matched_data = None
+                    if miner_id in miner_cache["miners"]:
+                        matched_name = miner_id
+                        matched_data = miner_cache["miners"][miner_id]
+                    else:
+                        for mn, md in miner_cache["miners"].items():
+                            if md.get("ip") == miner_id:
+                                matched_name = mn
+                                matched_data = md
+                                break
+                    if matched_name and matched_data:
+                        fg["count"] += 1
+                        fg["miners"].append(matched_name)
+                        if matched_data.get("online"):
+                            fg["online_count"] += 1
+                            hr_ths = matched_data.get("hashrate_ths", 0)
+                            if not hr_ths:
+                                hr_ghs = matched_data.get("hashrate_ghs", 0)
+                                hr_ths = hr_ghs / 1000 if hr_ghs else 0
+                            fg["hashrate_ths"] += hr_ths
+                            power = matched_data.get("power_watts")
+                            if power is not None:
+                                fg["power_watts"] += power
+                fleet_groups[group_name] = fg
+
         # Compute network hashrate for Statistics chart grid
         _net_diff = pool_stats.get("network_difficulty", 0)
         _net_hashrate = _compute_network_hashrate(_net_diff)
@@ -9580,6 +9760,8 @@ def get_miners():
             "enabled_coins": coins.get("enabled", []),
             # Device grouping for frontend grouped view
             "device_groups": device_groups,
+            # User-defined fleet groups with aggregated stats
+            "fleet_groups": fleet_groups,
             "algorithm": get_algorithm_for_coin(primary_coin) if primary_coin else "sha256d",
             "coins": {
                 "primary": primary_coin,
@@ -9592,6 +9774,9 @@ def get_miners():
             "pool_status": "wrong_pool" if is_wrong_pool else "ok",
             # Quiet hours: suppress browser celebration (confetti/audio) but not text alerts
             "celebration_quiet_hours": _is_celebration_quiet_hours(),
+            # Fan control state from Sentinel (mode + commanded % per miner)
+            # Per-miner tags for fleet organization
+            "miner_tags": miner_tags,
         })
     except Exception as e:
         # Log the error and return 500 with error info — NOT 200 with zeros
@@ -9854,8 +10039,10 @@ def get_miner_history(name):
     if not re.match(r'^[a-zA-Z0-9._ -]+$', name):
         return jsonify({"error": "Invalid worker name format"}), 400
 
-    hours = request.args.get('hours', 24, type=int)
-    hours = max(1, min(720, hours))  # Clamp to valid range
+    hours = request.args.get('hours', 24, type=float)
+    if hours is None or hours != hours or hours == float('inf') or hours == float('-inf'):
+        hours = 24
+    hours = max(0.25, min(720, hours))  # Clamp to valid range (15m minimum)
 
     # --- Try local per-miner history first ---
     cutoff = time.time() - (hours * 3600)
@@ -10811,7 +10998,7 @@ def get_alerts():
 
 
 @app.route('/api/alerts/config', methods=['GET', 'POST'])
-@api_key_or_login_required
+@admin_required
 def alerts_config():
     """Get or update alert configuration"""
     global alert_config
@@ -10987,6 +11174,22 @@ def get_combined_stats():
                 "dismissible": False
             })
 
+    # Wallet address mismatch warning
+    # Check if any configured wallet addresses look like placeholders
+    for symbol in enabled_coins:
+        node = MULTI_COIN_NODES.get(symbol, {})
+        wallet = node.get("wallet_address", "")
+        if wallet and wallet.upper().startswith("YOUR"):
+            system_warnings.append({
+                "id": f"{symbol.lower()}_wallet_placeholder",
+                "severity": "error",
+                "coin": symbol,
+                "title": f"{symbol} Wallet Not Configured",
+                "message": f"The {symbol} wallet address is still a placeholder. Block rewards cannot be claimed. "
+                          "Run the installer or update your Sentinel config to set a real wallet address.",
+                "dismissible": False
+            })
+
     response["system_warnings"] = system_warnings
 
     # Only include HA info if HA is enabled (keeps response clean for single-node setups)
@@ -11012,6 +11215,111 @@ def get_health():
     """Get pool and node health status"""
     health = fetch_health_data()
     return jsonify(health)
+
+
+@app.route('/api/system/info', methods=['GET'])
+@api_key_or_login_required
+def get_system_info():
+    """System resource info: CPU, memory, disk, uptime, services."""
+    import subprocess
+    info = {"success": True}
+
+    # System uptime (Linux /proc/uptime, fallback to 0)
+    try:
+        with open('/proc/uptime', 'r') as f:
+            info["uptime_seconds"] = int(float(f.read().split()[0]))
+    except Exception:
+        info["uptime_seconds"] = 0
+
+    # CPU load average (1, 5, 15 min)
+    try:
+        load1, load5, load15 = os.getloadavg()
+        info["cpu"] = {
+            "load_1m": round(load1, 2),
+            "load_5m": round(load5, 2),
+            "load_15m": round(load15, 2),
+            "cores": os.cpu_count() or 1
+        }
+    except (OSError, AttributeError):
+        info["cpu"] = {"load_1m": 0, "load_5m": 0, "load_15m": 0, "cores": os.cpu_count() or 1}
+
+    # Memory from /proc/meminfo (no psutil dependency)
+    try:
+        meminfo = {}
+        with open('/proc/meminfo', 'r') as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 2:
+                    meminfo[parts[0].rstrip(':')] = int(parts[1]) * 1024  # kB to bytes
+        total = meminfo.get('MemTotal', 0)
+        available = meminfo.get('MemAvailable', 0)
+        used = total - available
+        info["memory"] = {
+            "total_mb": round(total / (1024 * 1024)),
+            "used_mb": round(used / (1024 * 1024)),
+            "available_mb": round(available / (1024 * 1024)),
+            "percent": round((used / total * 100), 1) if total > 0 else 0
+        }
+    except Exception:
+        info["memory"] = {"total_mb": 0, "used_mb": 0, "available_mb": 0, "percent": 0}
+
+    # Disk usage for key mount points (deduplicate same-filesystem mounts)
+    disks = []
+    seen_devices = set()
+    for mount in ['/', '/spiralpool', '/var']:
+        try:
+            usage = shutil.disk_usage(mount)
+            # Use (total, free) as a fingerprint to detect same filesystem
+            device_key = (usage.total, usage.free)
+            if device_key in seen_devices:
+                continue
+            seen_devices.add(device_key)
+            disks.append({
+                "mount": mount,
+                "total_gb": round(usage.total / (1024**3), 1),
+                "used_gb": round(usage.used / (1024**3), 1),
+                "free_gb": round(usage.free / (1024**3), 1),
+                "percent": round(usage.used / usage.total * 100, 1) if usage.total > 0 else 0
+            })
+        except (OSError, FileNotFoundError):
+            pass
+    info["disks"] = disks
+
+    # Service statuses
+    services = {}
+    service_names = [
+        "spiralstratum", "spiralsentinel", "spiraldash"
+    ]
+    # Add coin daemon services from config
+    try:
+        coins_info = get_enabled_coins()
+        for coin_cfg in coins_info.get("coins_config", []):
+            svc = coin_cfg.get("daemon_service")
+            if svc and svc not in service_names:
+                service_names.append(svc)
+    except Exception:
+        pass
+
+    for svc in service_names:
+        try:
+            result = subprocess.run(
+                ["systemctl", "is-active", svc],
+                capture_output=True, text=True, timeout=5
+            )
+            services[svc] = result.stdout.strip()
+        except Exception:
+            services[svc] = "unknown"
+    info["services"] = services
+
+    # Pool version
+    try:
+        version_file = Path("/spiralpool/VERSION")
+        if version_file.exists():
+            info["version"] = version_file.read_text().strip()
+    except Exception:
+        pass
+
+    return jsonify(info)
 
 
 @app.route('/api/pool/local-addresses', methods=['GET'])
@@ -11417,6 +11725,334 @@ def start_node(symbol):
     except Exception as e:
         app.logger.error(f"Node start exception: {e}")
         return jsonify({"success": False, "error": "Failed to start node"})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MANAGEMENT TAB — Service Control, Log Viewer, System Updates
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Whitelist of pool services that can be controlled from the dashboard
+ALLOWED_SERVICES = {
+    "spiralstratum",
+    "spiralsentinel",
+    "spiraldash",
+    "spiralpool-health",
+    "spiralpool-ha-watcher",
+}
+
+
+@app.route('/api/services/<service>/<action>', methods=['POST'])
+@admin_required
+def service_control(service, action):
+    """Start/stop/restart a specific pool service (requires sudo permissions)"""
+    import subprocess
+
+    client_ip = request.remote_addr or "unknown"
+    if not check_rate_limit(client_ip, "service_control"):
+        return jsonify({"success": False, "error": "Rate limit exceeded. Please wait before trying again."}), 429
+
+    # SECURITY: Validate action against whitelist
+    if action not in ("start", "stop", "restart"):
+        return jsonify({"success": False, "error": "Invalid action"}), 400
+
+    # SECURITY: Validate service against whitelist (pool services only)
+    if service not in ALLOWED_SERVICES:
+        # Also check coin node services
+        coin_service = None
+        for sym, node in MULTI_COIN_NODES.items():
+            if node.get('service_name') == service:
+                coin_service = service
+                break
+        if not coin_service:
+            return jsonify({"success": False, "error": f"Unknown service: {service}"}), 400
+
+    # SECURITY: Validate service name format (alphanumeric and hyphens only)
+    if not re.match(r'^[a-zA-Z0-9-]+$', service):
+        app.logger.error(f"Invalid service name: {service}")
+        return jsonify({"success": False, "error": "Invalid service name"}), 400
+
+    try:
+        result = subprocess.run(
+            ['sudo', 'systemctl', action, service],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            app.logger.info(f"Service {service} {action}ed by {client_ip}")
+            record_activity("service_control", f"{service} {action}ed")
+            return jsonify({"success": True, "message": f"{service} {action}ed successfully"})
+        else:
+            app.logger.warning(f"Service {service} {action} failed for {client_ip}: {result.stderr}")
+            return jsonify({"success": False, "error": f"Service {action} failed. Check system logs."})
+    except subprocess.TimeoutExpired:
+        return jsonify({"success": False, "error": f"Service {action} timed out"})
+    except FileNotFoundError:
+        return jsonify({"success": False, "error": "systemctl not available"})
+    except PermissionError:
+        return jsonify({"success": False, "error": "Permission denied"})
+
+
+@app.route('/api/logs/<service>', methods=['GET'])
+@admin_required
+def get_service_logs(service):
+    """Fetch recent logs for a specific service via journalctl"""
+    import subprocess
+
+    client_ip = request.remote_addr or "unknown"
+    if not check_rate_limit(client_ip, "log_viewer"):
+        return jsonify({"success": False, "error": "Rate limit exceeded"}), 429
+
+    # SECURITY: Validate service against whitelist
+    all_allowed = set(ALLOWED_SERVICES)
+    for sym, node in MULTI_COIN_NODES.items():
+        svc = node.get('service_name')
+        if svc:
+            all_allowed.add(svc)
+    if service not in all_allowed:
+        return jsonify({"success": False, "error": f"Unknown service: {service}"}), 400
+
+    # SECURITY: Validate service name format
+    if not re.match(r'^[a-zA-Z0-9-]+$', service):
+        return jsonify({"success": False, "error": "Invalid service name"}), 400
+
+    lines = request.args.get('lines', '100', type=str)
+    # SECURITY: Validate lines is a reasonable integer
+    try:
+        lines_int = int(lines)
+        lines_int = max(10, min(lines_int, 500))  # Clamp to 10-500
+    except ValueError:
+        lines_int = 100
+
+    try:
+        # Try without sudo first (works if user is in systemd-journal group),
+        # fall back to sudo if that fails
+        result = subprocess.run(
+            ['journalctl', '-u', service, '-n', str(lines_int), '--no-pager', '-o', 'short-iso'],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        if result.returncode != 0:
+            # Retry with sudo
+            result = subprocess.run(
+                ['sudo', 'journalctl', '-u', service, '-n', str(lines_int), '--no-pager', '-o', 'short-iso'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+        if result.returncode == 0:
+            return jsonify({
+                "success": True,
+                "service": service,
+                "lines": result.stdout.strip().split('\n') if result.stdout.strip() else [],
+                "count": lines_int
+            })
+        else:
+            app.logger.warning(f"Log fetch failed for {service}: {result.stderr[:300]}")
+            return jsonify({"success": False, "error": f"Failed to fetch logs: {result.stderr[:200]}"})
+    except subprocess.TimeoutExpired:
+        return jsonify({"success": False, "error": "Log fetch timed out"})
+    except FileNotFoundError:
+        return jsonify({"success": False, "error": "journalctl not available"})
+
+
+@app.route('/api/system/updates', methods=['GET'])
+@admin_required
+def check_system_updates():
+    """Check for available system package updates"""
+    import subprocess
+
+    client_ip = request.remote_addr or "unknown"
+    if not check_rate_limit(client_ip, "update_check"):
+        return jsonify({"success": False, "error": "Rate limit exceeded"}), 429
+
+    try:
+        # Get list of upgradable packages (non-interactive)
+        result = subprocess.run(
+            ['apt', 'list', '--upgradable'],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env={**os.environ, 'DEBIAN_FRONTEND': 'noninteractive'}
+        )
+        packages = []
+        if result.returncode == 0:
+            for line in result.stdout.strip().split('\n'):
+                if '/' in line and 'upgradable' in line.lower():
+                    # Parse: package/source version [upgradable from: old_version]
+                    parts = line.split('/')
+                    if parts:
+                        pkg_name = parts[0].strip()
+                        packages.append(pkg_name)
+
+        # Get last update timestamp
+        last_update = None
+        try:
+            stat_result = subprocess.run(
+                ['stat', '-c', '%Y', '/var/lib/apt/lists/lock'],
+                capture_output=True, text=True, timeout=5
+            )
+            if stat_result.returncode == 0:
+                import datetime
+                ts = int(stat_result.stdout.strip())
+                last_update = datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).isoformat()
+        except Exception:
+            pass
+
+        return jsonify({
+            "success": True,
+            "upgradable_count": len(packages),
+            "packages": packages[:50],  # Limit to 50 for display
+            "last_check": last_update
+        })
+    except subprocess.TimeoutExpired:
+        return jsonify({"success": False, "error": "Update check timed out"})
+    except FileNotFoundError:
+        return jsonify({"success": False, "error": "apt not available"})
+
+
+@app.route('/api/system/updates/refresh', methods=['POST'])
+@admin_required
+def refresh_system_updates():
+    """Run apt-get update to refresh package lists"""
+    import subprocess
+
+    client_ip = request.remote_addr or "unknown"
+    if not check_rate_limit(client_ip, "update_refresh"):
+        return jsonify({"success": False, "error": "Rate limit exceeded"}), 429
+
+    try:
+        result = subprocess.run(
+            ['sudo', 'apt-get', 'update', '-qq'],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env={**os.environ, 'DEBIAN_FRONTEND': 'noninteractive'}
+        )
+        if result.returncode == 0:
+            app.logger.info(f"Package lists refreshed by {client_ip}")
+            record_activity("system_update", "Package lists refreshed")
+            return jsonify({"success": True, "message": "Package lists updated"})
+        else:
+            app.logger.warning(f"apt-get update failed for {client_ip}: {result.stderr[:300]}")
+            return jsonify({"success": False, "error": f"apt-get update failed: {result.stderr[:200]}"})
+    except subprocess.TimeoutExpired:
+        return jsonify({"success": False, "error": "Update refresh timed out"})
+    except FileNotFoundError:
+        return jsonify({"success": False, "error": "apt-get not available"})
+
+
+@app.route('/api/system/updates/apply', methods=['POST'])
+@admin_required
+def apply_system_updates():
+    """Apply available system package updates (apt-get upgrade)"""
+    import subprocess
+
+    client_ip = request.remote_addr or "unknown"
+    if not check_rate_limit(client_ip, "update_apply"):
+        return jsonify({"success": False, "error": "Rate limit exceeded"}), 429
+
+    try:
+        result = subprocess.run(
+            ['sudo', 'apt-get', 'upgrade', '-y', '-qq'],
+            capture_output=True,
+            text=True,
+            timeout=600,  # 10 min max for upgrades
+            env={**os.environ, 'DEBIAN_FRONTEND': 'noninteractive'}
+        )
+        if result.returncode == 0:
+            app.logger.info(f"System packages upgraded by {client_ip}")
+            record_activity("system_update", "System packages upgraded")
+            return jsonify({"success": True, "message": "Packages upgraded successfully"})
+        else:
+            app.logger.warning(f"Package upgrade failed for {client_ip}: {result.stderr[:200]}")
+            return jsonify({"success": False, "error": "apt-get upgrade failed. Check system logs."})
+    except subprocess.TimeoutExpired:
+        return jsonify({"success": False, "error": "Upgrade timed out (10 min limit)"})
+    except FileNotFoundError:
+        return jsonify({"success": False, "error": "apt-get not available"})
+
+
+@app.route('/api/system/pool-upgrade/check', methods=['GET'])
+@api_key_or_login_required
+def check_pool_upgrade():
+    """Check if a Spiral Pool upgrade is available from GitHub"""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ['sudo', '/spiralpool/scripts/upgrade.sh', '--check'],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        output = result.stdout.strip()
+        # upgrade.sh --check prints version info and exits
+        # Look for "Update available" or "already on latest" patterns
+        available = 'update available' in output.lower() or 'new version' in output.lower()
+        current_version = ""
+        latest_version = ""
+        for line in output.split('\n'):
+            ll = line.lower()
+            if 'current' in ll and 'version' in ll:
+                current_version = line.split(':')[-1].strip() if ':' in line else ""
+            elif 'latest' in ll or 'available' in ll:
+                latest_version = line.split(':')[-1].strip() if ':' in line else ""
+        return jsonify({
+            "success": True,
+            "update_available": available,
+            "current_version": current_version,
+            "latest_version": latest_version,
+            "output": output
+        })
+    except subprocess.TimeoutExpired:
+        return jsonify({"success": False, "error": "Version check timed out"})
+    except FileNotFoundError:
+        return jsonify({"success": False, "error": "upgrade.sh not found"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route('/api/system/pool-upgrade/apply', methods=['POST'])
+@admin_required
+def apply_pool_upgrade():
+    """Trigger Spiral Pool upgrade from GitHub (runs upgrade.sh --auto)"""
+    import subprocess
+
+    client_ip = request.remote_addr or "unknown"
+    if not check_rate_limit(client_ip, "pool_upgrade"):
+        return jsonify({"success": False, "error": "Rate limit exceeded"}), 429
+
+    try:
+        # Run upgrade.sh --auto in background — it will restart services itself
+        result = subprocess.run(
+            ['sudo', '/spiralpool/scripts/upgrade.sh', '--auto'],
+            capture_output=True,
+            text=True,
+            timeout=300  # 5 min max
+        )
+        if result.returncode == 0:
+            app.logger.info(f"Spiral Pool upgrade triggered by {client_ip}")
+            record_activity("pool_upgrade", "Spiral Pool upgraded from GitHub")
+            return jsonify({
+                "success": True,
+                "message": "Upgrade complete. Services are restarting.",
+                "output": result.stdout[-500:] if result.stdout else ""
+            })
+        else:
+            app.logger.warning(f"Pool upgrade failed for {client_ip}: {result.stderr[:200]}")
+            return jsonify({
+                "success": False,
+                "error": "Upgrade failed",
+                "output": result.stderr[-500:] if result.stderr else result.stdout[-500:]
+            })
+    except subprocess.TimeoutExpired:
+        return jsonify({"success": False, "error": "Upgrade timed out (5 min limit)"})
+    except FileNotFoundError:
+        return jsonify({"success": False, "error": "upgrade.sh not found at /spiralpool/scripts/upgrade.sh"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
 
 
 @app.route('/api/nodes/<symbol>/sync', methods=['GET'])
@@ -12517,7 +13153,7 @@ def test_discord_webhook(url: str, test_message: str = None) -> dict:
         "title": "🧪 Spiral Pool Test Notification",
         "description": test_message or "This is a test message from Spiral Dashboard. If you see this, your webhook is configured correctly!",
         "color": 0x00d4ff,  # Cyan color
-        "footer": {"text": f"Spiral Pool v1.2.3 CONVERGENT SPIRAL"},
+        "footer": {"text": f"Spiral Pool v2.0.0 PHI HASH REACTOR"},
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
@@ -12723,7 +13359,7 @@ def get_cgminer_stats():
 
 
 @app.route('/api/miner/cgminer/restart', methods=['POST'])
-@api_key_or_login_required
+@admin_required
 def cgminer_restart():
     """ Restart ASIC miner via CGMiner API"""
     data = request.json
@@ -12773,13 +13409,21 @@ def cgminer_update_pool():
 
 
 @app.route('/api/miner/cgminer/fan', methods=['POST'])
-@api_key_or_login_required
+@admin_required
 def cgminer_set_fan():
-    """ Set fan speed on ASIC miner (Antminer)"""
+    """Set fan speed on Avalon/Canaan ASIC via CGMiner ascset command.
+
+    Avalon driver-avalon7.c set_device() accepts: ascset|0,fan,MIN-MAX
+    where MIN and MAX are percentages 0-100 with MAX >= MIN.
+    The firmware runs PID control within those bounds based on temperature.
+
+    NOTE: Stock Antminer/WhatsMiner firmware does NOT support ascset fan control.
+    Only Avalon/Canaan devices are confirmed to support this command.
+    """
     data = request.json
     ip = data.get("ip", "")
     port = data.get("port", 4028)
-    fan_speed = data.get("fan_speed", 0)  # 0 = auto, otherwise percent
+    fan_speed = data.get("fan_speed", 0)  # 0 = auto (100% range), otherwise fixed percent
 
     if not ip:
         return jsonify({"success": False, "error": "IP required"})
@@ -12795,20 +13439,22 @@ def cgminer_set_fan():
     except ValueError:
         return jsonify({"success": False, "error": "Invalid fan speed"})
 
-    # This varies by manufacturer - Antminer example
+    # Avalon expects min-max format per driver-avalon7.c set_avalon7_fan()
     if speed == 0:
-        result = cgminer_command(ip, port, "ascset", "0,fan,auto")
+        # Auto: allow full 0-100 range for PID control
+        result = cgminer_command(ip, port, "ascset", "0,fan,0-100")
     else:
-        result = cgminer_command(ip, port, "ascset", f"0,fan,{speed}")
+        # Fixed: set both min and max to the same value
+        result = cgminer_command(ip, port, "ascset", f"0,fan,{speed}-{speed}")
 
     if "error" in result:
         return jsonify({"success": False, "error": result.get("error")})
 
-    return jsonify({"success": True, "message": f"Fan speed set to {speed}%" if speed else "Fan set to auto"})
+    return jsonify({"success": True, "message": f"Fan speed set to {speed}%" if speed else "Fan set to auto (0-100% PID)"})
 
 
 @app.route('/api/miner/cgminer/frequency', methods=['POST'])
-@api_key_or_login_required
+@admin_required
 def cgminer_set_frequency():
     """ Set mining frequency on ASIC miner"""
     data = request.json
@@ -13025,7 +13671,7 @@ def get_axeos_stats():
 
 
 @app.route('/api/miner/axeos/restart', methods=['POST'])
-@api_key_or_login_required
+@admin_required
 def axeos_restart():
     """ Restart AxeOS/NerdQAxe++ miner"""
     data = request.json
@@ -13048,7 +13694,7 @@ def axeos_restart():
 
 
 @app.route('/api/miner/axeos/frequency', methods=['POST'])
-@api_key_or_login_required
+@admin_required
 def axeos_set_frequency():
     """ Set mining frequency on AxeOS/NerdQAxe++ miner"""
     data = request.json
@@ -13082,7 +13728,7 @@ def axeos_set_frequency():
 
 
 @app.route('/api/miner/axeos/voltage', methods=['POST'])
-@api_key_or_login_required
+@admin_required
 def axeos_set_voltage():
     """ Set core voltage on AxeOS/NerdQAxe++ miner"""
     data = request.json
@@ -13114,13 +13760,20 @@ def axeos_set_voltage():
 
 
 @app.route('/api/miner/axeos/fan', methods=['POST'])
-@api_key_or_login_required
+@admin_required
 def axeos_set_fan():
-    """ Set fan speed on AxeOS/NerdQAxe++ miner"""
+    """Set fan speed on AxeOS-based miner (BitAxe, NerdQAxe, QAxe, NMAxe, etc.)
+
+    AxeOS fan parameters (from ESP-Miner nvs_config.c):
+      autofanspeed  — integer 0/1 (not boolean), enables PID auto-control
+      manualFanSpeed — uint16 0-100%, used when autofanspeed=0
+      temptarget     — uint16 35-66°C, target temp for auto-fan PID loop
+    """
     data = request.json
     ip = data.get("ip", "")
     fan_speed = data.get("fan_speed", 0)
     auto_fan = data.get("auto_fan", None)
+    temp_target = data.get("temp_target", None)
 
     if not ip:
         return jsonify({"success": False, "error": "IP required"})
@@ -13131,10 +13784,17 @@ def axeos_set_fan():
 
     payload = {}
 
-    # Handle auto fan toggle
+    # Handle auto fan toggle — AxeOS expects integer 0/1, not JSON boolean
     if auto_fan is not None:
-        payload["autofanspeed"] = auto_fan
+        payload["autofanspeed"] = 1 if auto_fan else 0
         if auto_fan:
+            if temp_target is not None:
+                try:
+                    tt = int(temp_target)
+                    if 35 <= tt <= 66:
+                        payload["temptarget"] = tt
+                except (ValueError, TypeError):
+                    pass
             result = axeos_api_call(ip, "/api/system", method="PATCH", data=payload)
             if result.get("error"):
                 return jsonify({"success": False, "error": result.get("error")})
@@ -13147,9 +13807,9 @@ def axeos_set_fan():
     except ValueError:
         return jsonify({"success": False, "error": "Invalid fan speed"})
 
-    # Set manual fan speed - disable auto first
-    payload["autofanspeed"] = False
-    payload["fanspeed"] = speed
+    # Set manual fan speed — disable auto first, use manualFanSpeed per nvs_config.c
+    payload["autofanspeed"] = 0
+    payload["manualFanSpeed"] = speed
 
     result = axeos_api_call(ip, "/api/system", method="PATCH", data=payload)
 
@@ -13160,7 +13820,7 @@ def axeos_set_fan():
 
 
 @app.route('/api/miner/axeos/pool', methods=['POST'])
-@api_key_or_login_required
+@admin_required
 def axeos_set_pool():
     """Disabled - configure miners directly via their web interface."""
     return jsonify({
@@ -13171,7 +13831,7 @@ def axeos_set_pool():
 
 
 @app.route('/api/miner/braiins/pool', methods=['POST'])
-@api_key_or_login_required
+@admin_required
 def braiins_set_pool():
     """Disabled - configure miners directly via their web interface."""
     return jsonify({
@@ -13182,7 +13842,7 @@ def braiins_set_pool():
 
 
 @app.route('/api/miner/vnish/pool', methods=['POST'])
-@api_key_or_login_required
+@admin_required
 def vnish_set_pool():
     """Disabled - configure miners directly via their web interface."""
     return jsonify({
@@ -13193,7 +13853,7 @@ def vnish_set_pool():
 
 
 @app.route('/api/miner/luxos/pool', methods=['POST'])
-@api_key_or_login_required
+@admin_required
 def luxos_set_pool():
     """Disabled - configure miners directly via their web interface."""
     return jsonify({
@@ -13204,7 +13864,7 @@ def luxos_set_pool():
 
 
 @app.route('/api/miner/axeos/wifi', methods=['POST'])
-@api_key_or_login_required
+@admin_required
 def axeos_set_wifi():
     """ Update WiFi configuration on AxeOS/NerdQAxe++ miner"""
     data = request.json
@@ -13240,7 +13900,7 @@ def axeos_set_wifi():
 
 
 @app.route('/api/miner/axeos/hostname', methods=['POST'])
-@api_key_or_login_required
+@admin_required
 def axeos_set_hostname():
     """ Update hostname on AxeOS/NerdQAxe++ miner"""
     data = request.json
@@ -13268,6 +13928,540 @@ def axeos_set_hostname():
         return jsonify({"success": False, "error": result.get("error")})
 
     return jsonify({"success": True, "message": f"Hostname set to {hostname}"})
+
+
+# ============================================
+#  VNISH FIRMWARE REMOTE CONTROL
+# ============================================
+
+@app.route('/api/miner/vnish/fan', methods=['POST'])
+@admin_required
+def vnish_set_fan():
+    """Set fan speed on Vnish firmware miner via REST API.
+
+    Vnish fan control is part of the unified settings endpoint.
+    Two modes:
+      - auto: fans target a chip temperature (mode.name="auto", mode.param=temp_c)
+      - manual: fixed fan percentage (mode.name="manual", mode.param=speed_pct)
+
+    Reference: pyasic vnish backend | http://[miner]/docs/
+    """
+    data = request.json
+    ip = data.get("ip", "")
+    fan_speed = data.get("fan_speed", 0)
+    auto_fan = data.get("auto_fan", False)
+    temp_target = data.get("temp_target", 75)
+    password = data.get("password", "admin")
+
+    if not ip:
+        return jsonify({"success": False, "error": "IP required"})
+    if not validate_miner_ip(ip):
+        return jsonify({"success": False, "error": "Invalid IP address - only private network IPs allowed"})
+
+    try:
+        if auto_fan:
+            tt = int(temp_target)
+            if tt < 40 or tt > 90:
+                return jsonify({"success": False, "error": "Target temp must be 40-90°C"})
+            cooling = {"mode": {"name": "auto", "param": tt}, "fan_min_duty": 0, "fan_min_count": 1}
+            msg = f"Fan set to auto (target {tt}°C)"
+        else:
+            speed = int(fan_speed)
+            if speed < 0 or speed > 100:
+                return jsonify({"success": False, "error": "Fan speed must be 0-100%"})
+            cooling = {"mode": {"name": "manual", "param": speed}, "fan_min_duty": speed, "fan_min_count": 1}
+            msg = f"Fan speed set to {speed}%"
+    except (ValueError, TypeError):
+        return jsonify({"success": False, "error": "Invalid fan parameters"})
+
+    result = vnish_api_call(ip, "/api/v1/settings", method="POST",
+                            data={"miner": {"cooling": cooling}}, password=password)
+
+    if result.get("error"):
+        return jsonify({"success": False, "error": result.get("error")})
+
+    return jsonify({"success": True, "message": msg})
+
+
+@app.route('/api/miner/vnish/overclock', methods=['POST'])
+@admin_required
+def vnish_set_overclock():
+    """Set overclock on Vnish firmware miner.
+
+    Two modes:
+      - preset: select a power profile (e.g., "3200" for 3200W target)
+      - manual: direct frequency (MHz) and voltage (mV) with preset="disabled"
+
+    Reference: pyasic vnish backend | GET /api/v1/autotune/presets for available presets
+    """
+    data = request.json
+    ip = data.get("ip", "")
+    preset = data.get("preset", "")
+    frequency = data.get("frequency", None)
+    voltage = data.get("voltage", None)
+    password = data.get("password", "admin")
+
+    if not ip:
+        return jsonify({"success": False, "error": "IP required"})
+    if not validate_miner_ip(ip):
+        return jsonify({"success": False, "error": "Invalid IP address - only private network IPs allowed"})
+
+    try:
+        if preset and preset != "disabled":
+            # Preset mode — select a power profile
+            overclock = {"preset": str(preset)}
+            msg = f"Overclock preset set to {preset}"
+        elif frequency is not None or voltage is not None:
+            # Manual mode — direct freq/volt
+            globals_dict = {}
+            if frequency is not None:
+                freq = int(frequency)
+                if freq < 100 or freq > 1000:
+                    return jsonify({"success": False, "error": "Frequency must be 100-1000 MHz"})
+                globals_dict["freq"] = freq
+            if voltage is not None:
+                volt = int(voltage)
+                if volt < 800 or volt > 1500:
+                    return jsonify({"success": False, "error": "Voltage must be 800-1500 mV"})
+                globals_dict["volt"] = volt
+            overclock = {"preset": "disabled", "globals": globals_dict}
+            parts = []
+            if "freq" in globals_dict:
+                parts.append(f"{globals_dict['freq']} MHz")
+            if "volt" in globals_dict:
+                parts.append(f"{globals_dict['volt']} mV")
+            msg = f"Manual overclock set: {', '.join(parts)}"
+        else:
+            return jsonify({"success": False, "error": "Provide preset name or frequency/voltage"})
+    except (ValueError, TypeError):
+        return jsonify({"success": False, "error": "Invalid overclock parameters"})
+
+    result = vnish_api_call(ip, "/api/v1/settings", method="POST",
+                            data={"miner": {"overclock": overclock}}, password=password)
+
+    if result.get("error"):
+        return jsonify({"success": False, "error": result.get("error")})
+
+    return jsonify({"success": True, "message": msg})
+
+
+@app.route('/api/miner/vnish/presets', methods=['POST'])
+@api_key_or_login_required
+def vnish_get_presets():
+    """Get available autotune presets from Vnish miner."""
+    data = request.json
+    ip = data.get("ip", "")
+    password = data.get("password", "admin")
+
+    if not ip:
+        return jsonify({"success": False, "error": "IP required"})
+    if not validate_miner_ip(ip):
+        return jsonify({"success": False, "error": "Invalid IP address - only private network IPs allowed"})
+
+    result = vnish_api_call(ip, "/api/v1/autotune/presets", method="GET", password=password)
+
+    if result.get("error"):
+        return jsonify({"success": False, "error": result.get("error")})
+
+    return jsonify({"success": True, "presets": result})
+
+
+# ============================================
+#  EPIC BLOCKMINER REMOTE CONTROL
+# ============================================
+
+def epic_api_call(ip, endpoint, method="GET", data=None, password="letmein", port=4028, timeout=10):
+    """Make HTTP API call to ePIC BlockMiner.
+
+    ePIC uses HTTP REST on port 4028 (NOT CGMiner TCP).
+    GET endpoints are unauthenticated.
+    POST endpoints authenticate via 'password' field in JSON body.
+    Reference: https://github.com/epicblockchain/epic-dashboard
+    """
+    if not validate_miner_ip(ip):
+        return {"error": "Invalid or blocked IP address (SSRF protection)"}
+
+    url = f"http://{ip}:{port}{endpoint}"
+    try:
+        if method == "GET":
+            response = requests.get(url, timeout=timeout)
+        elif method == "POST":
+            # ePIC authenticates via password in JSON body (no HTTP Basic Auth)
+            payload = data or {}
+            if "password" not in payload:
+                payload["password"] = password
+            response = requests.post(url, json=payload, timeout=timeout)
+        else:
+            return {"error": f"Unsupported method: {method}"}
+
+        if response.status_code == 200:
+            try:
+                return response.json()
+            except (ValueError, json.JSONDecodeError):
+                return {"success": True, "message": response.text}
+        else:
+            return {"error": f"HTTP {response.status_code}: {response.text[:200]}"}
+    except requests.exceptions.Timeout:
+        return {"error": "Connection timeout"}
+    except requests.exceptions.ConnectionError:
+        return {"error": "Connection refused - device offline?"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.route('/api/miner/epic/fan', methods=['POST'])
+@admin_required
+def epic_set_fan():
+    """Set fan speed on ePIC BlockMiner.
+
+    Two modes:
+      - manual: POST /fanspeed with {"param": "<speed_pct>", "password": "..."}
+        NOTE: param is a STRING, not int.
+      - auto: POST /fanspeed with {"param": {"Auto": {"Target Temperature": N, "Idle Speed": N}}, ...}
+
+    Reference: https://github.com/epicblockchain/epic-dashboard/blob/main/docs/APIv2.md
+    """
+    data = request.json
+    ip = data.get("ip", "")
+    fan_speed = data.get("fan_speed", 50)
+    auto_fan = data.get("auto_fan", False)
+    temp_target = data.get("temp_target", 65)
+    idle_speed = data.get("idle_speed", 30)
+    password = data.get("password", "letmein")
+    port = data.get("port", 4028)
+
+    if not ip:
+        return jsonify({"success": False, "error": "IP required"})
+    if not validate_miner_ip(ip):
+        return jsonify({"success": False, "error": "Invalid IP address - only private network IPs allowed"})
+
+    try:
+        if auto_fan:
+            tt = int(temp_target)
+            idle = int(idle_speed)
+            payload = {"param": {"Auto": {"Target Temperature": tt, "Idle Speed": idle}}, "password": password}
+            msg = f"Fan set to auto (target {tt}°C, idle {idle}%)"
+        else:
+            speed = int(fan_speed)
+            if speed < 1 or speed > 100:
+                return jsonify({"success": False, "error": "Fan speed must be 1-100%"})
+            # ePIC expects param as STRING for manual mode
+            payload = {"param": str(speed), "password": password}
+            msg = f"Fan speed set to {speed}%"
+    except (ValueError, TypeError):
+        return jsonify({"success": False, "error": "Invalid fan parameters"})
+
+    result = epic_api_call(ip, "/fanspeed", method="POST", data=payload, password=password, port=port)
+
+    if result.get("error"):
+        return jsonify({"success": False, "error": result.get("error")})
+
+    return jsonify({"success": True, "message": msg})
+
+
+@app.route('/api/miner/epic/overclock', methods=['POST'])
+@admin_required
+def epic_set_overclock():
+    """Set overclock on ePIC BlockMiner.
+
+    Options:
+      - preset: POST /mode with {"param": "<preset_name>", "password": "..."}
+      - power target: POST /power with {"param": <watts>, "password": "..."}
+      - clock+voltage (APIv3): POST /tune with {"param": {"clks": "<mhz>", "voltage": "<mv>"}, ...}
+
+    Reference: https://github.com/epicblockchain/epic-dashboard/blob/main/docs/APIv3.md
+    """
+    data = request.json
+    ip = data.get("ip", "")
+    preset = data.get("preset", "")
+    power_target = data.get("power_target", None)
+    frequency = data.get("frequency", None)
+    voltage = data.get("voltage", None)
+    password = data.get("password", "letmein")
+    port = data.get("port", 4028)
+
+    if not ip:
+        return jsonify({"success": False, "error": "IP required"})
+    if not validate_miner_ip(ip):
+        return jsonify({"success": False, "error": "Invalid IP address - only private network IPs allowed"})
+
+    try:
+        if preset:
+            # Preset mode — select a performance profile
+            payload = {"param": str(preset), "password": password}
+            result = epic_api_call(ip, "/mode", method="POST", data=payload, password=password, port=port)
+            msg = f"Preset set to {preset}"
+        elif power_target is not None:
+            # Power target mode
+            watts = int(power_target)
+            if watts < 100 or watts > 10000:
+                return jsonify({"success": False, "error": "Power target must be 100-10000W"})
+            payload = {"param": watts, "password": password}
+            result = epic_api_call(ip, "/power", method="POST", data=payload, password=password, port=port)
+            msg = f"Power target set to {watts}W"
+        elif frequency is not None or voltage is not None:
+            # Direct clock+voltage (APIv3 /tune endpoint)
+            tune_params = {}
+            if frequency is not None:
+                freq = int(frequency)
+                if freq < 100 or freq > 1000:
+                    return jsonify({"success": False, "error": "Frequency must be 100-1000 MHz"})
+                tune_params["clks"] = str(freq)
+            if voltage is not None:
+                # ePIC voltage is in millivolts as string
+                mv = int(voltage)
+                if mv < 5000 or mv > 15000:
+                    return jsonify({"success": False, "error": "Voltage must be 5000-15000 mV"})
+                tune_params["voltage"] = str(mv)
+            payload = {"param": tune_params, "password": password}
+            result = epic_api_call(ip, "/tune", method="POST", data=payload, password=password, port=port)
+            parts = []
+            if "clks" in tune_params:
+                parts.append(f"{tune_params['clks']} MHz")
+            if "voltage" in tune_params:
+                parts.append(f"{tune_params['voltage']} mV")
+            msg = f"Tune set: {', '.join(parts)}"
+        else:
+            return jsonify({"success": False, "error": "Provide preset, power_target, or frequency/voltage"})
+    except (ValueError, TypeError):
+        return jsonify({"success": False, "error": "Invalid overclock parameters"})
+
+    if result.get("error"):
+        return jsonify({"success": False, "error": result.get("error")})
+
+    return jsonify({"success": True, "message": msg})
+
+
+@app.route('/api/miner/epic/restart', methods=['POST'])
+@admin_required
+def epic_restart():
+    """Reboot ePIC BlockMiner via HTTP REST API."""
+    data = request.json
+    ip = data.get("ip", "")
+    password = data.get("password", "letmein")
+    port = data.get("port", 4028)
+
+    if not ip:
+        return jsonify({"success": False, "error": "IP required"})
+    if not validate_miner_ip(ip):
+        return jsonify({"success": False, "error": "Invalid IP address - only private network IPs allowed"})
+
+    result = epic_api_call(ip, "/reboot", method="POST",
+                           data={"param": 0, "password": password}, password=password, port=port)
+
+    if result.get("error"):
+        return jsonify({"success": False, "error": result.get("error")})
+
+    return jsonify({"success": True, "message": f"Reboot sent to {ip}"})
+
+
+# ============================================
+#  LUXOS FIRMWARE REMOTE CONTROL
+# ============================================
+
+def luxos_session_command(ip, port, command, parameter=None, timeout=5):
+    """Execute a privileged LuxOS command with session management.
+
+    LuxOS privileged commands require: logon → get SessionID → command with
+    session as first parameter → logoff. Sessions expire after 60s.
+
+    Args:
+        ip: Miner IP address
+        port: CGMiner API port (usually 4028)
+        command: LuxOS command name (e.g., 'fanset', 'frequencyset')
+        parameter: Parameter string WITHOUT session ID (will be prepended)
+        timeout: Socket timeout
+    """
+    if not validate_miner_ip(ip):
+        return {"error": "Invalid or blocked IP address (SSRF protection)"}
+
+    # Step 1: Logon to get session
+    logon_result = cgminer_command(ip, port, "logon", timeout=timeout)
+    session_id = None
+
+    # Extract session ID from response
+    sessions = logon_result.get("SESSION", [])
+    if isinstance(sessions, list) and sessions:
+        session_id = sessions[0].get("SessionID", "")
+    if not session_id:
+        return {"error": "Failed to create LuxOS session — logon returned no SessionID"}
+
+    try:
+        # Step 2: Execute privileged command with session ID as first parameter
+        if parameter:
+            full_param = f"{session_id},{parameter}"
+        else:
+            full_param = session_id
+
+        result = cgminer_command(ip, port, command, parameter=full_param, timeout=timeout)
+        return result
+    finally:
+        # Step 3: Always logoff to release session
+        try:
+            cgminer_command(ip, port, "logoff", parameter=session_id, timeout=3)
+        except Exception:
+            pass
+
+
+@app.route('/api/miner/luxos/fan', methods=['POST'])
+@admin_required
+def luxos_set_fan():
+    """Set fan speed on LuxOS firmware miner via CGMiner fanset command.
+
+    LuxOS fanset accepts key=value pairs after session ID:
+      - speed=N: fan speed 0-100% (-1 for auto)
+      - min_fans=N: minimum operational fans (optional)
+
+    Reference: pyasic luxminer backend | docs.luxor.tech/firmware/api
+    """
+    data = request.json
+    ip = data.get("ip", "")
+    port = data.get("port", 4028)
+    fan_speed = data.get("fan_speed", 0)
+    auto_fan = data.get("auto_fan", False)
+
+    if not ip:
+        return jsonify({"success": False, "error": "IP required"})
+    if not validate_miner_ip(ip):
+        return jsonify({"success": False, "error": "Invalid IP address - only private network IPs allowed"})
+
+    try:
+        if auto_fan:
+            param = "speed=-1"
+            msg = "Fan set to auto"
+        else:
+            speed = int(fan_speed)
+            if speed < 0 or speed > 100:
+                return jsonify({"success": False, "error": "Fan speed must be 0-100%"})
+            param = f"speed={speed}"
+            msg = f"Fan speed set to {speed}%"
+    except (ValueError, TypeError):
+        return jsonify({"success": False, "error": "Invalid fan speed"})
+
+    result = luxos_session_command(ip, port, "fanset", parameter=param)
+
+    if result.get("error"):
+        return jsonify({"success": False, "error": result.get("error")})
+
+    return jsonify({"success": True, "message": msg})
+
+
+@app.route('/api/miner/luxos/frequency', methods=['POST'])
+@admin_required
+def luxos_set_frequency():
+    """Set frequency on LuxOS firmware miner via CGMiner frequencyset command.
+
+    LuxOS frequencyset: parameter = "<board>,<freq_mhz>"
+    Board is 0-indexed. Applies to all boards if board=-1 (not confirmed).
+
+    Reference: pyasic luxminer backend
+    """
+    data = request.json
+    ip = data.get("ip", "")
+    port = data.get("port", 4028)
+    frequency = data.get("frequency", 0)
+    board = data.get("board", 0)
+
+    if not ip:
+        return jsonify({"success": False, "error": "IP required"})
+    if not validate_miner_ip(ip):
+        return jsonify({"success": False, "error": "Invalid IP address - only private network IPs allowed"})
+
+    try:
+        freq = int(frequency)
+        if freq < 100 or freq > 1000:
+            return jsonify({"success": False, "error": "Frequency must be 100-1000 MHz"})
+        board_idx = int(board)
+    except (ValueError, TypeError):
+        return jsonify({"success": False, "error": "Invalid frequency or board"})
+
+    result = luxos_session_command(ip, port, "frequencyset", parameter=f"{board_idx},{freq}")
+
+    if result.get("error"):
+        return jsonify({"success": False, "error": result.get("error")})
+
+    return jsonify({"success": True, "message": f"Frequency set to {freq} MHz (board {board_idx})"})
+
+
+@app.route('/api/miner/luxos/profile', methods=['POST'])
+@admin_required
+def luxos_set_profile():
+    """Set performance profile on LuxOS firmware miner.
+
+    LuxOS profileset: parameter = "<profile_name>"
+    Use GET /api/miner/luxos/profiles to list available profiles.
+
+    NOTE: ATM (Automatic Thermal Management) should be disabled before
+    changing profiles manually. This endpoint disables ATM, sets the profile,
+    then re-enables ATM.
+    """
+    data = request.json
+    ip = data.get("ip", "")
+    port = data.get("port", 4028)
+    profile = data.get("profile", "")
+
+    if not ip:
+        return jsonify({"success": False, "error": "IP required"})
+    if not validate_miner_ip(ip):
+        return jsonify({"success": False, "error": "Invalid IP address - only private network IPs allowed"})
+    if not profile:
+        return jsonify({"success": False, "error": "Profile name required"})
+
+    # Disable ATM before changing profile
+    luxos_session_command(ip, port, "atmset", parameter="enabled=false")
+
+    # Set the profile
+    result = luxos_session_command(ip, port, "profileset", parameter=str(profile))
+
+    # Re-enable ATM
+    luxos_session_command(ip, port, "atmset", parameter="enabled=true")
+
+    if result.get("error"):
+        return jsonify({"success": False, "error": result.get("error")})
+
+    return jsonify({"success": True, "message": f"Profile set to {profile}"})
+
+
+@app.route('/api/miner/luxos/profiles', methods=['POST'])
+@api_key_or_login_required
+def luxos_get_profiles():
+    """Get available performance profiles from LuxOS miner."""
+    data = request.json
+    ip = data.get("ip", "")
+    port = data.get("port", 4028)
+
+    if not ip:
+        return jsonify({"success": False, "error": "IP required"})
+    if not validate_miner_ip(ip):
+        return jsonify({"success": False, "error": "Invalid IP address - only private network IPs allowed"})
+
+    result = cgminer_command(ip, port, "profiles")
+
+    if result.get("error"):
+        return jsonify({"success": False, "error": result.get("error")})
+
+    return jsonify({"success": True, "profiles": result.get("PROFILES", [])})
+
+
+@app.route('/api/miner/luxos/restart', methods=['POST'])
+@admin_required
+def luxos_restart():
+    """Reboot LuxOS miner via CGMiner rebootdevice command."""
+    data = request.json
+    ip = data.get("ip", "")
+    port = data.get("port", 4028)
+
+    if not ip:
+        return jsonify({"success": False, "error": "IP required"})
+    if not validate_miner_ip(ip):
+        return jsonify({"success": False, "error": "Invalid IP address - only private network IPs allowed"})
+
+    result = luxos_session_command(ip, port, "rebootdevice")
+
+    if result.get("error"):
+        return jsonify({"success": False, "error": result.get("error")})
+
+    return jsonify({"success": True, "message": f"Reboot sent to {ip}"})
 
 
 # ============================================
@@ -13417,7 +14611,7 @@ def get_block_history():
                     # P0 AUDIT FIX: Don't default to "confirmed" - use "unknown" if status missing
                     "status": block.get("status", "unknown"),
                     "found_at": block.get("created", ""),
-                    "explorer_url": f"{DIGIEXPLORER_URL}/block/{block.get('hash', '')}"
+                    "explorer_url": f"{get_block_explorer(block.get('coin')).get('url', DIGIEXPLORER_URL)}/block/{block.get('hash', '')}"
                 }
 
                 # Add miner device info if found
@@ -13560,6 +14754,7 @@ def get_block_leaderboard():
 
 # Miner groups for fleet management
 miner_groups = {}
+miner_tags = {}   # {miner_ip_or_name: ["tag1", "tag2", ...]}
 
 # Maintenance mode state
 maintenance_mode = {
@@ -13591,6 +14786,28 @@ def save_miner_groups():
         print(f"Error saving miner groups: {e}")
 
 
+def load_miner_tags():
+    """Load miner tags from config"""
+    global miner_tags
+    try:
+        tags_file = os.path.join(CONFIG_DIR, "miner_tags.json")
+        if os.path.exists(tags_file):
+            with open(tags_file, "r") as f:
+                loaded = json.load(f)
+                miner_tags = loaded if isinstance(loaded, dict) else {}
+    except Exception as e:
+        print(f"Error loading miner tags: {e}")
+        miner_tags = {}
+
+
+def save_miner_tags():
+    """Save miner tags to config"""
+    try:
+        _atomic_json_save(os.path.join(CONFIG_DIR, "miner_tags.json"), miner_tags, indent=2)
+    except Exception as e:
+        print(f"Error saving miner tags: {e}")
+
+
 @app.route('/api/fleet/groups', methods=['GET'])
 @api_key_or_login_required
 def get_miner_groups():
@@ -13605,7 +14822,7 @@ def get_miner_groups():
 @admin_required
 def create_miner_group():
     """ Create a new miner group"""
-    data = request.json
+    data = request.json or {}
     group_name = str(data.get("name", "")).strip()
     group_type = str(data.get("type", "location"))
     miners = data.get("miners", [])  # List of miner IPs or names
@@ -13626,6 +14843,9 @@ def create_miner_group():
     # Validate each miner entry is a string of reasonable length
     miners = [str(m).strip()[:128] for m in miners if isinstance(m, (str, int, float))]
 
+    if group_name in miner_groups:
+        return jsonify({"success": False, "error": f"Group '{group_name}' already exists. Use PUT to update."})
+
     miner_groups[group_name] = {
         "name": group_name,
         "type": group_type,
@@ -13645,7 +14865,7 @@ def update_miner_group(group_name):
         return jsonify({"success": False, "error": "Group not found"})
 
     import re
-    data = request.json
+    data = request.json or {}
     if "miners" in data:
         miners = data["miners"]
         if not isinstance(miners, list) or len(miners) > 500:
@@ -13660,6 +14880,8 @@ def update_miner_group(group_name):
         new_name = str(data["name"]).strip()
         if not new_name or len(new_name) > 64 or not re.match(r'^[\w\s\-\.()]+$', new_name):
             return jsonify({"success": False, "error": "Invalid new group name"})
+        if new_name in miner_groups:
+            return jsonify({"success": False, "error": f"Group '{new_name}' already exists"})
         # Rename group
         miner_groups[new_name] = miner_groups.pop(group_name)
         miner_groups[new_name]["name"] = new_name
@@ -13678,6 +14900,50 @@ def delete_miner_group(group_name):
     del miner_groups[group_name]
     save_miner_groups()
     return jsonify({"success": True, "message": f"Group '{group_name}' deleted"})
+
+
+@app.route('/api/fleet/tags', methods=['GET'])
+@api_key_or_login_required
+def get_miner_tags():
+    """Get all miner tags"""
+    return jsonify({"success": True, "tags": miner_tags})
+
+
+@app.route('/api/fleet/tags/<miner_id>', methods=['PUT'])
+@admin_required
+def set_miner_tags(miner_id):
+    """Set tags for a miner (by IP or name)"""
+    import re
+    if not miner_id or len(miner_id) > 128 or not re.match(r'^[\w.\-: ]+$', miner_id):
+        return jsonify({"success": False, "error": "Invalid miner ID"}), 400
+    data = request.json or {}
+    tags = data.get("tags", [])
+    if not isinstance(tags, list) or len(tags) > 20:
+        return jsonify({"success": False, "error": "tags must be a list (max 20)"}), 400
+    # Validate each tag: alphanumeric + hyphens/underscores, max 32 chars
+    clean_tags = []
+    for t in tags:
+        t = str(t).strip()[:32]
+        if t and re.match(r'^[\w\-]+$', t):
+            clean_tags.append(t)
+    if clean_tags:
+        miner_tags[miner_id] = clean_tags
+    else:
+        miner_tags.pop(miner_id, None)
+    save_miner_tags()
+    return jsonify({"success": True, "miner": miner_id, "tags": clean_tags})
+
+
+@app.route('/api/fleet/tags/<miner_id>', methods=['DELETE'])
+@admin_required
+def delete_miner_tags(miner_id):
+    """Remove all tags from a miner"""
+    import re
+    if not miner_id or len(miner_id) > 128 or not re.match(r'^[\w.\-: ]+$', miner_id):
+        return jsonify({"success": False, "error": "Invalid miner ID"}), 400
+    miner_tags.pop(miner_id, None)
+    save_miner_tags()
+    return jsonify({"success": True, "message": f"Tags removed for {miner_id}"})
 
 
 # ============================================
@@ -14088,7 +15354,7 @@ def set_avalon_schedule(ip):
     if not validate_miner_ip(ip):
         return jsonify({"success": False, "error": "Invalid IP - only private network IPs allowed"})
 
-    data = request.json
+    data = request.json or {}
 
     # Validate rules
     rules = data.get("rules", [])
@@ -14158,10 +15424,8 @@ def apply_profile_now(ip):
     data = request.json
     profile_name = data.get("profile", "balanced")
 
-    # Get model from schedule if exists, otherwise use generic
-    model = "generic"
-    if ip in avalon_schedules:
-        model = avalon_schedules[ip].get("model", "generic")
+    # Model priority: request body > saved schedule > generic
+    model = data.get("model") or (avalon_schedules.get(ip, {}).get("model")) or "generic"
 
     result = apply_avalon_profile(ip, profile_name, model)
     return jsonify(result)
@@ -14554,7 +15818,7 @@ def get_fleet_status():
                 # Use hashrate_ths if available, otherwise convert raw hashrate to TH/s
                 # Note: Can't use `or` here because 0 is a valid hashrate
                 hashrate_ths = miner.get("hashrate_ths")
-                hashrate = hashrate_ths if hashrate_ths is not None else miner.get("hashrate", 0) / 1e12
+                hashrate = hashrate_ths if hashrate_ths is not None else miner.get("hashrate_ghs", 0) / 1e3
                 fleet_stats["total_hashrate_ths"] += hashrate
                 if miner.get("temp"):
                     temps.append(miner["temp"])
@@ -14592,11 +15856,11 @@ def get_fleet_by_algorithm():
         entry = algos[algo_name]
         hashrate_ths = miner.get("hashrate_ths")
         if hashrate_ths is None:
-            hashrate_ths = miner.get("hashrate", 0) / 1e12
+            hashrate_ths = miner.get("hashrate_ghs", 0) / 1e3
         entry["hashrate_ths"] += hashrate_ths
         entry["hashrate_ghs"] += hashrate_ths * 1000
         entry["workers"] += 1
-        entry["power_watts"] += miner.get("power", 0) or 0
+        entry["power_watts"] += miner.get("power_watts", 0) or 0
         entry["miners"].append(miner_name)
 
     # Round for display
@@ -14668,14 +15932,16 @@ def save_historical_data():
 @api_key_or_login_required
 def get_hashrate_history():
     """ Get hashrate history for graphing"""
-    period = request.args.get("period", "24h")  # 1h, 6h, 24h, 7d, 30d
+    period = request.args.get("period", "24h")  # 15m, 1h, 6h, 12h, 24h, 7d, 30d
     resolution = request.args.get("resolution", "auto")  # auto, 1m, 5m, 1h
 
     # Calculate time range
     now = time.time()
     period_seconds = {
+        "15m": 900,
         "1h": 3600,
         "6h": 21600,
+        "12h": 43200,
         "24h": 86400,
         "7d": 604800,
         "30d": 2592000
@@ -14684,7 +15950,7 @@ def get_hashrate_history():
     cutoff = now - period_seconds
 
     # Filter data by time range
-    data = [p for p in historical_data.get("hashrate", []) if p.get("timestamp", 0) > cutoff]
+    data = [p for p in historical_data.get("pool_hashrate", []) if p.get("time", 0) > cutoff]
 
     # Downsample if needed
     if resolution == "auto":
@@ -14709,15 +15975,17 @@ def get_share_history():
 
     now = time.time()
     period_seconds = {
+        "15m": 900,
         "1h": 3600,
         "6h": 21600,
+        "12h": 43200,
         "24h": 86400,
         "7d": 604800,
         "30d": 2592000
     }.get(period, 86400)
 
     cutoff = now - period_seconds
-    data = [p for p in historical_data.get("shares", []) if p.get("timestamp", 0) > cutoff]
+    data = [p for p in historical_data.get("shares_per_second", []) if p.get("time", 0) > cutoff]
 
     # Calculate acceptance rate over time
     acceptance_rates = []
@@ -14727,7 +15995,7 @@ def get_share_history():
         total = accepted + rejected
         rate = (accepted / total * 100) if total > 0 else 100
         acceptance_rates.append({
-            "timestamp": point["timestamp"],
+            "timestamp": point.get("time", 0),
             "acceptance_rate": round(rate, 2),
             "accepted": accepted,
             "rejected": rejected
@@ -14757,19 +16025,19 @@ def get_temperature_history():
     period = request.args.get("period", "24h")
 
     now = time.time()
-    period_seconds = {"1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800, "30d": 2592000}.get(period, 86400)
+    period_seconds = {"15m": 900, "1h": 3600, "6h": 21600, "12h": 43200, "24h": 86400, "7d": 604800, "30d": 2592000}.get(period, 86400)
     cutoff = now - period_seconds
 
-    data = [p for p in historical_data.get("temperature", []) if p.get("timestamp", 0) > cutoff]
+    data = [p for p in historical_data.get("temperatures", []) if p.get("time", 0) > cutoff]
 
     return jsonify({
         "success": True,
         "period": period,
         "data": data,
         "summary": {
-            "current_avg": data[-1].get("avg") if data else 0,
-            "period_max": max(p.get("max", 0) for p in data) if data else 0,
-            "period_min": min(p.get("min", 100) for p in data) if data else 0
+            "current_avg": data[-1].get("value", 0) if data else 0,
+            "period_max": max(p.get("value", 0) for p in data) if data else 0,
+            "period_min": min(p.get("value", 0) for p in data) if data else 0
         }
     })
 
@@ -14781,18 +16049,30 @@ def get_efficiency_history():
     period = request.args.get("period", "24h")
 
     now = time.time()
-    period_seconds = {"1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800, "30d": 2592000}.get(period, 86400)
+    period_seconds = {"15m": 900, "1h": 3600, "6h": 21600, "12h": 43200, "24h": 86400, "7d": 604800, "30d": 2592000}.get(period, 86400)
     cutoff = now - period_seconds
 
-    data = [p for p in historical_data.get("efficiency", []) if p.get("timestamp", 0) > cutoff]
+    # Compute J/TH from power (W) and hashrate (TH/s): J/TH = W / (TH/s)
+    power_data = [p for p in historical_data.get("power_watts", []) if p.get("time", 0) > cutoff]
+    hashrate_data = [p for p in historical_data.get("miner_hashrate", []) if p.get("time", 0) > cutoff]
+
+    # Build time-aligned efficiency data
+    hashrate_by_time = {round(p["time"]): p.get("value", 0) for p in hashrate_data}
+    data = []
+    for p in power_data:
+        t = round(p["time"])
+        watts = p.get("value", 0)
+        ths = hashrate_by_time.get(t, 0)
+        efficiency = watts / ths if ths > 0 else 0
+        data.append({"time": p["time"], "value": round(efficiency, 1)})
 
     return jsonify({
         "success": True,
         "period": period,
         "data": data,
         "summary": {
-            "current": data[-1].get("value") if data else 0,
-            "period_avg": sum(p.get("value", 0) for p in data) / len(data) if data else 0
+            "current": data[-1].get("value", 0) if data else 0,
+            "period_avg": round(sum(p.get("value", 0) for p in data) / len(data), 1) if data else 0
         }
     })
 
@@ -14913,7 +16193,7 @@ def get_difficulty_history():
     period = request.args.get("period", "24h")
 
     now = time.time()
-    period_seconds = {"1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800, "30d": 2592000}.get(period, 86400)
+    period_seconds = {"15m": 900, "1h": 3600, "6h": 21600, "12h": 43200, "24h": 86400, "7d": 604800, "30d": 2592000}.get(period, 86400)
     cutoff = now - period_seconds
 
     data = [p for p in network_health_cache.get("difficulty_history", []) if p.get("timestamp", 0) > cutoff]
@@ -14946,14 +16226,14 @@ def get_network_hashrate_history():
     period = request.args.get("period", "24h")
 
     now = time.time()
-    period_seconds = {"1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800, "30d": 2592000}.get(period, 86400)
+    period_seconds = {"15m": 900, "1h": 3600, "6h": 21600, "12h": 43200, "24h": 86400, "7d": 604800, "30d": 2592000}.get(period, 86400)
     cutoff = now - period_seconds
 
     data = [p for p in network_health_cache.get("hashrate_history", []) if p.get("timestamp", 0) > cutoff]
 
     # Convert to TH/s for display
     display_data = [{
-        "timestamp": p["timestamp"],
+        "timestamp": p.get("timestamp", 0),
         "hashrate_ths": p.get("hashrate", 0) / 1e12
     } for p in data]
 
@@ -14998,7 +16278,7 @@ def get_block_time_analysis():
     target_block_time = COIN_BLOCK_TIMES.get(coin, 15)
 
     now = time.time()
-    period_seconds = {"1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800}.get(period, 86400)
+    period_seconds = {"15m": 900, "1h": 3600, "6h": 21600, "12h": 43200, "24h": 86400, "7d": 604800, "30d": 2592000}.get(period, 86400)
     cutoff = now - period_seconds
 
     data = [p for p in network_health_cache.get("block_times", []) if p.get("timestamp", 0) > cutoff]
@@ -15228,6 +16508,7 @@ def record_miner_status(ip, is_online, miner_name=None):
     if ip not in downtime_tracker["miners"]:
         downtime_tracker["miners"][ip] = {
             "name": miner_name or ip,
+            "first_seen": now,
             "total_downtime_sec": 0,
             "downtime_events": [],
             "last_online": now if is_online else None,
@@ -15671,7 +16952,7 @@ def get_uptime_report():
     period = request.args.get("period", "24h")
 
     now = time.time()
-    period_seconds = {"1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800, "30d": 2592000}.get(period, 86400)
+    period_seconds = {"15m": 900, "1h": 3600, "6h": 21600, "12h": 43200, "24h": 86400, "7d": 604800, "30d": 2592000}.get(period, 86400)
     cutoff = now - period_seconds
 
     # Calculate per-miner uptime
@@ -15762,6 +17043,7 @@ def update_power_cost_tracking():
 
 
 @app.route('/api/currency', methods=['GET'])
+@api_key_or_login_required
 def currency_info_endpoint():
     """V1.0: Get supported currencies and current configuration."""
     config = load_config()
@@ -15790,7 +17072,7 @@ def currency_info_endpoint():
 
 
 @app.route('/api/power/config', methods=['GET', 'POST'])
-@api_key_or_login_required
+@admin_required
 def power_config_endpoint():
     """V1.0: Get or set power cost configuration"""
     config = load_config()
@@ -16526,6 +17808,221 @@ def export_share_audit():
     return response
 
 
+@app.route('/api/export/blocks', methods=['GET'])
+@api_key_or_login_required
+def export_blocks():
+    """Export block history as CSV with coin price and fiat value in user's chosen currency"""
+    import io
+
+    pool_blocks = get_found_blocks_from_pool()
+    coins_info = get_enabled_coins()
+    primary_coin = coins_info.get("primary", "")
+
+    # Use the user's configured display currency (set during install.sh)
+    config = load_config()
+    currency_code = config.get("display_currency",
+                      config.get("display_currency_primary", "CAD")).lower()
+    currency_label = currency_code.upper()
+    price = block_reward_cache.get(f"price_{currency_code}", 0)
+    currency_meta = DASHBOARD_CURRENCIES.get(currency_label, {})
+    currency_symbol = currency_meta.get("symbol", "$")
+
+    rows = []
+    for block in pool_blocks[:500]:
+        block_coin = block.get("coin", primary_coin).upper()
+        reward = float(block.get("reward", 0))
+        row = {
+            "height": block.get("height", 0),
+            "hash": block.get("hash", ""),
+            "reward": reward,
+            f"reward_{currency_code}": round(reward * price, 2),
+            "miner": block.get("miner", ""),
+            "worker": block.get("worker", ""),
+            "time": block.get("created", ""),
+            "confirmations": block.get("confirmations", 0),
+            "status": block.get("status", "unknown"),
+            "coin": block_coin,
+            f"price_{currency_code}": price,
+            "currency": currency_label,
+        }
+        rows.append(row)
+
+    if request.args.get("format", "csv").lower() == "json":
+        return jsonify({"success": True, "blocks": rows, "currency": currency_label, "count": len(rows)})
+
+    output = io.StringIO()
+    output.write(f"height,hash,reward,reward_{currency_code},miner,worker,time,confirmations,status,coin,price_{currency_code},currency\n")
+    for row in rows:
+        output.write(
+            f"{row['height']},"
+            f"{csv_safe(row['hash'])},"
+            f"{row['reward']},"
+            f"{row[f'reward_{currency_code}']},"
+            f"{csv_safe(row['miner'])},"
+            f"{csv_safe(row['worker'])},"
+            f"{csv_safe(str(row['time']))},"
+            f"{row['confirmations']},"
+            f"{csv_safe(row['status'])},"
+            f"{csv_safe(row['coin'])},"
+            f"{price},"
+            f"{currency_label}\n"
+        )
+
+    response = app.response_class(
+        response=output.getvalue(),
+        status=200,
+        mimetype='text/csv'
+    )
+    response.headers["Content-Disposition"] = f"attachment; filename=spiralpool_blocks_{int(time.time())}.csv"
+    return response
+
+
+@app.route('/api/export/earnings', methods=['GET'])
+@api_key_or_login_required
+def export_earnings():
+    """Export earnings summary as CSV with fiat values and wallet balance in user's chosen currency"""
+    import io
+    from collections import defaultdict
+
+    pool_blocks = get_found_blocks_from_pool()
+    coins_info = get_enabled_coins()
+    primary_coin = coins_info.get("primary", "")
+
+    # Use the user's configured display currency (set during install.sh)
+    config = load_config()
+    currency_code = config.get("display_currency",
+                      config.get("display_currency_primary", "CAD")).lower()
+    currency_label = currency_code.upper()
+    price = block_reward_cache.get(f"price_{currency_code}", 0)
+
+    # Aggregate rewards by date and coin
+    daily = defaultdict(lambda: defaultdict(float))
+    block_counts = defaultdict(lambda: defaultdict(int))
+    for block in pool_blocks:
+        block_coin = block.get("coin", primary_coin).upper()
+        created = block.get("created", "")
+        date_str = str(created)[:10] if created else "unknown"
+        daily[date_str][block_coin] += float(block.get("reward", 0))
+        block_counts[date_str][block_coin] += 1
+
+    rows = []
+    total_reward = 0
+    for date_str in sorted(daily.keys(), reverse=True):
+        for coin in sorted(daily[date_str].keys()):
+            reward = daily[date_str][coin]
+            total_reward += reward
+            rows.append({
+                "date": date_str,
+                "coin": coin,
+                "blocks": block_counts[date_str][coin],
+                "total_reward": round(reward, 8),
+                f"value_{currency_code}": round(reward * price, 2),
+                f"price_{currency_code}": price,
+                "currency": currency_label,
+            })
+
+    # Wallet balance from node (if available via Sentinel cache)
+    wallet_balance = None
+    try:
+        sentinel_url = app.config.get("SENTINEL_URL", "http://localhost:9191")
+        resp = requests.get(f"{sentinel_url}/health", timeout=3)
+        if resp.ok:
+            health = resp.json()
+            wallet_balance = health.get("wallet_balance")
+    except Exception:
+        pass
+
+    total_blocks = sum(sum(c.values()) for c in block_counts.values())
+
+    if request.args.get("format", "csv").lower() == "json":
+        result = {
+            "success": True,
+            "earnings": rows,
+            "total_reward": round(total_reward, 8),
+            f"total_value_{currency_code}": round(total_reward * price, 2),
+            "total_blocks": total_blocks,
+            "currency": currency_label,
+            f"price_{currency_code}": price,
+        }
+        if wallet_balance is not None:
+            result["wallet_balance"] = round(wallet_balance, 8)
+            result[f"wallet_value_{currency_code}"] = round(wallet_balance * price, 2)
+        return jsonify(result)
+
+    output = io.StringIO()
+    output.write(f"date,coin,blocks,total_reward,value_{currency_code},price_{currency_code},currency\n")
+    for row in rows:
+        output.write(
+            f"{csv_safe(row['date'])},"
+            f"{csv_safe(row['coin'])},"
+            f"{row['blocks']},"
+            f"{row['total_reward']:.8f},"
+            f"{row[f'value_{currency_code}']},"
+            f"{price},"
+            f"{currency_label}\n"
+        )
+    output.write(f"\n")
+    output.write(f"TOTAL,,{total_blocks},{total_reward:.8f},{total_reward * price:.2f},{price},{currency_label}\n")
+    if wallet_balance is not None:
+        output.write(f"WALLET_BALANCE,{primary_coin},,{wallet_balance:.8f},{wallet_balance * price:.2f},{price},{currency_label}\n")
+
+    response = app.response_class(
+        response=output.getvalue(),
+        status=200,
+        mimetype='text/csv'
+    )
+    response.headers["Content-Disposition"] = f"attachment; filename=spiralpool_earnings_{int(time.time())}.csv"
+    return response
+
+
+@app.route('/api/export/hashrate', methods=['GET'])
+@api_key_or_login_required
+def export_hashrate():
+    """Export hashrate history as CSV or JSON"""
+    import io
+
+    period = request.args.get("period", "24h")
+    now = time.time()
+    period_seconds = {
+        "15m": 900,
+        "1h": 3600,
+        "6h": 21600,
+        "12h": 43200,
+        "24h": 86400,
+        "7d": 604800,
+        "30d": 2592000
+    }.get(period, 86400)
+
+    cutoff = now - period_seconds
+    data = [p for p in historical_data.get("pool_hashrate", []) if p.get("time", 0) > cutoff]
+
+    rows = []
+    for point in data:
+        ts = point.get("time", 0)
+        try:
+            dt = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
+        except Exception:
+            dt = ""
+        hashrate = point.get("hashrate_ths", point.get("value", 0))
+        rows.append({"timestamp": ts, "datetime": dt, "hashrate_ths": hashrate})
+
+    if request.args.get("format", "csv").lower() == "json":
+        return jsonify({"success": True, "hashrate": rows, "period": period, "count": len(rows)})
+
+    output = io.StringIO()
+    output.write("timestamp,datetime,hashrate_ths\n")
+    for row in rows:
+        output.write(f"{row['timestamp']},{csv_safe(row['datetime'])},{row['hashrate_ths']}\n")
+
+    response = app.response_class(
+        response=output.getvalue(),
+        status=200,
+        mimetype='text/csv'
+    )
+    response.headers["Content-Disposition"] = f"attachment; filename=spiralpool_hashrate_{period}_{int(time.time())}.csv"
+    return response
+
+
 # ============================================
 # V1.0: ESTIMATED TIME TO BLOCK (ETB)
 # ============================================
@@ -17083,6 +18580,7 @@ def cli_reset_all():
 load_stats()
 load_block_finder_history()
 load_miner_groups()
+load_miner_tags()
 load_historical_data()
 load_activity_feed()
 load_share_audit_log()
@@ -17161,6 +18659,7 @@ reset commands:
     load_stats()
     load_block_finder_history()  #  Load block attribution history
     load_miner_groups()          #  Load fleet management groups
+    load_miner_tags()            #  Load per-miner tags
     load_historical_data()       #  Load historical analytics data
     load_activity_feed()         # Load activity feed
     load_share_audit_log()       # V1.0: Load share audit log

@@ -1,6 +1,10 @@
 #!/bin/bash
 # SPDX-License-Identifier: BSD-3-Clause
 # SPDX-FileCopyrightText: Copyright (c) 2026 Spiral Pool Contributors
+# Self-heal execute permission (needed after SCP from Windows).
+chmod +x "${BASH_SOURCE[0]}" 2>/dev/null || true
+# CRLF self-heal: fix Windows line endings if present (single-line, tolerates \r at EOL)
+head -c50 "$0"|od -c|grep -q '\\r'&&{ find "$(dirname "$0")" -type f \( -name "*.sh" -o -name "*.py" -o -name "*.sql" -o -name "*.conf" -o -name "*.yaml" -o -name "*.yml" -o -name "*.service" -o -name "*.template" \) -exec sed -i 's/\r$//' {} +;exec bash "$0" "$@"; } #
 #
 # ╔════════════════════════════════════════════════════════════════════════════╗
 # ║                                                                            ║
@@ -10,7 +14,7 @@
 # ║                                                                            ║
 # ║   Spiral Pool Contributors                                                 ║
 # ║                                                                            ║
-# ║   Version: 1.2.3                                                         ║
+# ║   Version: 2.0.0                                                         ║
 # ║   License: BSD-3-Clause (see LICENSE file)                                 ║
 # ║                                                                            ║
 # ╚════════════════════════════════════════════════════════════════════════════╝
@@ -35,7 +39,7 @@ SCRIPT_DIR_EARLY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "$SCRIPT_DIR_EARLY/VERSION" ]]; then
     VERSION=$(tr -d '[:space:]' < "$SCRIPT_DIR_EARLY/VERSION")
 else
-    VERSION="1.2.3"
+    VERSION="2.0.0"
 fi
 INSTALL_DIR="/spiralpool"
 DIGIBYTE_VERSION="8.26.2"
@@ -172,6 +176,15 @@ ENABLE_NMC="false"   # Namecoin - first AuxPoW coin (2011)
 ENABLE_SYS="false"   # Syscoin - UTXO platform with AuxPoW
 ENABLE_XMY="false"   # Myriad - Multi-algo coin (SHA256d algo)
 ENABLE_FBTC="false"  # Fractal Bitcoin - recursive Bitcoin scaling (AuxPoW)
+
+# Pruned node configuration — prune=5000 keeps ~5GB of recent blocks
+# Pruning still downloads the full blockchain for verification, then discards old blocks.
+# All pool operations (getblocktemplate, submitblock, ZMQ) work fine on pruned nodes.
+# txindex=1 is incompatible with pruning and will be omitted when pruning is enabled.
+PRUNE_ENABLED="false"
+# These are set by prompt_prune_option() and expanded inside heredoc configs
+PRUNE_CONF_TXINDEX="txindex=1"
+PRUNE_CONF_PRUNE="prune=0"
 
 # Merge Mining Configuration
 MERGE_MINING_ENABLED="false"
@@ -3958,110 +3971,7 @@ collect_docker_configuration() {
 
     log_success "Generated secure passwords for database, RPC, admin API, Grafana, and metrics"
 
-    # Optional: Discord webhook
-    screen_clear
-    echo ""
-    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-    echo -e "${WHITE}Notifications — Discord${NC}"
-    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-    echo ""
-    echo -e "${WHITE}Optional: Enter Discord webhook URL for block alerts and reports.${NC}"
-    echo -e "${DIM}(press Enter to skip)${NC}"
-    echo ""
-    prompt_input "Discord Webhook: "; read DISCORD_WEBHOOK_URL
-    echo ""
-
-    # Optional: Telegram
-    screen_clear
-    echo ""
-    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-    echo -e "${WHITE}Notifications — Telegram${NC}"
-    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-    echo ""
-    echo -e "${WHITE}Optional: Enter Telegram bot token for notifications.${NC}"
-    echo -e "${DIM}(press Enter to skip)${NC}"
-    echo ""
-    prompt_input "Telegram Bot Token: "; read TELEGRAM_BOT_TOKEN
-
-    if [[ -n "$TELEGRAM_BOT_TOKEN" ]]; then
-        prompt_input "Telegram Chat ID: "; read TELEGRAM_CHAT_ID
-    fi
-    echo ""
-
-    # Optional: XMPP
-    screen_clear
-    echo ""
-    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-    echo -e "${WHITE}Notifications — XMPP${NC}"
-    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-    echo ""
-    echo -e "${WHITE}Optional: Enter XMPP Bot JID for notifications.${NC}"
-    echo -e "${DIM}(press Enter to skip)${NC}"
-    echo ""
-    prompt_input "XMPP Bot JID: "; read XMPP_JID
-
-    if [[ -n "$XMPP_JID" ]]; then
-        prompt_input "XMPP Bot Password: "; read -s XMPP_PASSWORD; echo ""
-        prompt_input "Recipient JID: "; read XMPP_RECIPIENT
-        prompt_input "Is recipient a MUC room? (y/N): "; read xmpp_muc_yn
-        [[ "$xmpp_muc_yn" =~ ^[Yy] ]] && XMPP_MUC="true" || XMPP_MUC="false"
-        XMPP_USE_TLS="true"
-    fi
-    echo ""
-
-    # Optional: ntfy
-    screen_clear
-    echo ""
-    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-    echo -e "${WHITE}Notifications — ntfy Push${NC}"
-    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-    echo ""
-    NTFY_URL=""
-    NTFY_TOKEN=""
-    echo -e "${WHITE}Optional: Enter ntfy topic URL for push notifications.${NC}"
-    echo -e "${DIM}e.g. https://ntfy.sh/my-topic — press Enter to skip${NC}"
-    echo ""
-    prompt_input "ntfy URL: "; read NTFY_URL
-    if [[ -n "$NTFY_URL" ]]; then
-        prompt_input "ntfy auth token (or Enter if public topic): "; read NTFY_TOKEN
-    fi
-    echo ""
-
-    # Optional: SMTP email
-    screen_clear
-    echo ""
-    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-    echo -e "${WHITE}Notifications — Email (SMTP)${NC}"
-    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-    echo ""
-    SMTP_HOST=""
-    SMTP_PORT="587"
-    SMTP_USERNAME=""
-    SMTP_PASSWORD=""
-    SMTP_TO=""
-    SMTP_USE_TLS="true"
-    echo -e "${WHITE}Optional: Enter SMTP server hostname for email notifications.${NC}"
-    echo -e "${DIM}e.g. smtp.gmail.com — press Enter to skip${NC}"
-    echo ""
-    prompt_input "SMTP Host: "; read SMTP_HOST
-    if [[ -n "$SMTP_HOST" ]]; then
-        prompt_input "SMTP port [587 = STARTTLS / 465 = SSL, default 587]: "; read SMTP_PORT_INPUT
-        SMTP_PORT="${SMTP_PORT_INPUT:-587}"
-        prompt_input "SMTP username / from address: "; read SMTP_USERNAME
-        prompt_input "SMTP password (app-specific password recommended): "; read -s SMTP_PASSWORD; echo ""
-        prompt_input "Recipient email address(es) [comma-separated for multiple]: "; read SMTP_TO
-        if [[ -n "$SMTP_USERNAME" ]] && [[ -n "$SMTP_PASSWORD" ]] && [[ -n "$SMTP_TO" ]]; then
-            [[ "$SMTP_PORT" == "465" ]] && SMTP_USE_TLS="false" || SMTP_USE_TLS="true"
-            log_success "Email configured: $SMTP_USERNAME → $SMTP_TO via $SMTP_HOST:$SMTP_PORT"
-        else
-            log_warn "Email setup incomplete — skipping"
-            SMTP_HOST=""
-            SMTP_USERNAME=""
-            SMTP_PASSWORD=""
-            SMTP_TO=""
-        fi
-    fi
-    echo ""
+    configure_notifications
 
     # Expected hashrate
     screen_clear
@@ -4202,110 +4112,7 @@ collect_docker_multicoin_configuration() {
     fi
 
 
-    # Optional: Discord webhook
-    screen_clear
-    echo ""
-    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-    echo -e "${WHITE}Notifications — Discord${NC}"
-    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-    echo ""
-    echo -e "${WHITE}Optional: Enter Discord webhook URL for block alerts and reports.${NC}"
-    echo -e "${DIM}(press Enter to skip)${NC}"
-    echo ""
-    prompt_input "Discord Webhook: "; read DISCORD_WEBHOOK_URL
-    echo ""
-
-    # Optional: Telegram
-    screen_clear
-    echo ""
-    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-    echo -e "${WHITE}Notifications — Telegram${NC}"
-    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-    echo ""
-    echo -e "${WHITE}Optional: Enter Telegram bot token for notifications.${NC}"
-    echo -e "${DIM}(press Enter to skip)${NC}"
-    echo ""
-    prompt_input "Telegram Bot Token: "; read TELEGRAM_BOT_TOKEN
-
-    if [[ -n "$TELEGRAM_BOT_TOKEN" ]]; then
-        prompt_input "Telegram Chat ID: "; read TELEGRAM_CHAT_ID
-    fi
-    echo ""
-
-    # Optional: XMPP
-    screen_clear
-    echo ""
-    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-    echo -e "${WHITE}Notifications — XMPP${NC}"
-    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-    echo ""
-    echo -e "${WHITE}Optional: Enter XMPP Bot JID for notifications.${NC}"
-    echo -e "${DIM}(press Enter to skip)${NC}"
-    echo ""
-    prompt_input "XMPP Bot JID: "; read XMPP_JID
-
-    if [[ -n "$XMPP_JID" ]]; then
-        prompt_input "XMPP Bot Password: "; read -s XMPP_PASSWORD; echo ""
-        prompt_input "Recipient JID: "; read XMPP_RECIPIENT
-        prompt_input "Is recipient a MUC room? (y/N): "; read xmpp_muc_yn
-        [[ "$xmpp_muc_yn" =~ ^[Yy] ]] && XMPP_MUC="true" || XMPP_MUC="false"
-        XMPP_USE_TLS="true"
-    fi
-    echo ""
-
-    # Optional: ntfy
-    screen_clear
-    echo ""
-    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-    echo -e "${WHITE}Notifications — ntfy Push${NC}"
-    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-    echo ""
-    NTFY_URL=""
-    NTFY_TOKEN=""
-    echo -e "${WHITE}Optional: Enter ntfy topic URL for push notifications.${NC}"
-    echo -e "${DIM}e.g. https://ntfy.sh/my-topic — press Enter to skip${NC}"
-    echo ""
-    prompt_input "ntfy URL: "; read NTFY_URL
-    if [[ -n "$NTFY_URL" ]]; then
-        prompt_input "ntfy auth token (or Enter if public topic): "; read NTFY_TOKEN
-    fi
-    echo ""
-
-    # Optional: SMTP email
-    screen_clear
-    echo ""
-    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-    echo -e "${WHITE}Notifications — Email (SMTP)${NC}"
-    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-    echo ""
-    SMTP_HOST=""
-    SMTP_PORT="587"
-    SMTP_USERNAME=""
-    SMTP_PASSWORD=""
-    SMTP_TO=""
-    SMTP_USE_TLS="true"
-    echo -e "${WHITE}Optional: Enter SMTP server hostname for email notifications.${NC}"
-    echo -e "${DIM}e.g. smtp.gmail.com — press Enter to skip${NC}"
-    echo ""
-    prompt_input "SMTP Host: "; read SMTP_HOST
-    if [[ -n "$SMTP_HOST" ]]; then
-        prompt_input "SMTP port [587 = STARTTLS / 465 = SSL, default 587]: "; read SMTP_PORT_INPUT
-        SMTP_PORT="${SMTP_PORT_INPUT:-587}"
-        prompt_input "SMTP username / from address: "; read SMTP_USERNAME
-        prompt_input "SMTP password (app-specific password recommended): "; read -s SMTP_PASSWORD; echo ""
-        prompt_input "Recipient email address(es) [comma-separated for multiple]: "; read SMTP_TO
-        if [[ -n "$SMTP_USERNAME" ]] && [[ -n "$SMTP_PASSWORD" ]] && [[ -n "$SMTP_TO" ]]; then
-            [[ "$SMTP_PORT" == "465" ]] && SMTP_USE_TLS="false" || SMTP_USE_TLS="true"
-            log_success "Email configured: $SMTP_USERNAME → $SMTP_TO via $SMTP_HOST:$SMTP_PORT"
-        else
-            log_warn "Email setup incomplete — skipping"
-            SMTP_HOST=""
-            SMTP_USERNAME=""
-            SMTP_PASSWORD=""
-            SMTP_TO=""
-        fi
-    fi
-    echo ""
+    configure_notifications
 
     # Expected hashrate
     screen_clear
@@ -6178,7 +5985,8 @@ generate_docker_dgb_config() {
 # Network
 server=1
 daemon=0
-txindex=1
+$PRUNE_CONF_TXINDEX
+$PRUNE_CONF_PRUNE
 listen=1
 listenonion=0
 port=12024
@@ -6248,8 +6056,8 @@ maxconnections=125
 disablewallet=0
 
 # Storage
-prune=0
-txindex=1
+$PRUNE_CONF_PRUNE
+$PRUNE_CONF_TXINDEX
 
 # Logging
 printtoconsole=1
@@ -6301,8 +6109,8 @@ maxmempool=300
 disablewallet=0
 
 # Storage
-prune=0
-txindex=1
+$PRUNE_CONF_PRUNE
+$PRUNE_CONF_TXINDEX
 
 # Logging
 printtoconsole=1
@@ -6329,10 +6137,10 @@ generate_docker_bc2_config() {
 chain=main
 server=1
 daemon=0
-txindex=1
+$PRUNE_CONF_TXINDEX
 listen=1
 port=8338
-prune=0
+$PRUNE_CONF_PRUNE
 
 # RPC Configuration
 rpcuser=spiralbc2
@@ -6377,7 +6185,8 @@ generate_docker_nmc_config() {
 # Network
 server=1
 daemon=0
-txindex=1
+$PRUNE_CONF_TXINDEX
+$PRUNE_CONF_PRUNE
 listen=1
 port=8334
 
@@ -6421,7 +6230,8 @@ generate_docker_sys_config() {
 # Network
 server=1
 daemon=0
-txindex=1
+$PRUNE_CONF_TXINDEX
+$PRUNE_CONF_PRUNE
 listen=1
 port=8369
 
@@ -6465,7 +6275,8 @@ generate_docker_xmy_config() {
 # Network
 server=1
 daemon=0
-txindex=1
+$PRUNE_CONF_TXINDEX
+$PRUNE_CONF_PRUNE
 listen=1
 port=10888
 
@@ -6509,7 +6320,8 @@ generate_docker_fbtc_config() {
 # Network
 server=1
 daemon=0
-txindex=1
+$PRUNE_CONF_TXINDEX
+$PRUNE_CONF_PRUNE
 listen=1
 port=8341
 
@@ -6552,7 +6364,8 @@ generate_docker_ltc_config() {
 # Network
 server=1
 daemon=0
-txindex=1
+$PRUNE_CONF_TXINDEX
+$PRUNE_CONF_PRUNE
 listen=1
 port=9333
 
@@ -6596,7 +6409,8 @@ generate_docker_doge_config() {
 # Network
 server=1
 daemon=0
-txindex=1
+$PRUNE_CONF_TXINDEX
+$PRUNE_CONF_PRUNE
 listen=1
 port=22556
 
@@ -6636,7 +6450,8 @@ generate_docker_pep_config() {
 # Network
 server=1
 daemon=0
-txindex=1
+$PRUNE_CONF_TXINDEX
+$PRUNE_CONF_PRUNE
 listen=1
 port=33874
 
@@ -6676,7 +6491,8 @@ generate_docker_cat_config() {
 # Network
 server=1
 daemon=0
-txindex=1
+$PRUNE_CONF_TXINDEX
+$PRUNE_CONF_PRUNE
 listen=1
 port=9933
 
@@ -6717,7 +6533,8 @@ generate_docker_qbx_config() {
 # Network
 server=1
 daemon=0
-txindex=1
+$PRUNE_CONF_TXINDEX
+$PRUNE_CONF_PRUNE
 listen=1
 # P2P port remapped from default 8334 to 8345 to avoid NMC conflict
 port=8345
@@ -10488,6 +10305,295 @@ sync_addresses_from_primary() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# NOTIFICATION CHANNEL SELECTION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+configure_notifications() {
+    # Clear any previous values — both variable names used for Docker/systemd compat
+    DISCORD_WEBHOOK=""
+    DISCORD_WEBHOOK_URL=""
+    TELEGRAM_BOT_TOKEN=""
+    TELEGRAM_CHAT_ID=""
+    TELEGRAM_COMMANDS_ENABLED="false"
+    XMPP_JID=""
+    XMPP_PASSWORD=""
+    XMPP_RECIPIENT=""
+    XMPP_MUC="false"
+    XMPP_USE_TLS="true"
+    NTFY_URL=""
+    NTFY_TOKEN=""
+    WEBHOOK_URL=""
+    SMTP_HOST=""
+    SMTP_PORT="587"
+    SMTP_USERNAME=""
+    SMTP_PASSWORD=""
+    SMTP_TO=""
+    SMTP_USE_TLS="true"
+
+    screen_clear
+    echo ""
+    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
+    echo -e "${WHITE}  Notification Channels${NC}"
+    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "  Spiral Sentinel can send block alerts, daily reports, and"
+    echo -e "  health warnings through multiple channels."
+    echo ""
+    echo -e "  ${WHITE}Available channels:${NC}"
+    echo -e "    ${GREEN}1${NC}) Discord          Webhook URL"
+    echo -e "    ${GREEN}2${NC}) Telegram         Bot token + Chat ID"
+    echo -e "    ${GREEN}3${NC}) XMPP             Bot JID (Jabber)"
+    echo -e "    ${GREEN}4${NC}) ntfy             Push notifications"
+    echo -e "    ${GREEN}5${NC}) Email (SMTP)     Server + credentials"
+    echo -e "    ${GREEN}6${NC}) Generic Webhook  POST JSON to any URL"
+    echo ""
+    echo -e "  ${DIM}Enter the numbers of channels to configure, separated by spaces.${NC}"
+    echo -e "  ${DIM}Example: 1 2  (for Discord + Telegram)${NC}"
+    echo -e "  ${DIM}Press Enter to skip all notifications.${NC}"
+    echo ""
+    local notify_choices
+    prompt_input "Channels to configure: "; read notify_choices
+
+    if [[ -z "$notify_choices" ]]; then
+        log "Notifications: skipped (none selected)"
+        return
+    fi
+
+    # Discord
+    if [[ "$notify_choices" == *"1"* ]]; then
+        screen_clear
+        echo ""
+        echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
+        echo -e "${WHITE}  Discord Configuration${NC}"
+        echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
+        echo ""
+        echo -e "  Create a webhook in your Discord server:"
+        echo -e "  ${DIM}Server Settings → Integrations → Webhooks → New Webhook${NC}"
+        echo ""
+        local discord_input
+        prompt_input "Webhook URL: "; read discord_input
+        if [[ -n "$discord_input" ]]; then
+            if [[ "$discord_input" =~ ^https://discord\.com/api/webhooks/ ]] || [[ "$discord_input" =~ ^https://discordapp\.com/api/webhooks/ ]]; then
+                DISCORD_WEBHOOK="$discord_input"
+                DISCORD_WEBHOOK_URL="$discord_input"
+                log_success "Discord configured"
+            else
+                log_warn "Invalid webhook URL format — must start with https://discord.com/api/webhooks/"
+                log_warn "Discord skipped"
+            fi
+        fi
+        echo ""
+    fi
+
+    # Telegram
+    if [[ "$notify_choices" == *"2"* ]]; then
+        screen_clear
+        echo ""
+        echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
+        echo -e "${WHITE}  Telegram Configuration${NC}"
+        echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
+        echo ""
+        echo -e "  Create a bot via ${WHITE}@BotFather${NC} on Telegram to get a token."
+        echo -e "  Send a message to your bot, then get your Chat ID from:"
+        echo -e "  ${DIM}https://api.telegram.org/bot<TOKEN>/getUpdates${NC}"
+        echo ""
+        prompt_input "Bot Token: "; read TELEGRAM_BOT_TOKEN
+        if [[ -n "$TELEGRAM_BOT_TOKEN" ]]; then
+            prompt_input "Chat ID: "; read TELEGRAM_CHAT_ID
+            if [[ -n "$TELEGRAM_CHAT_ID" ]]; then
+                log_success "Telegram configured"
+                echo ""
+                echo -e "  ${WHITE}Telegram Bot Commands${NC}"
+                echo -e "  Your bot can respond to: /status /miners /hashrate /blocks /help"
+                echo ""
+                prompt_input "Enable Telegram bot commands? [Y/n]: "; read tg_cmds_choice
+                if [[ "${tg_cmds_choice,,}" == "n" ]]; then
+                    TELEGRAM_COMMANDS_ENABLED="false"
+                    log "Telegram bot commands disabled"
+                else
+                    TELEGRAM_COMMANDS_ENABLED="true"
+                    log_success "Telegram bot commands enabled"
+                fi
+            else
+                log_warn "Telegram skipped — no Chat ID"
+                TELEGRAM_BOT_TOKEN=""
+            fi
+        fi
+        echo ""
+    fi
+
+    # XMPP
+    if [[ "$notify_choices" == *"3"* ]]; then
+        screen_clear
+        echo ""
+        echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
+        echo -e "${WHITE}  XMPP Configuration${NC}"
+        echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
+        echo ""
+        echo -e "  Enter credentials for the XMPP bot account."
+        echo ""
+        prompt_input "Bot JID (e.g. bot@example.com): "; read XMPP_JID
+        if [[ -n "$XMPP_JID" ]]; then
+            prompt_input "Bot Password: "; read -s XMPP_PASSWORD; echo ""
+            if [[ -n "$XMPP_PASSWORD" ]]; then
+                prompt_input "Recipient JID: "; read XMPP_RECIPIENT
+                if [[ -n "$XMPP_RECIPIENT" ]]; then
+                    prompt_input "Is recipient a MUC room? (y/N): "; read xmpp_muc_yn
+                    [[ "$xmpp_muc_yn" =~ ^[Yy] ]] && XMPP_MUC="true" || XMPP_MUC="false"
+                    XMPP_USE_TLS="true"
+                    log_success "XMPP configured"
+                else
+                    log_warn "No recipient JID — skipping XMPP"
+                    XMPP_JID=""
+                fi
+            else
+                log_warn "No password — skipping XMPP"
+                XMPP_JID=""
+            fi
+        fi
+        echo ""
+    fi
+
+    # ntfy
+    if [[ "$notify_choices" == *"4"* ]]; then
+        screen_clear
+        echo ""
+        echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
+        echo -e "${WHITE}  ntfy Push Configuration${NC}"
+        echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
+        echo ""
+        echo -e "  Free mobile/desktop push — no account needed for public topics."
+        echo -e "  ${DIM}e.g. https://ntfy.sh/my-spiralpool-alerts${NC}"
+        echo ""
+        prompt_input "ntfy URL: "; read NTFY_URL
+        if [[ -n "$NTFY_URL" ]]; then
+            if [[ "$NTFY_URL" =~ ^https:// ]]; then
+                prompt_input "Auth token (Enter if public topic): "; read NTFY_TOKEN
+                log_success "ntfy configured: $NTFY_URL"
+            else
+                log_warn "ntfy URL must start with https:// — skipping"
+                NTFY_URL=""
+            fi
+        fi
+        echo ""
+    fi
+
+    # SMTP Email
+    if [[ "$notify_choices" == *"5"* ]]; then
+        screen_clear
+        echo ""
+        echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
+        echo -e "${WHITE}  Email (SMTP) Configuration${NC}"
+        echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
+        echo ""
+        echo -e "  ${DIM}e.g. smtp.gmail.com (use app-specific password for Gmail)${NC}"
+        echo ""
+        prompt_input "SMTP Host: "; read SMTP_HOST
+        if [[ -n "$SMTP_HOST" ]]; then
+            prompt_input "SMTP port [587 = STARTTLS / 465 = SSL, default 587]: "; read SMTP_PORT_INPUT
+            SMTP_PORT="${SMTP_PORT_INPUT:-587}"
+            prompt_input "SMTP username / from address: "; read SMTP_USERNAME
+            prompt_input "SMTP password: "; read -s SMTP_PASSWORD; echo ""
+            prompt_input "Recipient email(s) [comma-separated]: "; read SMTP_TO
+            if [[ -n "$SMTP_USERNAME" ]] && [[ -n "$SMTP_PASSWORD" ]] && [[ -n "$SMTP_TO" ]]; then
+                [[ "$SMTP_PORT" == "465" ]] && SMTP_USE_TLS="false" || SMTP_USE_TLS="true"
+                log_success "Email configured: $SMTP_USERNAME → $SMTP_TO via $SMTP_HOST:$SMTP_PORT"
+            else
+                log_warn "Email setup incomplete — skipping"
+                SMTP_HOST=""
+                SMTP_USERNAME=""
+                SMTP_PASSWORD=""
+                SMTP_TO=""
+            fi
+        fi
+        echo ""
+    fi
+
+    # Generic Webhook
+    if [[ "$notify_choices" == *"6"* ]]; then
+        screen_clear
+        echo ""
+        echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
+        echo -e "${WHITE}  Generic Webhook Configuration${NC}"
+        echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
+        echo ""
+        echo -e "  POST JSON alerts to any URL — Zapier, Home Assistant, IFTTT, PagerDuty."
+        echo -e "  ${DIM}Payload includes: event, title, description, fields, timestamp.${NC}"
+        echo ""
+        prompt_input "Webhook URL: "; read WEBHOOK_URL
+        if [[ -n "$WEBHOOK_URL" ]]; then
+            log_success "Generic webhook configured: ${WEBHOOK_URL:0:40}..."
+        fi
+        echo ""
+    fi
+
+    # Summary of selected channels
+    local configured=""
+    [[ -n "$DISCORD_WEBHOOK" ]] && configured+="Discord "
+    [[ -n "$TELEGRAM_BOT_TOKEN" ]] && configured+="Telegram "
+    [[ -n "$XMPP_JID" ]] && configured+="XMPP "
+    [[ -n "$NTFY_URL" ]] && configured+="ntfy "
+    [[ -n "$SMTP_HOST" ]] && configured+="Email "
+    [[ -n "$WEBHOOK_URL" ]] && configured+="Webhook "
+    if [[ -n "$configured" ]]; then
+        log_success "Notifications configured: ${configured}"
+    else
+        log "No notification channels configured (can configure later in config.json)"
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PRUNED NODE OPTION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+prompt_prune_option() {
+    # Only ask if at least one coin is enabled
+    local any_coin="false"
+    for var in ENABLE_DGB ENABLE_BTC ENABLE_BCH ENABLE_BC2 ENABLE_LTC ENABLE_DOGE ENABLE_NMC ENABLE_SYS ENABLE_XMY ENABLE_FBTC ENABLE_QBX ENABLE_PEP ENABLE_CAT ENABLE_DGB_SCRYPT; do
+        if [[ "${!var}" == "true" ]]; then
+            any_coin="true"
+            break
+        fi
+    done
+    [[ "$any_coin" == "false" ]] && return
+
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "  ${BOLD}Pruned Node Option${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "  Pruning reduces disk usage dramatically:"
+    echo -e "  ${GREEN}BTC:${NC} ~600 GB → ~5 GB    ${GREEN}DGB:${NC} ~60 GB → ~5 GB"
+    echo -e "  ${GREEN}BCH:${NC} ~200 GB → ~5 GB    ${GREEN}LTC:${NC} ~100 GB → ~5 GB"
+    echo ""
+    echo -e "  ${YELLOW}IMPORTANT:${NC} The node still downloads and verifies the ENTIRE"
+    echo -e "  blockchain first, then prunes (deletes) old blocks."
+    echo -e "  Initial sync takes the same time — ~5 GB per blockchain will"
+    echo -e "  remain on disk after pruning is complete."
+    echo ""
+    echo -e "  All pool operations (getblocktemplate, submitblock, ZMQ)"
+    echo -e "  work correctly on pruned nodes."
+    echo ""
+    echo -e "  ${RED}WARNING:${NC} Reverting from pruned to full requires re-downloading"
+    echo -e "  the entire blockchain from scratch."
+    echo ""
+
+    local choice
+    prompt_input "Enable pruned nodes? (saves 90%+ disk) [y/N]: "; read choice
+    if [[ "${choice,,}" == "y" || "${choice,,}" == "yes" ]]; then
+        PRUNE_ENABLED="true"
+        PRUNE_CONF_TXINDEX=""
+        PRUNE_CONF_PRUNE="prune=5000"
+        log_success "Pruned mode enabled — nodes will use prune=5000 (~5 GB)"
+    else
+        PRUNE_ENABLED="false"
+        PRUNE_CONF_TXINDEX="txindex=1"
+        PRUNE_CONF_PRUNE="prune=0"
+        log "Full archival nodes — no pruning"
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION COLLECTION
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -11066,6 +11172,9 @@ collect_configuration() {
                 echo -e "  ${WHITE}IMPORTANT: Generate your address using Bitcoin II Core,${NC}"
                 echo -e "  ${WHITE}          NOT Bitcoin Core or any BTC wallet!${NC}"
                 echo ""
+                echo -e "${WHITE}🔵 Bitcoin II Wallet Address${NC}"
+                echo -e "${CYAN}   ─────────────────────────────${NC}"
+                echo ""
                 echo "Block rewards go to a Bitcoin II wallet address. You have two options:"
                 echo ""
                 echo -e "  ${WHITE}[1] I have a wallet${NC} - Use an existing BC2 address"
@@ -11114,6 +11223,9 @@ collect_configuration() {
                 ;;
 
             BCH)
+                echo -e "${WHITE}🟢 Bitcoin Cash Wallet Address${NC}"
+                echo -e "${CYAN}   ─────────────────────────────${NC}"
+                echo ""
                 echo "Block rewards go to a Bitcoin Cash wallet address. You have two options:"
                 echo ""
                 echo -e "  ${WHITE}[1] I have a wallet${NC} - Use an existing address (recommended)"
@@ -11170,6 +11282,9 @@ collect_configuration() {
                 ;;
 
             BTC)
+                echo -e "${WHITE}🟠 Bitcoin Wallet Address${NC}"
+                echo -e "${CYAN}   ─────────────────────────${NC}"
+                echo ""
                 echo "Block rewards go to a Bitcoin wallet address. You have two options:"
                 echo ""
                 echo -e "  ${WHITE}[1] I have a wallet${NC} - Use an existing address (recommended)"
@@ -11230,6 +11345,9 @@ collect_configuration() {
                 ;;
 
             CAT)
+                echo -e "${WHITE}🐱 Catcoin Wallet Address${NC}"
+                echo -e "${CYAN}   ─────────────────────────${NC}"
+                echo ""
                 echo "Block rewards go to a Catcoin wallet address."
                 echo ""
                 echo -e "  ${YELLOW}Catcoin does not support server-side wallet generation.${NC}"
@@ -11363,6 +11481,9 @@ collect_configuration() {
                 ;;
 
             DOGE)
+                echo -e "${WHITE}🐕 Dogecoin Wallet Address${NC}"
+                echo -e "${CYAN}   ──────────────────────────${NC}"
+                echo ""
                 echo "Block rewards go to a Dogecoin wallet address. You have two options:"
                 echo ""
                 echo -e "  ${WHITE}[1] I have a wallet${NC} - Use an existing address (recommended)"
@@ -11409,6 +11530,9 @@ collect_configuration() {
                 ;;
 
             LTC)
+                echo -e "${WHITE}⚪ Litecoin Wallet Address${NC}"
+                echo -e "${CYAN}   ──────────────────────────${NC}"
+                echo ""
                 echo "Block rewards go to a Litecoin wallet address. You have two options:"
                 echo ""
                 echo -e "  ${WHITE}[1] I have a wallet${NC} - Use an existing address (recommended)"
@@ -11458,6 +11582,9 @@ collect_configuration() {
                 ;;
 
             PEP)
+                echo -e "${WHITE}🐸 PepeCoin Wallet Address${NC}"
+                echo -e "${CYAN}   ──────────────────────────${NC}"
+                echo ""
                 echo "Block rewards go to a PepeCoin wallet address. You have two options:"
                 echo ""
                 echo -e "  ${WHITE}[1] I have a wallet${NC} - Use an existing address (recommended)"
@@ -11504,6 +11631,9 @@ collect_configuration() {
                 ;;
 
             NMC)
+                echo -e "${WHITE}🔷 Namecoin Wallet Address${NC}"
+                echo -e "${CYAN}   ──────────────────────────${NC}"
+                echo ""
                 echo "Block rewards go to a Namecoin wallet address. You have two options:"
                 echo ""
                 echo -e "  ${WHITE}[1] I have a wallet${NC} - Use an existing address (recommended)"
@@ -11556,6 +11686,9 @@ collect_configuration() {
                 ;;
 
             XMY)
+                echo -e "${WHITE}🔶 Myriad Wallet Address${NC}"
+                echo -e "${CYAN}   ──────────────────────────${NC}"
+                echo ""
                 echo "Block rewards go to a Myriad wallet address. You have two options:"
                 echo ""
                 echo -e "  ${WHITE}[1] I have a wallet${NC} - Use an existing address (recommended)"
@@ -11601,6 +11734,9 @@ collect_configuration() {
                 ;;
 
             FBTC)
+                echo -e "${WHITE}🟤 Fractal Bitcoin Wallet Address${NC}"
+                echo -e "${CYAN}   ─────────────────────────────────${NC}"
+                echo ""
                 echo "Block rewards go to a Fractal Bitcoin wallet address. You have two options:"
                 echo ""
                 echo -e "  ${WHITE}[1] I have a wallet${NC} - Use an existing address (recommended)"
@@ -11648,6 +11784,9 @@ collect_configuration() {
                 ;;
 
             QBX)
+                echo -e "${WHITE}⚛️  Q-BitX Wallet Address${NC}"
+                echo -e "${CYAN}   ─────────────────────────${NC}"
+                echo ""
                 echo "Block rewards go to a Q-BitX wallet address. You have two options:"
                 echo ""
                 echo -e "  ${WHITE}[1] I have a wallet${NC} - Use an existing address (recommended)"
@@ -12811,212 +12950,7 @@ collect_configuration() {
     SENTINEL_SATS_SURGE_ENABLED="true"
     SENTINEL_WALLET_DROP_ENABLED="true"
     if [[ "$INSTALL_MODE" == "full" ]]; then
-        screen_clear
-        echo ""
-        echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-        echo -e "${WHITE}Notification Setup (Optional)${NC}"
-        echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-        echo ""
-        echo "Spiral Sentinel can send alerts when:"
-        echo "  - A block is found"
-        echo "  - A miner goes offline"
-        echo "  - Temperature warnings occur"
-        echo "  - 6-hour, weekly, and monthly reports"
-        echo ""
-        echo "You can configure Discord, Telegram, XMPP, ntfy, email (SMTP), or any combination."
-        echo ""
-        echo -e "${DIM}Tip: For Discord, you'll need a webhook URL from Server Settings > Webhooks.${NC}"
-        echo -e "${DIM}     For Telegram, you'll need a bot token from @BotFather and a chat ID.${NC}"
-        echo -e "${DIM}     For XMPP, you'll need a bot JID and the recipient's JID.${NC}"
-        echo -e "${DIM}     For ntfy, you'll need a topic URL (e.g. https://ntfy.sh/my-topic).${NC}"
-        echo -e "${DIM}     For email, you'll need SMTP server credentials (Gmail, Outlook, etc.).${NC}"
-        echo -e "${DIM}     See README.md > Notifications for detailed setup instructions.${NC}"
-        echo ""
-        echo ""
-
-        # Discord setup
-        screen_clear
-        echo ""
-        echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-        echo -e "${WHITE}Notifications — Discord${NC}"
-        echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-        echo ""
-        echo -e "${YELLOW}Discord Notifications${NC}"
-        echo "To get a webhook URL:"
-        echo "  1. Open Discord > Server Settings > Integrations > Webhooks"
-        echo "  2. Create a webhook and copy the URL"
-        echo ""
-        prompt_input "Discord Webhook URL (or Enter to skip): "; read DISCORD_WEBHOOK
-        if [[ -n "$DISCORD_WEBHOOK" ]]; then
-            if [[ "$DISCORD_WEBHOOK" =~ ^https://discord\.com/api/webhooks/ ]] || [[ "$DISCORD_WEBHOOK" =~ ^https://discordapp\.com/api/webhooks/ ]]; then
-                log_success "Discord webhook configured"
-            else
-                log_warn "Invalid webhook URL format, skipping Discord"
-                DISCORD_WEBHOOK=""
-            fi
-        else
-            log "Discord notifications skipped"
-        fi
-        echo ""
-
-        # Telegram setup
-        screen_clear
-        echo ""
-        echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-        echo -e "${WHITE}Notifications — Telegram${NC}"
-        echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-        echo ""
-        echo -e "${YELLOW}Telegram Notifications${NC}"
-        echo "To set up Telegram notifications:"
-        echo "  1. Message @BotFather on Telegram and create a bot"
-        echo "  2. Copy the bot token (looks like: 123456789:ABCdefGHI...)"
-        echo "  3. Add your bot to a group/channel or message it directly"
-        echo "  4. Get your chat ID from @userinfobot or @RawDataBot"
-        echo ""
-        prompt_input "Telegram Bot Token (or Enter to skip): "; read TELEGRAM_BOT_TOKEN
-        if [[ -n "$TELEGRAM_BOT_TOKEN" ]]; then
-            prompt_input "Telegram Chat ID: "; read TELEGRAM_CHAT_ID
-            if [[ -n "$TELEGRAM_CHAT_ID" ]]; then
-                log_success "Telegram configured"
-            else
-                log_warn "No chat ID provided, skipping Telegram"
-                TELEGRAM_BOT_TOKEN=""
-            fi
-        else
-            log "Telegram notifications skipped"
-        fi
-        echo ""
-
-        # XMPP Direct Send
-        screen_clear
-        echo ""
-        echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-        echo -e "${WHITE}Notifications — XMPP${NC}"
-        echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-        echo ""
-        echo -e "${YELLOW}XMPP Notifications${NC}"
-        echo "Send alerts directly to any XMPP account or MUC room."
-        echo "  1. You need an XMPP account for the bot (e.g. sentinel@yourserver.com)"
-        echo "  2. The recipient's JID (e.g. you@yourserver.com)"
-        echo ""
-        prompt_input "XMPP Bot JID (or Enter to skip): "; read XMPP_JID
-        if [[ -n "$XMPP_JID" ]]; then
-            prompt_input "XMPP Bot Password: "; read -s XMPP_PASSWORD; echo ""
-            if [[ -n "$XMPP_PASSWORD" ]]; then
-                prompt_input "Recipient JID (user or room): "; read XMPP_RECIPIENT
-                if [[ -n "$XMPP_RECIPIENT" ]]; then
-                    prompt_input "Is this a MUC room? (y/N): "; read xmpp_muc_yn
-                    [[ "$xmpp_muc_yn" =~ ^[Yy] ]] && XMPP_MUC="true"
-                    log_success "XMPP configured"
-                else
-                    log_warn "No recipient JID, skipping XMPP"
-                    XMPP_JID=""
-                fi
-            else
-                log_warn "No password provided, skipping XMPP"
-                XMPP_JID=""
-            fi
-        else
-            log "XMPP notifications skipped"
-        fi
-        echo ""
-
-        # ntfy push notifications
-        screen_clear
-        echo ""
-        echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-        echo -e "${WHITE}Notifications — ntfy Push${NC}"
-        echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-        echo ""
-        echo -e "${YELLOW}ntfy Push Notifications${NC}"
-        echo "Free mobile/desktop push notifications — no account required for public topics."
-        echo "  1. Install the ntfy app on your phone (iOS/Android)"
-        echo "  2. Subscribe to any topic name you choose (e.g. my-spiral-pool-abc123)"
-        echo "  3. Use https://ntfy.sh/your_topic as the URL, or self-host ntfy"
-        echo -e "${DIM}  Private topics and self-hosted servers require an auth token.${NC}"
-        echo ""
-        prompt_input "ntfy topic URL (or Enter to skip): "; read NTFY_URL
-        if [[ -n "$NTFY_URL" ]]; then
-            if [[ "$NTFY_URL" =~ ^https:// ]]; then
-                prompt_input "ntfy auth token (or Enter if public topic): "; read NTFY_TOKEN
-                log_success "ntfy configured: $NTFY_URL"
-            else
-                log_warn "ntfy URL must start with https:// — skipping"
-                NTFY_URL=""
-            fi
-        else
-            log "ntfy notifications skipped"
-            NTFY_TOKEN=""
-        fi
-        echo ""
-
-        # Email / SMTP notifications
-        screen_clear
-        echo ""
-        echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-        echo -e "${WHITE}Notifications — Email (SMTP)${NC}"
-        echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-        echo ""
-        echo -e "${YELLOW}Email / SMTP Notifications${NC}"
-        echo "Receive alerts by email via any SMTP server (Gmail, Outlook, your own)."
-        echo -e "${DIM}  Credentials are stored in config.json (chmod 600, spiraluser only).${NC}"
-        echo ""
-        prompt_input "SMTP server hostname (or Enter to skip, e.g. smtp.gmail.com): "; read SMTP_HOST
-        if [[ -n "$SMTP_HOST" ]]; then
-            prompt_input "SMTP port [587 = STARTTLS / 465 = SSL, default 587]: "; read SMTP_PORT_INPUT
-            SMTP_PORT="${SMTP_PORT_INPUT:-587}"
-            prompt_input "SMTP username / from address: "; read SMTP_USERNAME
-            prompt_input "SMTP password (app-specific password recommended): "; read -s SMTP_PASSWORD; echo ""
-            prompt_input "Recipient email address(es) [comma-separated for multiple]: "; read SMTP_TO
-            if [[ -n "$SMTP_USERNAME" ]] && [[ -n "$SMTP_PASSWORD" ]] && [[ -n "$SMTP_TO" ]]; then
-                if [[ "$SMTP_PORT" == "465" ]]; then
-                    SMTP_USE_TLS="false"
-                else
-                    SMTP_USE_TLS="true"
-                fi
-                log_success "Email configured: $SMTP_USERNAME → $SMTP_TO via $SMTP_HOST:$SMTP_PORT"
-            else
-                log_warn "Email setup incomplete — skipping"
-                SMTP_HOST=""
-                SMTP_USERNAME=""
-                SMTP_PASSWORD=""
-                SMTP_TO=""
-            fi
-        else
-            log "Email notifications skipped"
-            SMTP_HOST=""
-            SMTP_PORT="587"
-            SMTP_USERNAME=""
-            SMTP_PASSWORD=""
-            SMTP_TO=""
-            SMTP_USE_TLS="true"
-        fi
-        echo ""
-
-        # Telegram bot commands
-        if [[ -n "$TELEGRAM_BOT_TOKEN" ]]; then
-            echo ""
-            echo -e "${YELLOW}Telegram Bot Commands${NC}"
-            echo "Your Telegram bot can respond to commands from your chat:"
-            echo "  /status   /miners   /hashrate   /blocks   /help"
-            echo ""
-            prompt_input "Enable Telegram bot commands? [Y/n]: "; read tg_cmds_choice
-            if [[ "${tg_cmds_choice,,}" == "n" ]]; then
-                TELEGRAM_COMMANDS_ENABLED="false"
-                log "Telegram bot commands disabled"
-            else
-                TELEGRAM_COMMANDS_ENABLED="true"
-                log_success "Telegram bot commands enabled"
-            fi
-            echo ""
-        else
-            TELEGRAM_COMMANDS_ENABLED="false"
-        fi
-
-        # Summary of notification setup
-        if [[ -z "$DISCORD_WEBHOOK" ]] && [[ -z "$TELEGRAM_BOT_TOKEN" ]] && [[ -z "$XMPP_JID" ]] && [[ -z "$NTFY_URL" ]] && [[ -z "$SMTP_HOST" ]]; then
-            log "No notifications configured (can configure later in ~/.spiralsentinel/config.json)"
-        fi
+        configure_notifications
         echo ""
 
         # Reporting Currency Preference
@@ -13473,6 +13407,9 @@ collect_configuration() {
     fi
     echo ""
 
+    # ── Pruned Node Option ──────────────────────────────────────────────
+    prompt_prune_option
+
     # Summary
     screen_clear
     echo ""
@@ -13484,20 +13421,18 @@ collect_configuration() {
         echo -e "  ${WHITE}Mode:${NC}          ${GREEN}Spiral Pool (Complete Solution)${NC}"
         echo -e "  ${WHITE}Components:${NC}    ${GREEN}Node + Pool + DB + Dashboard + Sentinel + Health${NC}"
         # Show notification status
-        if [[ -n "$DISCORD_WEBHOOK" ]]; then
-            echo -e "  ${WHITE}Discord:${NC}       ${GREEN}Configured${NC}"
+        local _notify_list=""
+        [[ -n "$DISCORD_WEBHOOK" ]] && _notify_list+="Discord, "
+        [[ -n "$TELEGRAM_BOT_TOKEN" ]] && _notify_list+="Telegram, "
+        [[ -n "$XMPP_JID" ]] && _notify_list+="XMPP, "
+        [[ -n "$NTFY_URL" ]] && _notify_list+="ntfy, "
+        [[ -n "$SMTP_HOST" ]] && _notify_list+="Email, "
+        [[ -n "$WEBHOOK_URL" ]] && _notify_list+="Webhook, "
+        _notify_list="${_notify_list%, }"  # trim trailing comma
+        if [[ -n "$_notify_list" ]]; then
+            echo -e "  ${WHITE}Notifications:${NC} ${GREEN}${_notify_list}${NC}"
         else
-            echo -e "  ${WHITE}Discord:${NC}       ${YELLOW}Not configured${NC}"
-        fi
-        if [[ -n "$TELEGRAM_BOT_TOKEN" ]]; then
-            echo -e "  ${WHITE}Telegram:${NC}      ${GREEN}Configured${NC}"
-        else
-            echo -e "  ${WHITE}Telegram:${NC}      ${YELLOW}Not configured${NC}"
-        fi
-        if [[ -n "$XMPP_JID" ]]; then
-            echo -e "  ${WHITE}XMPP:${NC}          ${GREEN}Configured${NC}"
-        else
-            echo -e "  ${WHITE}XMPP:${NC}          ${YELLOW}Not configured${NC}"
+            echo -e "  ${WHITE}Notifications:${NC} ${YELLOW}None configured${NC}"
         fi
         # Show update mode
         case "$AUTO_UPDATE_MODE" in
@@ -13691,6 +13626,11 @@ collect_configuration() {
         echo -e "  ${WHITE}Sync Watcher:${NC}  ${GREEN}Enabled${NC}"
     else
         echo -e "  ${WHITE}Sync Watcher:${NC}  ${YELLOW}Disabled${NC}"
+    fi
+    if [[ "$PRUNE_ENABLED" == "true" ]]; then
+        echo -e "  ${WHITE}Node Storage:${NC}  ${YELLOW}Pruned (prune=5000, ~5 GB per coin)${NC}"
+    else
+        echo -e "  ${WHITE}Node Storage:${NC}  ${GREEN}Full archival nodes${NC}"
     fi
     echo ""
     echo -e "${YELLOW}═══════════════════════════════════════════════════════════${NC}"
@@ -15079,7 +15019,7 @@ echo -e "${CYAN}             ░███${NC}"
 echo -e "${CYAN}             █████${NC}"
 echo -e "${CYAN}            ░░░░░${NC}"
 echo -e "                                 ${MAGENTA}Multi-Algorithm Solo Mining Pool${NC}"
-echo -e "                                     ${DIM}V1.2.3 — CONVERGENT SPIRAL EDITION${NC}"
+echo -e "                                     ${DIM}V2.0.0 — PHI HASH REACTOR EDITION${NC}"
 echo ""
 echo -e "  ${POOL_C}${POOL_I}${NC} Stratum    ${POOL_C}${POOL_P}${NC}   ${DASH_C}${DASH_I}${NC} Dashboard   ${DASH_C}${DASH_P}${NC}   ${SENT_C}${SENT_I}${NC} Sentinel   ${SENT_C}${SENT_P}${NC}"
 echo -e "  ${DIM}Uptime:${NC} ${GREEN}${UPTIME}${NC}   ${DIM}Load:${NC} ${GREEN}${LOAD}${NC}   ${DIM}Mem:${NC} ${GREEN}${MEM_USED}/${MEM_TOTAL}${NC}   ${DIM}Disk:${NC} ${GREEN}${DISK_USED}${NC}"
@@ -15338,8 +15278,8 @@ nblocks=64"
 server=1
 daemon=1
 $(if [[ "$TOR_ENABLED" != "true" ]]; then echo "listen=1"; else echo "listen=0"; fi)
-txindex=1
-prune=0
+$PRUNE_CONF_TXINDEX
+$PRUNE_CONF_PRUNE
 
 # === RPC CONFIGURATION ===
 rpcuser=$DGB_RPC_USER
@@ -15802,9 +15742,9 @@ nblocks=64"
 # === CORE SETTINGS ===
 server=1
 daemon=1
-txindex=1
-# Full node - no pruning
-prune=0
+$PRUNE_CONF_TXINDEX
+$(if [[ "$PRUNE_ENABLED" == "true" ]]; then echo "# Pruned node — txindex disabled"; else echo "# Full node - no pruning"; fi)
+$PRUNE_CONF_PRUNE
 # Mainnet
 chain=main
 
@@ -16141,9 +16081,9 @@ dnsseed=1"
 # === CORE SETTINGS ===
 server=1
 daemon=1
-txindex=1
-# Full node - no pruning
-prune=0
+$PRUNE_CONF_TXINDEX
+$(if [[ "$PRUNE_ENABLED" == "true" ]]; then echo "# Pruned node — txindex disabled"; else echo "# Full node - no pruning"; fi)
+$PRUNE_CONF_PRUNE
 
 # === RPC CONFIGURATION (unique port 8432) ===
 rpcuser=$BCH_RPC_USER
@@ -16476,9 +16416,9 @@ nblocks=64"
 # === CORE SETTINGS ===
 server=1
 daemon=1
-txindex=1
-# Full node - no pruning
-prune=0
+$PRUNE_CONF_TXINDEX
+$(if [[ "$PRUNE_ENABLED" == "true" ]]; then echo "# Pruned node — txindex disabled"; else echo "# Full node - no pruning"; fi)
+$PRUNE_CONF_PRUNE
 # Mainnet
 chain=main
 
@@ -16753,7 +16693,8 @@ dnsseed=dnsseed.koin-project.com"
 # === CORE SETTINGS ===
 server=1
 daemon=1
-txindex=1
+$PRUNE_CONF_TXINDEX
+$PRUNE_CONF_PRUNE
 
 # RPC Settings
 rpcuser=$LTC_RPC_USER
@@ -16970,7 +16911,8 @@ dnsseed=seed2.multidoge.org"
 # === CORE SETTINGS ===
 server=1
 daemon=1
-txindex=1
+$PRUNE_CONF_TXINDEX
+$PRUNE_CONF_PRUNE
 
 # RPC Settings
 rpcuser=$DOGE_RPC_USER
@@ -17191,7 +17133,8 @@ dnsseed=seeds.pepeblocks.com"
 # === CORE SETTINGS ===
 server=1
 daemon=1
-txindex=1
+$PRUNE_CONF_TXINDEX
+$PRUNE_CONF_PRUNE
 
 # RPC Settings
 rpcuser=$PEP_RPC_USER
@@ -17424,7 +17367,8 @@ dnsseed=seed.catcoinwallets.com"
 # === CORE SETTINGS ===
 server=1
 daemon=1
-txindex=1
+$PRUNE_CONF_TXINDEX
+$PRUNE_CONF_PRUNE
 
 # RPC Settings
 rpcuser=$CAT_RPC_USER
@@ -17644,7 +17588,8 @@ dnsseed=namecoin.seed.cypherstack.com"
 # === CORE SETTINGS ===
 server=1
 daemon=1
-txindex=1
+$PRUNE_CONF_TXINDEX
+$PRUNE_CONF_PRUNE
 
 # RPC Settings
 rpcuser=$NMC_RPC_USER
@@ -17860,7 +17805,8 @@ dnsseed=seed4.syscoin.org"
 # === CORE SETTINGS ===
 server=1
 daemon=1
-txindex=1
+$PRUNE_CONF_TXINDEX
+$PRUNE_CONF_PRUNE
 
 # RPC Settings
 rpcuser=$SYS_RPC_USER
@@ -18092,7 +18038,8 @@ dnsseed=seed4.myriadcoin.org"
 # === CORE SETTINGS ===
 server=1
 daemon=1
-txindex=1
+$PRUNE_CONF_TXINDEX
+$PRUNE_CONF_PRUNE
 
 # RPC Settings
 rpcuser=$XMY_RPC_USER
@@ -18305,7 +18252,8 @@ dnsseed=dnsseed-mainnet.unisat.io"
 # === CORE SETTINGS ===
 server=1
 daemon=1
-txindex=1
+$PRUNE_CONF_TXINDEX
+$PRUNE_CONF_PRUNE
 
 # RPC Settings
 rpcuser=$FBTC_RPC_USER
@@ -18493,7 +18441,8 @@ install_qbx() {
 # === CORE SETTINGS ===
 server=1
 daemon=1
-txindex=1
+$PRUNE_CONF_TXINDEX
+$PRUNE_CONF_PRUNE
 
 # RPC Settings
 rpcuser=$QBX_RPC_USER
@@ -20944,7 +20893,7 @@ build_stratum() {
     }
 
     # Read version for ldflags injection (matches upgrade.sh behavior)
-    local BUILD_VERSION="1.2.3"
+    local BUILD_VERSION="2.0.0"
     if [[ -f "$SCRIPT_DIR/VERSION" ]]; then
         BUILD_VERSION=$(tr -d '[:space:]' < "$SCRIPT_DIR/VERSION")
     fi
@@ -23010,6 +22959,73 @@ EOF
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# DASHBOARD TLS — Self-signed certificate generation
+# ═══════════════════════════════════════════════════════════════════════════════
+
+generate_dashboard_cert() {
+    # Generate a self-signed TLS certificate for the dashboard HTTPS endpoint.
+    # Uses a 10-year validity period so operators don't need to rotate it.
+    # The CN is set to the hostname; SANs include localhost, hostname, and
+    # any detected LAN IPs so the browser accepts the cert for common access patterns.
+    local CERT_DIR="$INSTALL_DIR/certs"
+    local CERT_FILE="$CERT_DIR/dashboard.crt"
+    local KEY_FILE="$CERT_DIR/dashboard.key"
+
+    # Skip if cert already exists and is valid
+    if [[ -f "$CERT_FILE" ]] && [[ -f "$KEY_FILE" ]]; then
+        # Check if cert is still valid (not expired)
+        if openssl x509 -checkend 86400 -noout -in "$CERT_FILE" 2>/dev/null; then
+            log_info "Dashboard TLS certificate already exists and is valid"
+            return 0
+        fi
+        log_info "Dashboard TLS certificate expired — regenerating"
+    fi
+
+    sudo mkdir -p "$CERT_DIR"
+
+    # Build Subject Alternative Names (SANs) for LAN access
+    local san_entries="DNS:localhost,DNS:$(hostname)"
+    # Add all non-loopback IPv4 addresses
+    local lan_ips
+    lan_ips=$(ip -4 addr show 2>/dev/null | grep -oP 'inet \K[0-9.]+' | grep -v '^127\.' || hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^$' || true)
+    local ip_index=1
+    for ip in $lan_ips; do
+        san_entries="${san_entries},IP:${ip}"
+        ip_index=$((ip_index + 1))
+    done
+    # Always include loopback
+    san_entries="${san_entries},IP:127.0.0.1"
+
+    log_info "Generating self-signed TLS certificate for dashboard..."
+    openssl req -x509 \
+        -newkey rsa:2048 \
+        -keyout "$KEY_FILE" \
+        -out "$CERT_FILE" \
+        -sha256 \
+        -days 3650 \
+        -nodes \
+        -subj "/O=Spiral Pool/CN=$(hostname)" \
+        -addext "subjectAltName=${san_entries}" \
+        -addext "basicConstraints=CA:FALSE" \
+        -addext "keyUsage=digitalSignature,keyEncipherment" \
+        -addext "extendedKeyUsage=serverAuth" \
+        2>/dev/null
+
+    if [[ $? -eq 0 ]] && [[ -f "$CERT_FILE" ]]; then
+        sudo chown "${POOL_USER}:${POOL_USER}" "$CERT_FILE" "$KEY_FILE"
+        sudo chmod 640 "$KEY_FILE"
+        sudo chmod 644 "$CERT_FILE"
+        log_success "Dashboard TLS certificate generated (self-signed, 10-year validity)"
+        log_info "  Certificate: $CERT_FILE"
+        log_info "  Key:         $KEY_FILE"
+        log_info "  SANs:        ${san_entries}"
+    else
+        log_warn "Failed to generate TLS certificate — dashboard will fall back to HTTP"
+        return 1
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # DASHBOARD INSTALLATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -23051,6 +23067,9 @@ install_dashboard() {
     sudo chown "$POOL_USER:$POOL_USER" "$DASH_DIR/data"
     sudo chmod 700 "$DASH_DIR/data"
 
+    # Generate self-signed TLS certificate for HTTPS
+    generate_dashboard_cert
+
     # Create service
     sudo tee /etc/systemd/system/spiraldash.service > /dev/null << EOF
 [Unit]
@@ -23068,7 +23087,8 @@ User=$POOL_USER
 Group=$POOL_USER
 WorkingDirectory=$DASH_DIR
 ExecStartPre=-/bin/rm -f $DASH_DIR/gunicorn.ctl
-ExecStart=$DASH_DIR/venv/bin/gunicorn --bind 0.0.0.0:$DASHBOARD_PORT --worker-class gthread --workers 1 --threads 4 --timeout 120 dashboard:app
+# HTTPS: self-signed cert generated by install.sh (browser will show cert warning on first visit)
+ExecStart=$DASH_DIR/venv/bin/gunicorn --bind 0.0.0.0:$DASHBOARD_PORT --certfile=$INSTALL_DIR/certs/dashboard.crt --keyfile=$INSTALL_DIR/certs/dashboard.key --worker-class gthread --workers 1 --threads 4 --timeout 120 dashboard:app
 
 # === INSTALLATION PATHS ===
 # Tell dashboard where to find data files (miners.json, etc.)
@@ -23098,7 +23118,7 @@ TimeoutStopSec=30
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=$DASH_DIR $INSTALL_DIR/config $INSTALL_DIR/data /home/$POOL_USER/.spiralpool
+ReadWritePaths=$DASH_DIR $INSTALL_DIR/config $INSTALL_DIR/data $INSTALL_DIR/certs /home/$POOL_USER/.spiralpool
 # NoNewPrivileges must be 'no' — dashboard uses sudo systemctl restart/stop
 # for service control via web UI. sudo is a setuid binary that requires
 # privilege escalation. Allowed commands are restricted via sudoers rules
@@ -23227,6 +23247,13 @@ $POOL_USER ALL=(ALL) NOPASSWD: ${INSTALL_DIR}/scripts/ha-add-peer.sh *
 # Auto-update: update-checker.sh runs as spiraluser via cron, needs sudo for upgrade
 # Trailing * allows --force --auto arguments
 $POOL_USER ALL=(ALL) NOPASSWD: ${INSTALL_DIR}/upgrade.sh *
+
+# Log viewer - allow journalctl to read any service logs from dashboard
+# Dashboard validates service names against ALLOWED_SERVICES whitelist before invoking
+$POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/journalctl *
+
+# System package updates - apt-get update/upgrade from dashboard
+$POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/apt-get *
 
 # Database health check - allow psql as postgres user
 $POOL_USER ALL=(postgres) NOPASSWD: /usr/bin/psql -c SELECT\ 1
@@ -23411,7 +23438,7 @@ install_sentinel() {
             local _sentinel_update_safe=true
             for _addr_var in POOL_ADDRESS ADMIN_API_KEY BTC_ADDRESS BCH_ADDRESS BC2_ADDRESS \
                              LTC_ADDRESS DOGE_ADDRESS DGB_SCRYPT_ADDRESS PEP_ADDRESS CAT_ADDRESS \
-                             NMC_ADDRESS SYS_ADDRESS XMY_ADDRESS FBTC_ADDRESS DISPLAY_TIMEZONE; do
+                             NMC_ADDRESS SYS_ADDRESS XMY_ADDRESS FBTC_ADDRESS QBX_ADDRESS DISPLAY_TIMEZONE; do
                 local _addr_val="${!_addr_var:-}"
                 if [[ "$_addr_val" =~ [\'\"\\\`\$] ]]; then
                     log_error "Variable $_addr_var contains unsafe characters — skipping sentinel config update"
@@ -23642,6 +23669,7 @@ with open('$SENTINEL_CONFIG', 'w') as f:
   "pool_no_shares_threshold_min": 30,
   "ntfy_url": "${NTFY_URL:-}",
   "ntfy_token": "${NTFY_TOKEN:-}",
+  "webhook_url": "${WEBHOOK_URL:-}",
   "smtp_host": "${SMTP_HOST:-}",
   "smtp_port": ${SMTP_PORT:-587},
   "smtp_username": "${SMTP_USERNAME:-}",
@@ -23649,7 +23677,7 @@ with open('$SENTINEL_CONFIG', 'w') as f:
   "smtp_from": "${SMTP_USERNAME:-}",
   "smtp_to": "${SMTP_TO:-}",
   "smtp_use_tls": ${SMTP_USE_TLS:-true},
-  "smtp_enabled": ${SMTP_HOST:+true}${SMTP_HOST:-false},
+  "smtp_enabled": $(if [[ -n "${SMTP_HOST:-}" ]]; then echo "true"; else echo "false"; fi),
   "telegram_commands_enabled": ${TELEGRAM_COMMANDS_ENABLED:-false},
   "alerts_enabled": ${SENTINEL_ALERTS_ENABLED:-true},
   "health_monitoring_enabled": ${SENTINEL_HEALTH_ENABLED:-true},
@@ -23945,6 +23973,7 @@ EOF
   "pool_no_shares_threshold_min": 30,
   "ntfy_url": "${NTFY_URL:-}",
   "ntfy_token": "${NTFY_TOKEN:-}",
+  "webhook_url": "${WEBHOOK_URL:-}",
   "smtp_host": "${SMTP_HOST:-}",
   "smtp_port": ${SMTP_PORT:-587},
   "smtp_username": "${SMTP_USERNAME:-}",
@@ -23952,7 +23981,7 @@ EOF
   "smtp_from": "${SMTP_USERNAME:-}",
   "smtp_to": "${SMTP_TO:-}",
   "smtp_use_tls": ${SMTP_USE_TLS:-true},
-  "smtp_enabled": ${SMTP_HOST:+true}${SMTP_HOST:-false},
+  "smtp_enabled": $(if [[ -n "${SMTP_HOST:-}" ]]; then echo "true"; else echo "false"; fi),
   "telegram_commands_enabled": ${TELEGRAM_COMMANDS_ENABLED:-false},
   "alerts_enabled": ${SENTINEL_ALERTS_ENABLED:-true},
   "health_monitoring_enabled": ${SENTINEL_HEALTH_ENABLED:-true},
@@ -24241,7 +24270,7 @@ EOF
     # Enable Sentinel if any notification method is configured
     # HA backup: do NOT enable — ha-role-watcher manages sentinel on promotion.
     # Enabling it would cause systemd to auto-start it on reboot before the watcher can stop it.
-    if [[ -n "$DISCORD_WEBHOOK" ]] || [[ -n "$TELEGRAM_BOT_TOKEN" ]] || [[ -n "$XMPP_JID" ]]; then
+    if [[ -n "$DISCORD_WEBHOOK" ]] || [[ -n "$TELEGRAM_BOT_TOKEN" ]] || [[ -n "$XMPP_JID" ]] || [[ -n "${NTFY_URL:-}" ]] || [[ -n "${SMTP_HOST:-}" ]] || [[ -n "${WEBHOOK_URL:-}" ]]; then
         if [[ "$HA_MODE" != "ha-backup" ]]; then
             sudo systemctl enable spiralsentinel || true
         fi
@@ -24249,6 +24278,9 @@ EOF
         [[ -n "$DISCORD_WEBHOOK" ]] && notify_methods="Discord"
         [[ -n "$TELEGRAM_BOT_TOKEN" ]] && notify_methods="${notify_methods:+$notify_methods + }Telegram"
         [[ -n "$XMPP_JID" ]] && notify_methods="${notify_methods:+$notify_methods + }XMPP"
+        [[ -n "${NTFY_URL:-}" ]] && notify_methods="${notify_methods:+$notify_methods + }ntfy"
+        [[ -n "${SMTP_HOST:-}" ]] && notify_methods="${notify_methods:+$notify_methods + }Email"
+        [[ -n "${WEBHOOK_URL:-}" ]] && notify_methods="${notify_methods:+$notify_methods + }Webhook"
         log_success "Sentinel installed and enabled ($notify_methods notifications active)"
     else
         log_success "Sentinel installed (configure notifications in $INSTALL_DIR/config/sentinel/config.json to enable)"
@@ -29041,11 +29073,11 @@ echo -e "    Worker:  ${WHITE}$NEW_ADDRESS.worker_name${NC}"
 echo ""
 WALLETEOF
 
-    # V1.2.3-CONVERGENT_SPIRAL: Create backup command
+    # V2.0.0-PHI_HASH_REACTOR: Create backup command
     sudo tee /usr/local/bin/spiralpool-backup > /dev/null << 'BACKUPEOF'
 #!/bin/bash
 #
-# Spiral Pool Backup Utility - V1.2.3-CONVERGENT_SPIRAL
+# Spiral Pool Backup Utility - V2.0.0-PHI_HASH_REACTOR
 # Creates encrypted, compressed backups of wallet, database, and config
 #
 
@@ -29090,7 +29122,7 @@ log_success() { echo -e "${GREEN}[$(date '+%H:%M:%S')] ✓${NC} $1"; }
 show_help() {
     echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${NC}${WHITE}       SPIRAL POOL BACKUP UTILITY - V1.2.3-CONVERGENT_SPIRAL${NC}${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}${WHITE}       SPIRAL POOL BACKUP UTILITY - V2.0.0-PHI_HASH_REACTOR${NC}${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo "Usage: spiralpool-backup [OPTIONS]"
@@ -29439,7 +29471,7 @@ create_manifest() {
 
     cat > "${TEMP_DIR}/manifest.json" << MANIFEST
 {
-    "version": "1.2.3",
+    "version": "2.0.0",
     "created": "$(date -Iseconds)",
     "hostname": "$(hostname)",
     "components": {
@@ -29706,7 +29738,7 @@ mkdir -p "$TEMP_DIR"
 
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║${NC}${WHITE}              SPIRAL POOL BACKUP - V1.2.3-CONVERGENT_SPIRAL${NC}${CYAN}║${NC}"
+echo -e "${CYAN}║${NC}${WHITE}              SPIRAL POOL BACKUP - V2.0.0-PHI_HASH_REACTOR${NC}${CYAN}║${NC}"
 echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -29759,11 +29791,11 @@ echo "  To restore: spiralpool-restore ${OUTPUT_FILE}"
 echo ""
 BACKUPEOF
 
-    # V1.2.3-CONVERGENT_SPIRAL: Create restore command
+    # V2.0.0-PHI_HASH_REACTOR: Create restore command
     sudo tee /usr/local/bin/spiralpool-restore > /dev/null << 'RESTOREEOF'
 #!/bin/bash
 #
-# Spiral Pool Restore Utility - V1.2.3-CONVERGENT_SPIRAL
+# Spiral Pool Restore Utility - V2.0.0-PHI_HASH_REACTOR
 # Restores backups created by spiralpool-backup
 #
 
@@ -29810,7 +29842,7 @@ log_success() { echo -e "${GREEN}[$(date '+%H:%M:%S')] ✓${NC} $1"; }
 show_help() {
     echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${NC}${WHITE}         SPIRAL POOL RESTORE UTILITY - V1.2.3-CONVERGENT_SPIRAL${NC}${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}${WHITE}         SPIRAL POOL RESTORE UTILITY - V2.0.0-PHI_HASH_REACTOR${NC}${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo "Usage: spiralpool-restore BACKUP_FILE [OPTIONS]"
@@ -30132,7 +30164,7 @@ fi
 
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║${NC}${WHITE}           SPIRAL POOL RESTORE - V1.2.3-CONVERGENT_SPIRAL${NC}${CYAN}║${NC}"
+echo -e "${CYAN}║${NC}${WHITE}           SPIRAL POOL RESTORE - V2.0.0-PHI_HASH_REACTOR${NC}${CYAN}║${NC}"
 echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -35501,17 +35533,18 @@ print_completion() {
         echo -e "  ${DIM}will become MASTER and start them automatically.${NC}"
     else
         if [[ -n "$CLOUD_DETECTED" ]]; then
-            echo -e "  ${YELLOW}⚠ CLOUD INSTALL: Dashboard is not exposed over the internet (HTTP is unencrypted)${NC}"
+            echo -e "  ${YELLOW}⚠ CLOUD INSTALL: Dashboard is accessible via SSH tunnel${NC}"
             echo -e "  ${WHITE}Access via SSH tunnel from your local machine:${NC}"
             echo ""
             echo -e "  ${GREEN}  ssh -L 1618:localhost:1618 ${ADMIN_USER}@${CLOUD_SERVER_IP:-YOUR_SERVER_IP}${NC}"
-            echo -e "  ${WHITE}  Then open:${NC} ${GREEN}http://localhost:1618${NC}"
+            echo -e "  ${WHITE}  Then open:${NC} ${GREEN}https://localhost:1618${NC}"
             echo ""
-            echo -e "  ${DIM}Port 1618 is intentionally closed in the firewall. Traffic travels encrypted${NC}"
-            echo -e "  ${DIM}through your SSH session — no certificates or reverse proxy required.${NC}"
+            echo -e "  ${DIM}Port 1618 is intentionally closed in the firewall. A self-signed TLS${NC}"
+            echo -e "  ${DIM}certificate is used — accept the browser warning on first visit.${NC}"
             echo -e "  ${DIM}See: docs/setup/CLOUD_OPERATIONS.md${NC}"
         else
-            echo -e "  ${WHITE}Dashboard:${NC}       http://$connect_ip:$DASHBOARD_PORT"
+            echo -e "  ${WHITE}Dashboard:${NC}       https://$connect_ip:$DASHBOARD_PORT"
+            echo -e "  ${DIM}(Self-signed TLS cert — accept the browser warning on first visit)${NC}"
         fi
         if [[ -n "$CLOUD_DETECTED" ]]; then
             echo -e "  ${WHITE}Pool API:${NC}        http://$connect_ip:$API_PORT/api/pools  ${DIM}(world-accessible — public stats; admin routes require API key)${NC}"
@@ -35578,9 +35611,9 @@ print_completion() {
         echo ""
         if [[ -n "$CLOUD_DETECTED" ]]; then
             echo -e "  ${WHITE}1.${NC} SSH tunnel: ${GREEN}ssh -L 1618:localhost:1618 ${ADMIN_USER}@${CLOUD_SERVER_IP:-YOUR_SERVER_IP}${NC}"
-            echo -e "  ${WHITE}2.${NC} Open:       ${GREEN}http://localhost:1618/setup${NC}"
+            echo -e "  ${WHITE}2.${NC} Open:       ${GREEN}https://localhost:1618/setup${NC}"
         else
-            echo -e "  ${WHITE}Open:${NC}  ${GREEN}http://${connect_ip}:${DASHBOARD_PORT}/setup${NC}"
+            echo -e "  ${WHITE}Open:${NC}  ${GREEN}https://${connect_ip}:${DASHBOARD_PORT}/setup${NC}"
         fi
         echo ""
         echo -e "  ${DIM}The setup wizard will detect your active coins and show wallet inputs for each.${NC}"
@@ -35808,7 +35841,7 @@ print_completion() {
     echo -e "${CYAN}            ░░░░░${NC}"
     echo ""
     echo -e "                                     ${GREEN}✓ Installation Completed${NC}"
-    echo -e "                                     ${DIM}V1.2.3 - CONVERGENT SPIRAL${NC}"
+    echo -e "                                     ${DIM}V2.0.0 - PHI HASH REACTOR${NC}"
     echo ""
 }
 

@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 Spiral Pool Contributors
 """
 ╔═════════════════════════════════════════════════════════════════════════════╗
-║  Spiral Sentinel v1.2.3 - CONVERGENT SPIRAL EDITION                                 ║
+║  Spiral Sentinel v2.0.0 - PHI HASH REACTOR EDITION                                 ║
 ║  Autonomous SHA-256 Solo Mining Monitor (DGB/BTC/BCH/BC2)                   ║
 ║  Self-Healing + Share Monitoring (No Pool Software Dependency)              ║
 ╠═════════════════════════════════════════════════════════════════════════════╣
@@ -28,8 +28,8 @@
 ║  • Whatsminer API: whatsminer.com                                           ║
 ╚═════════════════════════════════════════════════════════════════════════════╝
 """
-__version__ = "1.2.3-CONVERGENT_SPIRAL"
-__codename__ = "CONVERGENT_SPIRAL"
+__version__ = "2.0.0-PHI_HASH_REACTOR"
+__codename__ = "PHI_HASH_REACTOR"
 
 import copy, json, socket, sys, time, os, urllib.request, urllib.error, ssl, random, ipaddress, re, threading, http.server
 from urllib.parse import urlparse, quote as url_quote
@@ -259,7 +259,7 @@ def _http(url, timeout=10, headers=None, retries=2):
 _RPC_ALLOWED_METHODS = frozenset({
     "getmininginfo", "getblockchaininfo", "getnetworkinfo", "getpeerinfo",
     "getblockcount", "getdifficulty", "getconnectioncount", "getmempoolinfo",
-    "getnettotals", "uptime", "getbestblockhash",
+    "getnettotals", "uptime", "getbestblockhash", "validateaddress",
 })
 
 def _rpc_call(host, port, method, params=None, timeout=10):
@@ -744,6 +744,9 @@ DEFAULT_CONFIG = {
     # ntfy notifications (optional) — free push notifications, no account required
     "ntfy_url": "",                    # ntfy topic URL (e.g. https://ntfy.sh/your_topic or https://your-ntfy-server.com/your_topic)
     "ntfy_token": "",                  # Optional auth token (required for private topics or self-hosted servers)
+    # Generic webhook notifications (optional) — POST JSON to any URL
+    "webhook_url": "",                 # Full URL to POST alerts to (HTTPS required, or http://localhost)
+    "webhook_headers": {},             # Optional custom HTTP headers (e.g. {"Authorization": "Bearer xyz"})
     # Email / SMTP notifications (optional) — stored in config.json (chmod 600, spiraluser only)
     "smtp_host": "",                   # SMTP server hostname (e.g. smtp.gmail.com)
     "smtp_port": 587,                  # 587 = STARTTLS (recommended), 465 = SSL/TLS, 25 = plain
@@ -862,6 +865,11 @@ DEFAULT_CONFIG = {
     "pool_share_validation": True,             # Enable pool-side share verification
     "pool_no_shares_threshold_min": 30,        # Alert if no pool shares for this long
     "push_device_hints": True,                 # Push device info to pool for difficulty hints
+    # Stratum URL mismatch detection — alerts if a miner points at a different pool
+    "pool_url": "",                              # Expected stratum URL (e.g. "stratum+tcp://192.168.1.21:20335")
+    "fallback_pool_urls": [],                    # Additional valid pool URLs (HA failover, VIP, etc.)
+    # Firmware auto-detection — probe BraiinsOS/Vnish on port 80 when CGMiner fails
+    "firmware_auto_detect": True,                 # Try BraiinsOS then Vnish when antminer CGMiner probe fails
     # ═══════════════════════════════════════════════════════════════════════════════
     # PROMETHEUS METRICS & INFRASTRUCTURE MONITORING
     # ═══════════════════════════════════════════════════════════════════════════════
@@ -1298,6 +1306,7 @@ def load_config():
         "XMPP_RECIPIENT": "xmpp_recipient",
         "NTFY_URL": "ntfy_url",
         "NTFY_TOKEN": "ntfy_token",
+        "WEBHOOK_URL": "webhook_url",
         "SMTP_HOST": "smtp_host",
         "SMTP_PORT": "smtp_port",
         "SMTP_USERNAME": "smtp_username",
@@ -2061,6 +2070,41 @@ def check_coin_node_synced(coin):
         return False
     except (urllib.error.URLError, urllib.error.HTTPError, socket.timeout, OSError):
         return False
+
+def validate_wallet_addresses():
+    """Validate configured wallet addresses against each coin's node at startup.
+
+    For each enabled coin with an RPC port, calls validateaddress to check
+    whether the configured wallet address is known to the node. Returns a list
+    of (symbol, address, issue) tuples for any problems found.
+    """
+    issues = []
+    for coin in get_enabled_coins():
+        symbol = coin.get("symbol", "UNKNOWN")
+        address = coin.get("wallet_address", "")
+        rpc_port = coin.get("rpc_port")
+        if not address or not rpc_port:
+            continue
+        # Skip placeholder addresses
+        if address.upper().startswith("YOUR"):
+            continue
+        try:
+            result = _rpc_call("127.0.0.1", rpc_port, "validateaddress", [address])
+            if result is None:
+                # RPC failed (daemon offline or auth required) — skip silently
+                continue
+            if not isinstance(result, dict):
+                logger.debug(f"Wallet validation for {symbol}: unexpected RPC result type {type(result)}")
+                continue
+            if not result.get("isvalid", False):
+                issues.append((symbol, address, "Address is not valid for this network"))
+            elif result.get("ismine") is False and result.get("iswatchonly") is False:
+                # Address is valid but not in the node's wallet — warn operator
+                issues.append((symbol, address, "Address is not in the node's wallet (not ismine, not watchonly)"))
+        except Exception as e:
+            logger.debug(f"Wallet validation for {symbol}: {e}")
+    return issues
+
 
 def get_all_coins_status():
     """Get sync status for all enabled coins"""
@@ -3220,8 +3264,8 @@ def handle_coin_health_alerts(health_results, state):
             send_alert("miner_online", embed, state)  # Reuse miner_online cooldown category
             logger.info(f"{symbol} node recovered — alert sent")
 
-    # Update state
-    _coin_health_state = health_results.copy()
+    # Update state — merge results to preserve state for coins not in this check
+    _coin_health_state.update(health_results)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -3396,7 +3440,7 @@ def check_dry_streak(state):
             # Get pool hashrate (H/s) and network difficulty
             pool_stats = pool_data.get("poolStats", {})
             pool_hashrate_hps = pool_stats.get("poolHashrate", 0)
-            network_diff = pool_data.get("networkDifficulty", 0)
+            network_diff = pool_stats.get("networkDifficulty", 0)
 
             if pool_hashrate_hps <= 0 or network_diff <= 0:
                 continue
@@ -3508,7 +3552,7 @@ def check_difficulty_changes(state):
             pool_data = fetch_pool_stats_for_coin(coin)
             if not pool_data:
                 continue
-            network_diff = pool_data.get("networkDifficulty", 0)
+            network_diff = pool_data.get("poolStats", {}).get("networkDifficulty", 0)
             if network_diff <= 0:
                 continue
 
@@ -5016,7 +5060,10 @@ NTFY_ENABLED = bool(NTFY_URL)
 
 # SMTP / email configuration
 SMTP_HOST     = CONFIG.get("smtp_host", "").strip()
-SMTP_PORT     = int(CONFIG.get("smtp_port", 587))
+try:
+    SMTP_PORT = int(CONFIG.get("smtp_port", 587))
+except (ValueError, TypeError):
+    SMTP_PORT = 587
 SMTP_USERNAME = CONFIG.get("smtp_username", "").strip()
 SMTP_PASSWORD = CONFIG.get("smtp_password", "")
 SMTP_FROM     = CONFIG.get("smtp_from", "").strip() or SMTP_USERNAME
@@ -5039,7 +5086,10 @@ _tg_last_cmd_ts: float = 0.0  # rate-limit: earliest time next command is accept
 
 # Sentinel health endpoint configuration
 SENTINEL_HEALTH_ENABLED = bool(CONFIG.get("sentinel_health_enabled", True))
-SENTINEL_HEALTH_PORT    = int(CONFIG.get("sentinel_health_port", 9191))
+try:
+    SENTINEL_HEALTH_PORT = int(CONFIG.get("sentinel_health_port", 9191))
+except (ValueError, TypeError):
+    SENTINEL_HEALTH_PORT = 9191
 SENTINEL_START_TIME     = time.time()   # Process start timestamp for uptime reporting
 _health_state_ref       = None          # Set in monitor_loop after state is initialized
 
@@ -5088,6 +5138,64 @@ DEFAULT_MINERS = {
     "vnish": [],           # Vnish firmware on Antminers (REST API port 80 + CGMiner on 4028)
     "luxos": [],           # LuxOS firmware on Antminers (CGMiner API port 4028)
 }
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FLEET GROUPS — user-defined miner grouping for aggregated alerting
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_miner_groups_cache = {}
+_miner_groups_last_load = 0
+
+def load_miner_groups():
+    """Load user-defined miner groups from dashboard config.
+
+    Groups are stored by the dashboard in miner_groups.json. This function
+    reads the same file so Sentinel can send group-level offline alerts
+    (e.g., 'All 4 miners in Garage went offline') instead of individual ones.
+
+    Returns dict: { "Garage": { "name": "Garage", "type": "location", "miners": [...] }, ... }
+    """
+    global _miner_groups_cache, _miner_groups_last_load
+    # Reload at most every 60 seconds to avoid constant disk I/O
+    if time.time() - _miner_groups_last_load < 60 and _miner_groups_cache:
+        return _miner_groups_cache
+
+    candidates = [
+        INSTALL_DIR / "dashboard" / "data" / "miner_groups.json",
+        SHARED_DATA_DIR / "miner_groups.json",
+    ]
+    for path in candidates:
+        if path.exists():
+            try:
+                with open(path) as f:
+                    _miner_groups_cache = json.load(f)
+                _miner_groups_last_load = time.time()
+                return _miner_groups_cache
+            except (json.JSONDecodeError, IOError) as e:
+                logger.warning(f"Failed to load miner groups from {path}: {e}")
+    _miner_groups_cache = {}
+    _miner_groups_last_load = time.time()
+    return _miner_groups_cache
+
+
+def _resolve_group_miners(group_data, miner_status, ip_lookup):
+    """Resolve group miner identifiers to display names used in miner_status.
+
+    Group miners are stored as names or IPs. miner_status keys are display names.
+    Returns list of resolved display names that exist in miner_status.
+    """
+    resolved = []
+    for mid in group_data.get("miners", []):
+        if mid in miner_status:
+            resolved.append(mid)
+        else:
+            # Try matching by IP
+            for name, ip in ip_lookup.items():
+                if ip == mid:
+                    resolved.append(name)
+                    break
+    return resolved
+
 
 # Unified miner database file (shared with dashboard and config tools)
 # Primary location is /spiralpool/data/ (shared between admin and service users)
@@ -5374,7 +5482,7 @@ def reload_miners():
                 "old_count": old_count,
                 "new_count": new_count,
                 "success": True,
-                "sentinel_version": "V1.2.3-CONVERGENT_SPIRAL"
+                "sentinel_version": "V2.0.0-PHI_HASH_REACTOR"
             }
             _atomic_json_save(MINER_RELOAD_ACK, ack_data)
             logger.debug(f"Wrote reload ACK: {MINER_RELOAD_ACK}")
@@ -5393,7 +5501,7 @@ def reload_miners():
                 "timestamp_iso": datetime.now(timezone.utc).isoformat(),
                 "success": False,
                 "error": "Failed to reload miner configuration",
-                "sentinel_version": "V1.2.3-CONVERGENT_SPIRAL"
+                "sentinel_version": "V2.0.0-PHI_HASH_REACTOR"
             }
             _atomic_json_save(MINER_RELOAD_ACK, ack_data)
         except (PermissionError, OSError):
@@ -5974,6 +6082,8 @@ IMMEDIATE_ALERT_TYPES = {
     # Important operational alerts
     "miner_offline",      # Miner went down - needs attention
     "miner_online",       # Miner recovery notification
+    "group_offline",      # All miners in a fleet group went offline
+    "group_online",       # Fleet group recovered (at least one miner back online)
     "pool_hashrate_drop", # Significant pool hashrate drop
     "hashrate_crash",     # Network hashrate crash
     "high_odds",          # Mining opportunity
@@ -6512,15 +6622,20 @@ def _cgminer(ip, port, cmd, timeout=5):
                 pass
 
 def _cgminer_get_worker(ip, port, timeout=5):
-    """Extract worker name from CGMiner pools command for pool share validation."""
+    """Extract worker name and pool URL from CGMiner pools command.
+
+    Returns (stratum_user, worker_name, pool_url) for pool share and URL mismatch validation.
+    """
     pools = _cgminer(ip, port, "pools", timeout)
     if pools and "POOLS" in pools:
         for p in pools["POOLS"]:
             if p.get("Status") == "Alive" or p.get("Stratum Active"):
                 stratum_user = p.get("User", "")
                 worker_name = stratum_user.split(".")[-1] if "." in stratum_user else stratum_user
-                return stratum_user, worker_name
-    return "", ""
+                pool_url = p.get("URL", "")
+                return stratum_user, worker_name, pool_url
+    return "", "", ""
+
 
 def fetch_avalon(ip, port=4028, timeout=5):
     """
@@ -6587,7 +6702,7 @@ def fetch_avalon(ip, port=4028, timeout=5):
                         if 10 < pout < 500:  # Sanity check for home miners
                             r["power_watts"] = pout
     # Get pool info to extract worker name for pool share validation
-    r["stratum_user"], r["worker_name"] = _cgminer_get_worker(ip, port, timeout)
+    r["stratum_user"], r["worker_name"], r["pool_url"] = _cgminer_get_worker(ip, port, timeout)
     return r if r["hashrate_ghs"] is not None else None
 
 
@@ -6604,7 +6719,7 @@ def fetch_futurebit(ip, port=4028, timeout=5):
 
     Reference: https://github.com/jstefanop/apolloapi-v2
     """
-    r = {"hashrate_ghs": None, "found_blocks": 0, "temps": {}, "uptime": None, "accepted": 0, "rejected": 0, "stale": 0, "stratum_user": "", "worker_name": ""}
+    r = {"hashrate_ghs": None, "found_blocks": 0, "temps": {}, "uptime": None, "accepted": 0, "rejected": 0, "stale": 0, "stratum_user": "", "worker_name": "", "pool_url": ""}
     d = _cgminer(ip, port, "summary", timeout)
     if d and "SUMMARY" in d:
         for s in d["SUMMARY"]:
@@ -6630,7 +6745,7 @@ def fetch_futurebit(ip, port=4028, timeout=5):
             for k, t in [("temp", "chip"), ("temp2", "board"), ("Temperature", "chip")]:
                 if k in s and s[k]:
                     r["temps"][t] = s[k]
-    r["stratum_user"], r["worker_name"] = _cgminer_get_worker(ip, port, timeout)
+    r["stratum_user"], r["worker_name"], r["pool_url"] = _cgminer_get_worker(ip, port, timeout)
     return r if r["hashrate_ghs"] is not None else None
 
 
@@ -6640,7 +6755,7 @@ def fetch_antminer(ip, port=4028, timeout=5):
     Supports: S19, S19 Pro, S19j Pro, S19 XP, S21, T21, etc.
     Reference: https://github.com/bitmaintech/cgminer
     """
-    r = {"hashrate_ghs": None, "found_blocks": 0, "temps": {}, "uptime": None, "accepted": 0, "rejected": 0, "stale": 0, "hw_errors": 0, "power_watts": 0, "fans": [], "chain_hashrates": [], "stratum_user": "", "worker_name": ""}
+    r = {"hashrate_ghs": None, "found_blocks": 0, "temps": {}, "uptime": None, "accepted": 0, "rejected": 0, "stale": 0, "hw_errors": 0, "power_watts": 0, "fans": [], "chain_hashrates": [], "stratum_user": "", "worker_name": "", "pool_url": ""}
     d = _cgminer(ip, port, "summary", timeout)
     if d and "SUMMARY" in d:
         for s in d["SUMMARY"]:
@@ -6681,7 +6796,7 @@ def fetch_antminer(ip, port=4028, timeout=5):
                     parsed.append(0)
             if any(p > 0 for p in parsed):
                 r["chain_hashrates"] = parsed
-    r["stratum_user"], r["worker_name"] = _cgminer_get_worker(ip, port, timeout)
+    r["stratum_user"], r["worker_name"], r["pool_url"] = _cgminer_get_worker(ip, port, timeout)
     return r if r["hashrate_ghs"] is not None else None
 
 
@@ -6692,7 +6807,7 @@ def fetch_whatsminer(ip, port=4028, timeout=5):
     Note: CGMiner API must be enabled in miner web interface.
     Reference: https://www.whatsminer.com/file/WhatsminerAPI%20V2.0.3.pdf
     """
-    r = {"hashrate_ghs": None, "found_blocks": 0, "temps": {}, "uptime": None, "accepted": 0, "rejected": 0, "stale": 0, "hw_errors": 0, "power_watts": 0, "fans": [], "chain_hashrates": [], "stratum_user": "", "worker_name": ""}
+    r = {"hashrate_ghs": None, "found_blocks": 0, "temps": {}, "uptime": None, "accepted": 0, "rejected": 0, "stale": 0, "hw_errors": 0, "power_watts": 0, "fans": [], "chain_hashrates": [], "stratum_user": "", "worker_name": "", "pool_url": ""}
     d = _cgminer(ip, port, "summary", timeout)
     if d and "SUMMARY" in d:
         for s in d["SUMMARY"]:
@@ -6724,7 +6839,7 @@ def fetch_whatsminer(ip, port=4028, timeout=5):
                     parsed.append(0)
             if any(p > 0 for p in parsed):
                 r["chain_hashrates"] = parsed
-    r["stratum_user"], r["worker_name"] = _cgminer_get_worker(ip, port, timeout)
+    r["stratum_user"], r["worker_name"], r["pool_url"] = _cgminer_get_worker(ip, port, timeout)
     return r if r["hashrate_ghs"] is not None else None
 
 
@@ -6733,7 +6848,7 @@ def fetch_innosilicon(ip, port=4028, timeout=5):
     Fetch data from Innosilicon via CGMiner API.
     Supports: A10, A10 Pro, A11, T2T, T3, etc.
     """
-    r = {"hashrate_ghs": None, "found_blocks": 0, "temps": {}, "uptime": None, "accepted": 0, "rejected": 0, "stale": 0, "power_watts": 0, "fans": [], "stratum_user": "", "worker_name": ""}
+    r = {"hashrate_ghs": None, "found_blocks": 0, "temps": {}, "uptime": None, "accepted": 0, "rejected": 0, "stale": 0, "power_watts": 0, "fans": [], "stratum_user": "", "worker_name": "", "pool_url": ""}
     d = _cgminer(ip, port, "summary", timeout)
     if d and "SUMMARY" in d:
         for s in d["SUMMARY"]:
@@ -6756,7 +6871,7 @@ def fetch_innosilicon(ip, port=4028, timeout=5):
             if fans: r["fans"] = fans
             # Power
             if s.get("Power"): r["power_watts"] = s["Power"]
-    r["stratum_user"], r["worker_name"] = _cgminer_get_worker(ip, port, timeout)
+    r["stratum_user"], r["worker_name"], r["pool_url"] = _cgminer_get_worker(ip, port, timeout)
     return r if r["hashrate_ghs"] is not None else None
 
 
@@ -6773,11 +6888,11 @@ def fetch_braiins(ip, username="root", password="", timeout=10):
     """
     r = {"hashrate_ghs": None, "found_blocks": 0, "temps": {}, "uptime": None,
          "accepted": 0, "rejected": 0, "stale": 0, "power_watts": 0, "fans": [],
-         "stratum_user": "", "worker_name": ""}
+         "stratum_user": "", "worker_name": "", "pool_url": ""}
 
     if not REQUESTS_AVAILABLE:
         logger.debug("fetch_braiins: 'requests' module not installed — skipping")
-        return r
+        return None
 
     try:
         if not validate_miner_ip(ip):
@@ -6844,7 +6959,7 @@ def fetch_braiins(ip, username="root", password="", timeout=10):
                     r["temps"]["chip"] = degree_c
                 # Fans: fans[].rpm
                 fans_data = cooling.get("fans", [])
-                r["fans"] = [f.get("rpm", 0) for f in fans_data if f.get("rpm")]
+                r["fans"] = [f.get("rpm", 0) for f in fans_data if f.get("rpm") is not None]
         except Exception:
             pass
 
@@ -6877,11 +6992,11 @@ def fetch_vnish(ip, password="admin", timeout=10):
     """
     r = {"hashrate_ghs": None, "found_blocks": 0, "temps": {}, "uptime": None,
          "accepted": 0, "rejected": 0, "stale": 0, "power_watts": 0, "fans": [],
-         "stratum_user": "", "worker_name": ""}
+         "stratum_user": "", "worker_name": "", "pool_url": ""}
 
     if not REQUESTS_AVAILABLE:
         logger.debug("fetch_vnish: 'requests' module not installed — skipping")
-        return r
+        return None
 
     try:
         if not validate_miner_ip(ip):
@@ -6958,6 +7073,8 @@ def fetch_vnish(ip, password="admin", timeout=10):
                     fans = [s.get(f"fan{i}", 0) for i in range(1, 5) if s.get(f"fan{i}", 0) > 0]
                     if fans:
                         r["fans"] = fans
+            # Pool URL via CGMiner pools command (for stratum URL mismatch detection)
+            r["stratum_user"], r["worker_name"], r["pool_url"] = _cgminer_get_worker(ip, 4028, timeout)
         except Exception:
             pass
 
@@ -7000,11 +7117,11 @@ def fetch_epic(ip, port=4028, username="root", password="letmein", timeout=10):
     """
     r = {"hashrate_ghs": None, "found_blocks": 0, "temps": {}, "uptime": None,
          "accepted": 0, "rejected": 0, "stale": 0, "power_watts": 0, "fans": [],
-         "stratum_user": "", "worker_name": ""}
+         "stratum_user": "", "worker_name": "", "pool_url": ""}
 
     if not REQUESTS_AVAILABLE:
         logger.debug("fetch_epic: 'requests' module not installed — skipping")
-        return r
+        return None
 
     try:
         if not validate_miner_ip(ip):
@@ -7038,6 +7155,7 @@ def fetch_epic(ip, port=4028, username="root", password="letmein", timeout=10):
                         r["worker_name"] = parts[1]
                     elif user:
                         r["stratum_user"] = user
+                    r["pool_url"] = stratum.get("Current Pool", "") or stratum.get("URL", "")
                     # Hashboards temps
                     hbs = summary.get("HBs", [])
                     if isinstance(hbs, list):
@@ -7455,24 +7573,36 @@ def get_pool_share_stats():
 # Module-level lookups populated by get_total_hashrate() each cycle
 _miner_ip_lookup = {}    # Maps display name -> IP address
 _miner_type_lookup = {}  # Maps display name -> miner type string (e.g., "antminer", "axeos")
+_miner_config_lookup = {}  # Maps display name -> miners.json entry (for per-miner overrides)
 
 def get_total_hashrate():
     """Get total hashrate from all configured miners with algorithm-aware formatting."""
-    global _avalon_display_names, _miner_ip_lookup, _miner_type_lookup
+    global _avalon_display_names, _miner_ip_lookup, _miner_type_lookup, _miner_config_lookup
     _avalon_display_names = set()  # Clear and rebuild on each collection cycle
     _miner_ip_lookup = {}   # Maps display name -> IP address
     _miner_type_lookup = {} # Maps display name -> miner type string
+    _miner_config_lookup = {} # Maps display name -> miner config dict
     total, details, temps, status, power, uptimes, mblocks, mpools, mstats, worker_names = 0, {}, {}, {}, {}, {}, {}, {}, {}, {}
     fans = {}  # Maps display name -> list of fan RPMs
     chain_data = {}  # Maps display name -> list of per-chain hashrates (GH/s)
     hw_errors_data = {}  # Maps display name -> total HW error count
     # Get the primary coin to determine algorithm for formatting
     primary_coin = get_primary_coin()
+    # Build IP → miner config lookup for per-miner overrides (fan control, etc.)
+    _ip_to_miner_cfg = {}
+    for mtype, mlist in MINERS.items():
+        for m in mlist:
+            if m.get("ip"):
+                _ip_to_miner_cfg[m["ip"]] = m
+
     def process(name, data, exp, watts=0, has_blocks=False, miner_ip=None, miner_type=None):
         nonlocal total
         # Populate IP and type lookups for thermal protection and fan alerts
         if miner_ip:
             _miner_ip_lookup[name] = miner_ip
+            # Store miner config for per-miner overrides (fan_control_enabled, etc.)
+            if miner_ip in _ip_to_miner_cfg:
+                _miner_config_lookup[name] = _ip_to_miner_cfg[miner_ip]
         if miner_type:
             _miner_type_lookup[name] = miner_type
         # A miner is "online" if it has hashrate OR is confirmed connected via stratum
@@ -7565,10 +7695,26 @@ def get_total_hashrate():
     # Industrial ASIC miners (Bitmain Antminer, MicroBT Whatsminer, Innosilicon)
     for m in MINERS.get("antminer", []):
         data = fetch_antminer(m["ip"], m.get("port", 4028))
+        detected_type = "antminer"
+        # Auto-scan: if CGMiner probe fails, try BraiinsOS then Vnish on HTTP port 80
+        if not data and CONFIG.get("firmware_auto_detect", True):
+            braiins_data = fetch_braiins(m["ip"], username=m.get("username", "root"), password=m.get("password", ""))
+            if braiins_data:
+                data = braiins_data
+                detected_type = "braiins"
+                logger.info(f"Auto-detected BraiinsOS firmware on {m['ip']} (configured as antminer)")
+            else:
+                vnish_data = fetch_vnish(m["ip"], password=m.get("password", "admin"))
+                if vnish_data:
+                    data = vnish_data
+                    detected_type = "vnish"
+                    logger.info(f"Auto-detected Vnish firmware on {m['ip']} (configured as antminer)")
+                else:
+                    logger.warning(f"Auto-detect failed for {m['ip']}: CGMiner, BraiinsOS, and Vnish probes all unsuccessful — requires manual credential setup")
         display_name = m["name"]
         if data and display_name == m["ip"] and data.get("worker_name"):
             display_name = data["worker_name"]
-        process(display_name, data, m.get("fallback_ths", 0)*1000, m.get("watts", 3250), has_blocks=True, miner_ip=m["ip"], miner_type="antminer")
+        process(display_name, data, m.get("fallback_ths", 0)*1000, m.get("watts", 3250), has_blocks=True, miner_ip=m["ip"], miner_type=detected_type)
     for m in MINERS.get("whatsminer", []):
         data = fetch_whatsminer(m["ip"], m.get("port", 4028))
         display_name = m["name"]
@@ -7627,10 +7773,26 @@ def get_total_hashrate():
     # Bitmain Antminer L7/L9 (Scrypt, uses same CGMiner API as SHA256 Antminers)
     for m in MINERS.get("antminer_scrypt", []):
         data = fetch_antminer(m["ip"], m.get("port", 4028))
+        detected_type = "antminer_scrypt"
+        # Auto-scan: if CGMiner probe fails, try BraiinsOS then Vnish on HTTP port 80
+        if not data and CONFIG.get("firmware_auto_detect", True):
+            braiins_data = fetch_braiins(m["ip"], username=m.get("username", "root"), password=m.get("password", ""))
+            if braiins_data:
+                data = braiins_data
+                detected_type = "braiins"
+                logger.info(f"Auto-detected BraiinsOS firmware on {m['ip']} (configured as antminer_scrypt)")
+            else:
+                vnish_data = fetch_vnish(m["ip"], password=m.get("password", "admin"))
+                if vnish_data:
+                    data = vnish_data
+                    detected_type = "vnish"
+                    logger.info(f"Auto-detected Vnish firmware on {m['ip']} (configured as antminer_scrypt)")
+                else:
+                    logger.warning(f"Auto-detect failed for {m['ip']}: CGMiner, BraiinsOS, and Vnish probes all unsuccessful — requires manual credential setup")
         display_name = m["name"]
         if data and display_name == m["ip"] and data.get("worker_name"):
             display_name = data["worker_name"]
-        process(display_name, data, m.get("fallback_ths", 0)*1000, m.get("watts", 3250), has_blocks=True, miner_ip=m["ip"], miner_type="antminer_scrypt")
+        process(display_name, data, m.get("fallback_ths", 0)*1000, m.get("watts", 3250), has_blocks=True, miner_ip=m["ip"], miner_type=detected_type)
     # BitAxe family (uses same AxeOS HTTP API as nmaxe)
     for m in MINERS.get("bitaxe", []):
         process(m["name"], fetch_nmaxe(m["ip"]), m.get("fallback_ths", 0)*1000 or m.get("fallback_ghs", 0), has_blocks=False, miner_ip=m["ip"], miner_type="bitaxe")
@@ -10102,7 +10264,7 @@ def calc_odds(net_phs, fleet_ths, coin=None):
     dpb = 1 / (blocks_per_day * clamped / 100) if clamped > 0 else float('inf')
     return {"share_pct": share, "daily_odds_pct": daily * 100, "weekly_odds_pct": weekly * 100, "days_per_block": dpb}
 
-# === PROFITABILITY TRACKER (v1.2.3 — NOT ACTIVE) ===
+# === PROFITABILITY TRACKER (v2.0.0 — NOT ACTIVE) ===
 # This module computes per-coin profitability rankings within each algorithm family.
 # It is NOT wired to any API endpoint or report loop yet. To activate in a future
 # release, expose compute_profitability_rankings() via a /api/profitability route.
@@ -10657,7 +10819,12 @@ def send_xmpp(embed):
     text = embed_to_xmpp_text(embed)
 
     try:
-        return asyncio.run(_xmpp_send(XMPP_JID, XMPP_PASSWORD, XMPP_RECIPIENT, text, XMPP_USE_TLS, XMPP_MUC))
+        # Use new_event_loop instead of asyncio.run() — safe from any thread
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_xmpp_send(XMPP_JID, XMPP_PASSWORD, XMPP_RECIPIENT, text, XMPP_USE_TLS, XMPP_MUC))
+        finally:
+            loop.close()
     except Exception as e:
         logger.error(f"XMPP error: {e}")
         return False
@@ -10872,7 +11039,7 @@ def _handle_telegram_command(cmd, state):
     if cmd == "/status":
         try:
             data = _http(f"{pool_url}/api/pools", timeout=8)
-            pools = data if isinstance(data, list) else []
+            pools = data.get("pools", data) if isinstance(data, dict) else (data if isinstance(data, list) else [])
             lines = ["*Pool Status*", ""]
             for p in pools:
                 symbol = _tg_escape(p.get("coin", {}).get("symbol", "?"))
@@ -10906,7 +11073,7 @@ def _handle_telegram_command(cmd, state):
     if cmd == "/hashrate":
         try:
             data = _http(f"{pool_url}/api/pools", timeout=8)
-            pools = data if isinstance(data, list) else []
+            pools = data.get("pools", data) if isinstance(data, dict) else (data if isinstance(data, list) else [])
             lines = ["*Hashrate \\& Difficulty*", ""]
             for p in pools:
                 symbol = _tg_escape(p.get("coin", {}).get("symbol", "?"))
@@ -10925,7 +11092,7 @@ def _handle_telegram_command(cmd, state):
     if cmd == "/miners":
         try:
             data = _http(f"{pool_url}/api/pools", timeout=8)
-            pools = data if isinstance(data, list) else []
+            pools = data.get("pools", data) if isinstance(data, dict) else (data if isinstance(data, list) else [])
             lines = ["*Connected Miners*", ""]
             found_any = False
             nicknames = CONFIG.get("miner_nicknames", {})
@@ -10963,7 +11130,7 @@ def _handle_telegram_command(cmd, state):
     if cmd == "/blocks":
         try:
             data = _http(f"{pool_url}/api/pools", timeout=8)
-            pools = data if isinstance(data, list) else []
+            pools = data.get("pools", data) if isinstance(data, dict) else (data if isinstance(data, list) else [])
             lines = ["*Last Blocks Found*", ""]
             found_any = False
             for p in pools:
@@ -11175,11 +11342,23 @@ class _HealthHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _send_health(self):
-        self._write_json({
+        data = {
             "alive": True,
             "uptime_s": int(time.time() - SENTINEL_START_TIME),
             "version": __version__,
-        })
+        }
+        state = _health_state_ref
+        if state is not None:
+            # Include wallet validation issues if any were found at startup
+            if hasattr(state, "wallet_issues") and state.wallet_issues:
+                data["wallet_issues"] = [
+                    {"coin": sym, "address": addr, "issue": desc}
+                    for sym, addr, desc in state.wallet_issues
+                ]
+            # Include wallet balance if known (used by export endpoints)
+            if hasattr(state, "last_wallet_balance") and state.last_wallet_balance is not None:
+                data["wallet_balance"] = state.last_wallet_balance
+        self._write_json(data)
 
     def _send_cooldowns(self):
         state = _health_state_ref
@@ -11314,8 +11493,93 @@ def send_email(embed):
     return False
 
 
+def send_webhook(embed):
+    """Send notification via generic HTTP webhook (POST JSON to any URL).
+
+    Enables integration with Zapier, Home Assistant, IFTTT, PagerDuty, custom scripts, etc.
+
+    Config keys:
+        webhook_url: Full URL to POST to (must be https:// or http://localhost)
+        webhook_headers: Optional dict of custom HTTP headers
+    """
+    config = load_config()
+    webhook_url = config.get("webhook_url", "")
+    if not webhook_url:
+        return False
+
+    # SECURITY: Only allow HTTPS or localhost HTTP
+    parsed = urllib.parse.urlparse(webhook_url)
+    if parsed.scheme == "http" and parsed.hostname not in ("localhost", "127.0.0.1"):
+        logger.warning(f"SECURITY: Rejecting non-HTTPS webhook URL: {webhook_url}")
+        return False
+    if parsed.scheme not in ("http", "https"):
+        logger.warning(f"SECURITY: Rejecting webhook URL with invalid scheme: {parsed.scheme}")
+        return False
+
+    # Build JSON payload
+    title = embed.get("title", "Alert")
+    description = embed.get("description", "")
+    fields = embed.get("fields", [])
+    color = embed.get("color")
+
+    payload = {
+        "event": "spiral_sentinel_alert",
+        "title": title,
+        "description": description,
+        "fields": [{"name": f.get("name", ""), "value": f.get("value", "")} for f in fields],
+        "color": color,
+        "timestamp": utc_ts(),
+    }
+
+    custom_headers = config.get("webhook_headers", {})
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": f"SpiralSentinel/{__version__}",
+    }
+    if isinstance(custom_headers, dict):
+        blocked = {"content-type", "host", "content-length", "transfer-encoding"}
+        for k, v in custom_headers.items():
+            if isinstance(k, str) and isinstance(v, str) and k.lower() not in blocked and '\r' not in v and '\n' not in v:
+                headers[k] = v
+
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(webhook_url, data=data, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                if resp.status < 300:
+                    return True
+                logger.warning(f"Webhook returned status {resp.status}")
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                retry_after_raw = e.headers.get("Retry-After", "5")
+                try:
+                    retry_after = int(retry_after_raw)
+                except (ValueError, TypeError):
+                    # Retry-After can be an HTTP-date — fall back to 5s
+                    retry_after = 5
+                time.sleep(min(retry_after, 30))
+                continue
+            if e.code in (400, 401, 403, 404):
+                # Non-recoverable client errors — retrying won't help
+                logger.warning(f"Webhook HTTP error {e.code}: {e.reason} — not retrying")
+                return False
+            logger.warning(f"Webhook HTTP error {e.code}: {e.reason}")
+        except (urllib.error.URLError, socket.timeout, OSError) as e:
+            if attempt < max_retries - 1:
+                time.sleep(2 * (attempt + 1))
+                continue
+            logger.error(f"Webhook error after {max_retries} attempts: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Webhook error: {e}")
+            return False
+    return False
+
+
 def send_notifications(embed):
-    """Send notification to all configured channels (Discord, Telegram, XMPP, ntfy, and/or email)
+    """Send notification to all configured channels (Discord, Telegram, XMPP, ntfy, webhook, and/or email)
 
     If all remote notifications fail on first attempt, retries once after a brief
     delay to handle transient network blips. Falls back to logging the alert
@@ -11325,16 +11589,19 @@ def send_notifications(embed):
     telegram_sent = send_telegram(embed)
     xmpp_sent     = send_xmpp(embed)
     ntfy_sent     = send_ntfy(embed)
+    webhook_sent  = send_webhook(embed)
     email_sent    = send_email(embed)
 
     # Retry once if all channels failed (transient network blips)
-    if not discord_sent and not telegram_sent and not xmpp_sent and not ntfy_sent and not email_sent:
+    any_sent = discord_sent or telegram_sent or xmpp_sent or ntfy_sent or webhook_sent or email_sent
+    if not any_sent:
         config = load_config()
         any_configured = (
             bool(config.get("discord_webhook_url")) or
             bool(config.get("telegram_bot_token") and config.get("telegram_chat_id")) or
             bool(config.get("xmpp_jid") and config.get("xmpp_recipient")) or
             bool(config.get("ntfy_url")) or
+            bool(config.get("webhook_url")) or
             bool(config.get("smtp_host") and config.get("smtp_to"))
         )
         if any_configured:
@@ -11344,19 +11611,22 @@ def send_notifications(embed):
             telegram_sent = send_telegram(embed)
             xmpp_sent     = send_xmpp(embed)
             ntfy_sent     = send_ntfy(embed)
+            webhook_sent  = send_webhook(embed)
             email_sent    = send_email(embed)
+            any_sent = discord_sent or telegram_sent or xmpp_sent or ntfy_sent or webhook_sent or email_sent
 
     # If all remote notifications failed, log locally as fallback
-    if not discord_sent and not telegram_sent and not xmpp_sent and not ntfy_sent and not email_sent:
+    if not any_sent:
         # Only log fallback if at least one channel was configured
         config = load_config()
         discord_configured  = bool(config.get("discord_webhook_url"))
         telegram_configured = bool(config.get("telegram_bot_token") and config.get("telegram_chat_id"))
         xmpp_configured     = bool(config.get("xmpp_jid") and config.get("xmpp_recipient"))
         ntfy_configured     = bool(config.get("ntfy_url"))
+        webhook_configured  = bool(config.get("webhook_url"))
         email_configured    = bool(config.get("smtp_host") and config.get("smtp_to"))
 
-        if discord_configured or telegram_configured or xmpp_configured or ntfy_configured or email_configured:
+        if discord_configured or telegram_configured or xmpp_configured or ntfy_configured or webhook_configured or email_configured:
             # Convert embed to plain text for logging
             title = embed.get("title", "Alert")
             desc = embed.get("description", "")
@@ -11385,7 +11655,7 @@ def send_notifications(embed):
             except Exception as e:
                 logger.error(f"Failed to write fallback notification: {e}")
 
-    return discord_sent or telegram_sent or xmpp_sent or ntfy_sent or email_sent
+    return any_sent
 
 def kick_stratum_session(ip):
     """Kick all stratum sessions from the given IP via the pool admin API.
@@ -12693,6 +12963,85 @@ def create_miner_online_embed(n, m, miner_ip=None, hashrate_ghs=None, temp_c=Non
     )
 
 
+def create_group_offline_embed(group_name, miner_names, ip_lookup=None):
+    """Sentinel alert: All miners in a fleet group went offline."""
+    count = len(miner_names)
+
+    miner_list = "\n".join(
+        f"  • `{get_miner_display_name(n)}`" + (f" ({ip_lookup[n]})" if ip_lookup and n in ip_lookup else "")
+        for n in miner_names[:8]
+    )
+    if count > 8:
+        miner_list += f"\n  • ... and **{count - 8}** more"
+
+    desc = f"""```diff
+- ⚠️  FLEET GROUP DOWN  ⚠️
+```
+
+🔴🔴🔴 **All {count} miners in "{group_name}" are offline**
+
+This likely indicates a location-wide issue (power outage, network failure, breaker trip).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+
+    fields = [
+        {
+            "name": f"📍 Group: {group_name}",
+            "value": f"**Miners affected:** {count}\n{miner_list}",
+            "inline": False
+        },
+        {
+            "name": "🔧 Suggested Actions",
+            "value": "• Check power at this location\n• Check network/switch at this location\n• Ping the gateway/router for this group",
+            "inline": False
+        },
+    ]
+
+    return _embed(
+        f"🔴 Fleet Group Offline: {group_name}",
+        desc,
+        COLORS["red"],
+        fields,
+        footer="Spiral Sentinel • Fleet Group Monitoring"
+    )
+
+
+def create_group_online_embed(group_name, online_miners, total_miners):
+    """Sentinel alert: Fleet group recovered — at least one miner back online."""
+    online_count = len(online_miners)
+    total_count = len(total_miners)
+
+    miner_list = "\n".join(
+        f"  • `{get_miner_display_name(n)}`" for n in online_miners[:8]
+    )
+    if online_count > 8:
+        miner_list += f"\n  • ... and **{online_count - 8}** more"
+
+    desc = f"""```diff
++ ✅  FLEET GROUP RECOVERED  ✅
+```
+
+✨ **"{group_name}"** is back online ({online_count}/{total_count} miners)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+
+    fields = [
+        {
+            "name": f"📍 Group: {group_name}",
+            "value": f"**Online:** {online_count}/{total_count}\n{miner_list}",
+            "inline": False
+        },
+    ]
+
+    return _embed(
+        f"🟢 Fleet Group Online: {group_name}",
+        desc,
+        COLORS["green"],
+        fields,
+        footer="Spiral Sentinel • Fleet Group Monitoring"
+    )
+
+
 def create_restart_embed(n, m, ok):
     """Sentinel alert: Auto-restart triggered - Enhanced feedback"""
     display_name = get_miner_display_name(n)
@@ -13656,6 +14005,38 @@ def create_stratum_url_mismatch_embed(name, expected_url, actual_url):
     ]
 
     return _embed(theme("url_mismatch.title"), desc, COLORS["red"], fields, footer=theme("url_mismatch.footer"))
+
+
+def create_wallet_mismatch_embed(issues):
+    """Sentinel alert: Configured wallet address not recognized by the node.
+
+    Args:
+        issues: List of (symbol, address, issue_description) tuples
+    """
+    issue_lines = "\n".join(
+        f"**{symbol}**: `{address}`\n  ⚠️ {desc}"
+        for symbol, address, desc in issues
+    )
+
+    desc = f"""🔴 **Wallet address validation failed at startup**
+
+The following wallet addresses may not be configured correctly:
+
+{issue_lines}
+
+**This means block rewards may go to the wrong address or be unrecoverable.**
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+
+    fields = [
+        {
+            "name": "🔧 Action Required",
+            "value": "• Verify the wallet address in your Sentinel config\n• Confirm the address exists in the node's wallet (`bitcoin-cli validateaddress <addr>`)\n• For watch-only wallets, import the address first\n• Re-run install.sh to reconfigure if needed",
+            "inline": False
+        },
+    ]
+
+    return _embed("🚨 Wallet Address Mismatch", desc, COLORS["red"], fields)
 
 
 def create_hashboard_dead_embed(name, chain_hashrates, dead_chains):
@@ -15301,6 +15682,7 @@ class MonitorState:
         # This works for ALL miners (including nmaxe, nerdqaxe, avalon, hammer, axeos)
         # since the pool knows when any worker finds a block.
         self.seen_pool_block_hashes = set()  # Set of block hashes we've already processed
+        self._pool_block_detection_initialized = False  # True after first check_pool_for_new_blocks call
 
         # ═══════════════════════════════════════════════════════════════════════════════
         # SATS SURGE TRACKING - Alert when coin/BTC sat value increases significantly
@@ -15366,6 +15748,8 @@ class MonitorState:
         self.wallet_balance_last_check = 0     # Timestamp of last wallet balance check
         self.missing_payout_alerted = False    # Cleared when balance changes
         self.payout_deferred_from_quiet = False # True when payout alert was suppressed by quiet hours
+        self.wallet_issues = []               # List of (symbol, address, issue) from startup validation
+        # Auto fan control state
         self.previous_month_earnings = {}      # Snapshot of last month's final earnings totals
         self.revenue_decline_alerted = False   # Cleared each new month
 
@@ -15395,6 +15779,8 @@ class MonitorState:
             # Convert list back to set for pool block tracking
             if isinstance(self.seen_pool_block_hashes, list):
                 self.seen_pool_block_hashes = set(self.seen_pool_block_hashes)
+            # If state.json exists, pool block detection was already initialized in a prior run
+            self._pool_block_detection_initialized = True
             # Migrate earnings dict: ensure keys exist for all current coins.
             # Old state.json may lack keys for coins added after it was saved.
             for _coin in SUPPORTED_COIN_SYMBOLS:
@@ -15720,6 +16106,8 @@ class MonitorState:
         type_info = {
             "miner_offline": ("🔴", "Miners Offline", "Multiple miners went offline"),
             "miner_online": ("🟢", "Miners Online", "Multiple miners came back online"),
+            "group_offline": ("🔴", "Fleet Group Offline", "All miners in a group went offline"),
+            "group_online": ("🟢", "Fleet Group Online", "Fleet group miners back online"),
             "miner_reboot": ("🔄", "Miners Rebooted", "Multiple miners rebooted"),
             "temp_warning": ("🌡️", "Temperature Warnings", "Multiple miners have high temperatures"),
             "temp_critical": ("🔥", "CRITICAL Temperatures", "Multiple miners at critical temps!"),
@@ -15764,9 +16152,11 @@ class MonitorState:
         # Determine color based on severity
         color_map = {
             "miner_offline": COLORS["red"],
+            "group_offline": COLORS["red"],
             "temp_critical": COLORS["red"],
             "zombie_miner": COLORS["red"],
             "miner_online": COLORS["green"],
+            "group_online": COLORS["green"],
             "miner_reboot": COLORS["yellow"],
             "temp_warning": COLORS["yellow"],
             "degradation": COLORS["orange"],
@@ -16394,10 +16784,17 @@ class MonitorState:
             # Fetch recent blocks from pool API
             pool_blocks = fetch_pool_blocks(limit=20, pool_id=pool_id)
             if not pool_blocks:
+                # Mark as initialized even if no blocks exist yet, so the
+                # first block found later is treated as new (not fresh-start seeded).
+                self._pool_block_detection_initialized = True
                 return []
 
             wallet = CONFIG.get("wallet_address", "")
-            _fresh_start = len(self.seen_pool_block_hashes) == 0
+            # Fresh start: only True on genuine first run (no state.json) AND before
+            # the first call completes. Previously this used len(seen_pool_block_hashes)==0,
+            # which stayed True indefinitely if no blocks existed at startup — causing
+            # the FIRST block ever found to be silently seeded instead of alerted.
+            _fresh_start = not self._pool_block_detection_initialized
 
             for block in pool_blocks:
                 block_hash = block.get("hash", "")
@@ -16411,8 +16808,8 @@ class MonitorState:
                 # On fresh state (state.json lost or first run), seed ALL existing blocks
                 # as seen without alerting. We have no record of what was already alerted,
                 # so re-alerting anything risks duplicates. Normal restarts with intact
-                # state.json have seen_pool_block_hashes populated (fresh_start=False) and
-                # handle missed blocks correctly via the normal path below.
+                # state.json have _pool_block_detection_initialized=True (from state load)
+                # and handle missed blocks correctly via the normal path below.
                 if _fresh_start:
                     self.seen_pool_block_hashes.add(block_hash)
                     # Initialize pool_blocks_found counter from existing blocks so the
@@ -16481,6 +16878,11 @@ class MonitorState:
 
         except Exception as e:
             logger.debug(f"check_pool_for_new_blocks error: {e}")
+
+        # Mark detection as initialized after first successful call.
+        # This ensures fresh-start seeding only happens on the very first call
+        # when state.json is missing, not on every call until a block appears.
+        self._pool_block_detection_initialized = True
 
         return new_blocks
 
@@ -17737,6 +18139,18 @@ def monitor_loop(state):
     except Exception as _e:
         logger.debug(f"Config warning check error (non-critical): {_e}")
 
+    # ── Wallet address validation (fire once at startup) ──────────────────────────
+    try:
+        wallet_issues = validate_wallet_addresses()
+        state.wallet_issues = wallet_issues  # Expose to health endpoint for dashboard banner
+        if wallet_issues:
+            logger.warning(f"WALLET MISMATCH: {len(wallet_issues)} address issue(s) found at startup")
+            for symbol, addr, desc in wallet_issues:
+                logger.warning(f"  {symbol}: {addr} — {desc}")
+            send_notifications(create_wallet_mismatch_embed(wallet_issues))
+    except Exception as _e:
+        logger.debug(f"Wallet validation check error (non-critical): {_e}")
+
     # ═══════════════════════════════════════════════════════════════════════════════
     # BLOCK RECOVERY — Detect blocks found while Sentinel was offline
     # ═══════════════════════════════════════════════════════════════════════════════
@@ -18945,6 +19359,44 @@ def monitor_loop(state):
                         # Miner was never offline - clear any stale hysteresis timer
                         state.miner_stable_online_since.pop(name, None)
 
+            # Fleet group offline/online alerting
+            # Detects when ALL miners in a user-defined group go offline (location outage)
+            # and sends a single group alert instead of individual miner alerts
+            miner_groups = load_miner_groups()
+            for group_name, group_data in miner_groups.items():
+                resolved = _resolve_group_miners(group_data, miner_status, _miner_ip_lookup)
+                if len(resolved) < 2:
+                    continue  # Skip groups with 0-1 resolved miners (no point in group alerting)
+
+                all_offline = all(miner_status.get(n) == "offline" for n in resolved)
+                group_alert_key = f"group_offline:{group_name}"
+
+                if all_offline:
+                    # Check if all have been offline past threshold
+                    all_past_threshold = all(
+                        n in state.miner_offline_since and
+                        (time.time() - state.miner_offline_since[n]) / 60 >= MINER_OFFLINE_TH
+                        for n in resolved
+                    )
+                    if all_past_threshold and group_alert_key not in state.miner_offline_alert_sent:
+                        # Suppress individual alerts for these miners (they're covered by the group alert)
+                        for n in resolved:
+                            state.miner_offline_alert_sent[n] = True
+                        send_alert("group_offline",
+                            create_group_offline_embed(group_name, resolved, ip_lookup=_miner_ip_lookup),
+                            state, miner_name=group_name)
+                        state.miner_offline_alert_sent[group_alert_key] = True
+                        logger.info(f"GROUP OFFLINE: All {len(resolved)} miners in '{sanitize_log_input(group_name)}' are offline")
+                else:
+                    # Group recovered — at least one miner is back online
+                    if group_alert_key in state.miner_offline_alert_sent:
+                        online_miners = [n for n in resolved if miner_status.get(n) != "offline"]
+                        send_alert("group_online",
+                            create_group_online_embed(group_name, online_miners, resolved),
+                            state, miner_name=group_name)
+                        del state.miner_offline_alert_sent[group_alert_key]
+                        logger.info(f"GROUP ONLINE: '{sanitize_log_input(group_name)}' recovered ({len(online_miners)}/{len(resolved)} online)")
+
             # Temp alerts (skip Avalon devices - they are personal heaters, high temps expected)
             # Enhanced with thermal protection: emergency_stop_axeos at TEMP_EMERGENCY or sustained TEMP_CRIT
             for name, td in temps.items():
@@ -19050,7 +19502,7 @@ def monitor_loop(state):
                                 last_alert = state.last_alerts.get(alert_key, 0)
                                 if (current_time - last_alert) >= ALERT_COOLDOWNS.get("stratum_url_mismatch", 0):
                                     send_alert("stratum_url_mismatch", create_stratum_url_mismatch_embed(
-                                        name, list(expected_pool_urls)[0] if expected_pool_urls else "unknown", pool
+                                        name, CONFIG.get("pool_url", "unknown"), pool
                                     ), state, miner_name=name)
                                     state.last_alerts[alert_key] = current_time
                                     state.url_mismatch_alerted[name] = pool_normalized  # Store URL, not True
