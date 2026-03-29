@@ -382,7 +382,7 @@ foreach ($port in $selectedPorts) {
         try {
             New-NetFirewallRule -DisplayName $ruleName `
                 -Direction Inbound -Protocol TCP -LocalPort $port `
-                -Action Allow -Profile Any | Out-Null
+                -Action Allow -Profile "Private,Domain" | Out-Null
             Write-Host "  +  Firewall: allowed TCP $port (inbound)" -ForegroundColor Green
         } catch {
             Write-Host ("  [!] Firewall rule failed for port {0}: {1}" -f $port, $_) -ForegroundColor Yellow

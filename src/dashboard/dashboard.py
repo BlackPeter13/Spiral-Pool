@@ -331,9 +331,19 @@ def admin_required(f):
 
 # Session configuration
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=SESSION_LIFETIME_HOURS)
-# SECURITY: Secure cookies require HTTPS. Default to false for local network deployments.
-# Set DASHBOARD_SECURE_COOKIES=true if running behind HTTPS reverse proxy.
-app.config['SESSION_COOKIE_SECURE'] = os.environ.get("DASHBOARD_SECURE_COOKIES", "false").lower() == "true"
+# SECURITY: Secure cookies require HTTPS. Auto-detect from systemd service file,
+# or override via DASHBOARD_SECURE_COOKIES env var for reverse proxy setups.
+_secure_cookie_env = os.environ.get("DASHBOARD_SECURE_COOKIES", "").lower()
+if _secure_cookie_env in ("true", "false"):
+    _secure_cookies = _secure_cookie_env == "true"
+else:
+    # Auto-detect: check if spiraldash.service ExecStart has --certfile (HTTPS enabled)
+    # Match only ExecStart line — template comments may also mention certfile
+    try:
+        _secure_cookies = any("--certfile" in line for line in Path("/etc/systemd/system/spiraldash.service").read_text().splitlines() if line.strip().startswith("ExecStart"))
+    except Exception:
+        _secure_cookies = False
+app.config['SESSION_COOKIE_SECURE'] = _secure_cookies
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 # SECURITY: Use 'Strict' to ensure session cookies are sent on same-origin POST requests via fetch/XHR.
 # 'Lax' can cause issues where browsers don't include cookies on JavaScript-initiated POST requests.
@@ -11731,6 +11741,9 @@ def start_node(symbol):
 # MANAGEMENT TAB — Service Control, Log Viewer, System Updates
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# Wrapper that escapes ProtectSystem=strict via systemd-run --pipe
+_apt_wrapper = '/spiralpool/scripts/apt-noninteractive.sh'
+
 # Whitelist of pool services that can be controlled from the dashboard
 ALLOWED_SERVICES = {
     "spiralstratum",
@@ -11924,11 +11937,10 @@ def refresh_system_updates():
 
     try:
         result = subprocess.run(
-            ['sudo', 'apt-get', 'update', '-qq'],
+            ['sudo', _apt_wrapper, 'update', '-qq'],
             capture_output=True,
             text=True,
-            timeout=120,
-            env={**os.environ, 'DEBIAN_FRONTEND': 'noninteractive'}
+            timeout=120
         )
         if result.returncode == 0:
             app.logger.info(f"Package lists refreshed by {client_ip}")
@@ -11946,7 +11958,7 @@ def refresh_system_updates():
 @app.route('/api/system/updates/apply', methods=['POST'])
 @admin_required
 def apply_system_updates():
-    """Apply available system package updates (apt-get upgrade)"""
+    """Apply available system package updates (apt-get dist-upgrade)"""
     import subprocess
 
     client_ip = request.remote_addr or "unknown"
@@ -11954,24 +11966,63 @@ def apply_system_updates():
         return jsonify({"success": False, "error": "Rate limit exceeded"}), 429
 
     try:
+        # Refresh package cache first — stale cache is a common cause of
+        # dist-upgrade failures, especially on freshly installed systems.
+        subprocess.run(
+            ['sudo', _apt_wrapper, 'update', '-qq'],
+            capture_output=True, text=True, timeout=120
+        )
         result = subprocess.run(
-            ['sudo', 'apt-get', 'upgrade', '-y', '-qq'],
+            ['sudo', _apt_wrapper, 'dist-upgrade', '-y', '-qq',
+             '-o', 'Dpkg::Options::=--force-confold',
+             '-o', 'Dpkg::Options::=--force-confdef'],
             capture_output=True,
             text=True,
-            timeout=600,  # 10 min max for upgrades
-            env={**os.environ, 'DEBIAN_FRONTEND': 'noninteractive'}
+            timeout=600  # 10 min max for upgrades
         )
         if result.returncode == 0:
             app.logger.info(f"System packages upgraded by {client_ip}")
             record_activity("system_update", "System packages upgraded")
             return jsonify({"success": True, "message": "Packages upgraded successfully"})
         else:
-            app.logger.warning(f"Package upgrade failed for {client_ip}: {result.stderr[:200]}")
-            return jsonify({"success": False, "error": "apt-get upgrade failed. Check system logs."})
+            stderr_msg = (result.stderr or result.stdout or "").strip()
+            app.logger.warning(f"Package upgrade failed for {client_ip}: {stderr_msg[:300]}")
+            return jsonify({"success": False, "error": f"apt-get dist-upgrade failed: {stderr_msg[:200]}"})
     except subprocess.TimeoutExpired:
         return jsonify({"success": False, "error": "Upgrade timed out (10 min limit)"})
     except FileNotFoundError:
         return jsonify({"success": False, "error": "apt-get not available"})
+
+
+@app.route('/api/system/reboot', methods=['POST'])
+@admin_required
+def reboot_system():
+    """Gracefully reboot the system (systemctl reboot stops all services first)"""
+    import subprocess
+
+    client_ip = request.remote_addr or "unknown"
+    if not check_rate_limit(client_ip, "system_reboot"):
+        return jsonify({"success": False, "error": "Rate limit exceeded"}), 429
+
+    try:
+        app.logger.warning(f"System reboot initiated by {client_ip}")
+        record_activity("system_reboot", f"System reboot initiated by {client_ip}")
+        result = subprocess.run(
+            ['sudo', '/bin/systemctl', '--no-block', 'reboot'],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            return jsonify({"success": True, "message": "System is rebooting..."})
+        else:
+            return jsonify({"success": False, "error": f"Reboot failed: {result.stderr[:200]}"})
+    except subprocess.TimeoutExpired:
+        # Reboot may have already started, killing our process
+        return jsonify({"success": True, "message": "System is rebooting..."})
+    except Exception as e:
+        app.logger.error(f"Reboot error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)[:200]})
 
 
 @app.route('/api/system/pool-upgrade/check', methods=['GET'])
@@ -11982,7 +12033,7 @@ def check_pool_upgrade():
 
     try:
         result = subprocess.run(
-            ['sudo', '/spiralpool/scripts/upgrade.sh', '--check'],
+            ['sudo', f'{os.environ.get("SPIRALPOOL_INSTALL_DIR", "/spiralpool")}/upgrade.sh', '--check'],
             capture_output=True,
             text=True,
             timeout=30
@@ -12027,7 +12078,7 @@ def apply_pool_upgrade():
     try:
         # Run upgrade.sh --auto in background — it will restart services itself
         result = subprocess.run(
-            ['sudo', '/spiralpool/scripts/upgrade.sh', '--auto'],
+            ['sudo', f'{os.environ.get("SPIRALPOOL_INSTALL_DIR", "/spiralpool")}/upgrade.sh', '--auto'],
             capture_output=True,
             text=True,
             timeout=300  # 5 min max
@@ -12050,7 +12101,100 @@ def apply_pool_upgrade():
     except subprocess.TimeoutExpired:
         return jsonify({"success": False, "error": "Upgrade timed out (5 min limit)"})
     except FileNotFoundError:
-        return jsonify({"success": False, "error": "upgrade.sh not found at /spiralpool/scripts/upgrade.sh"})
+        return jsonify({"success": False, "error": "upgrade.sh not found"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route('/api/system/https/status', methods=['GET'])
+@api_key_or_login_required
+def get_https_status():
+    """Check if HTTPS is enabled and if a TLS certificate exists"""
+    install_dir = os.environ.get("SPIRALPOOL_INSTALL_DIR", "/spiralpool")
+    cert_file = Path(install_dir) / "certs" / "dashboard.crt"
+    key_file = Path(install_dir) / "certs" / "dashboard.key"
+    service_file = Path("/etc/systemd/system/spiraldash.service")
+
+    https_enabled = False
+    if service_file.is_file():
+        try:
+            content = service_file.read_text()
+            https_enabled = any("--certfile" in line for line in content.splitlines() if line.strip().startswith("ExecStart"))
+        except Exception:
+            pass
+
+    cert_exists = cert_file.is_file() and key_file.is_file()
+
+    # Get cert expiry if it exists
+    cert_expiry = None
+    if cert_exists:
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["openssl", "x509", "-enddate", "-noout", "-in", str(cert_file)],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                cert_expiry = result.stdout.strip().replace("notAfter=", "")
+        except Exception:
+            pass
+
+    return jsonify({
+        "success": True,
+        "https_enabled": https_enabled,
+        "cert_exists": cert_exists,
+        "cert_expiry": cert_expiry,
+        "current_protocol": "https" if request.is_secure else "http"
+    })
+
+
+@app.route('/api/system/https/enable', methods=['POST'])
+@admin_required
+def enable_https():
+    """Enable HTTPS on the dashboard by running enable-https.sh"""
+    import subprocess
+
+    client_ip = request.remote_addr or "unknown"
+    if not check_rate_limit(client_ip, "enable_https"):
+        return jsonify({"success": False, "error": "Rate limit exceeded"}), 429
+
+    install_dir = os.environ.get("SPIRALPOOL_INSTALL_DIR", "/spiralpool")
+    script = f"{install_dir}/scripts/enable-https.sh"
+
+    # Check cert exists first
+    cert_file = Path(install_dir) / "certs" / "dashboard.crt"
+    if not cert_file.is_file():
+        return jsonify({
+            "success": False,
+            "error": "TLS certificate not found. Run upgrade.sh first to generate the certificate."
+        })
+
+    try:
+        # enable-https.sh patches the service file synchronously (so we get the real
+        # exit code), then spawns a background delayed restart (3 seconds). This gives
+        # us time to send the HTTP response before gunicorn gets killed.
+        result = subprocess.run(
+            ["sudo", script],
+            capture_output=True,
+            text=True,
+            timeout=15
+        )
+        if result.returncode == 0:
+            app.logger.info(f"HTTPS enabled by {client_ip}")
+            record_activity("https_enabled", "Dashboard HTTPS enabled from Management tab")
+            return jsonify({
+                "success": True,
+                "message": "HTTPS enabled. The dashboard will restart in a few seconds. Reconnect using https:// on the same port. Your browser will show a certificate warning — accept it to continue."
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": result.stderr.strip() if result.stderr else "enable-https.sh failed"
+            })
+    except FileNotFoundError:
+        return jsonify({"success": False, "error": f"Script not found: {script}. Run upgrade.sh first."})
+    except subprocess.TimeoutExpired:
+        return jsonify({"success": False, "error": "Timed out enabling HTTPS"})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
@@ -13006,6 +13150,8 @@ def check_enhanced_alerts():
             if not is_avalon_ui:
                 temps = miner.get("temps", {})
                 for temp_type, temp_value in temps.items():
+                    if not isinstance(temp_value, (int, float)):
+                        continue  # Skip non-scalar values (e.g. Goldshell all_temps list)
                     if temp_value >= alert_config.get("temp_critical", 80):
                         alert = {
                             "type": "temperature_critical",
@@ -18362,7 +18508,11 @@ def get_luck_overview():
             "blocks_found": luck_tracker["blocks_found"],
             "blocks_expected": luck_tracker["blocks_expected"]
         },
-        "history": luck_tracker["luck_history"][-24:],  # Last 24 hours
+        "history": luck_tracker["luck_history"],  # Full history (up to 720 hourly samples)
+        "hashrate": {
+            "pool_hps": pool_stats_cache.get("pool_hashrate", 0),
+            "network_hps": pool_stats_cache.get("node_networkhashps", 0)
+        },
         "note": "Luck >100% means you're finding more blocks than expected. Mining is random - short-term luck varies greatly!"
     })
 

@@ -30,6 +30,9 @@
     "chart-network-hashrate": "#c47a50",
     "chart-difficulty": "#8b5e3c",
     "chart-workers": "#6b8a4e",
+    "chart-blocks-actual": "#deb070",
+    "chart-blocks-expected": "#d4956a",
+    "chart-hashrate-pool-share": "#d4956a",
     "chart-blocks-found": "#d4a020",
     "chart-shares-rate": "#6b8a4e"
   },

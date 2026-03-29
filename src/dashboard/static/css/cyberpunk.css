@@ -51,6 +51,9 @@
     --chart-workers: var(--neon-green);
     --chart-blocks-found: var(--neon-yellow);
     --chart-shares-rate: var(--neon-green);
+    --chart-blocks-actual: var(--neon-yellow);
+    --chart-blocks-expected: var(--neon-cyan);
+    --chart-hashrate-pool-share: var(--neon-cyan);
 
     /* Fonts */
     --font-display: 'Orbitron', sans-serif;

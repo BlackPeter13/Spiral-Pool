@@ -273,8 +273,8 @@ AUTO_MODE=false
 UPDATE_STRATUM=true
 UPDATE_DASHBOARD=true
 UPDATE_SENTINEL=true
-UPDATE_SERVICES=false
-FIX_CONFIG=false
+UPDATE_SERVICES=true
+FIX_CONFIG=true
 SKIP_START=false
 
 # Track what services were running before upgrade
@@ -293,12 +293,67 @@ fi
 # Helper Functions
 # =============================================================================
 
-# WSL2 pre-flight checks: warn about clock drift and memory pressure
+# Docker deployment detection: upgrade.sh only supports native (non-Docker) installs.
+# Docker deployments should rebuild images with: docker compose build --no-cache
+docker_deployment_check() {
+    # Check 1: Running inside a Docker container
+    if [[ -f /.dockerenv ]] || grep -q 'docker\|containerd' /proc/1/cgroup 2>/dev/null; then
+        log_error "This script is running inside a Docker container."
+        log_error "Docker deployments do not use upgrade.sh."
+        log_error ""
+        log_error "To upgrade a Docker deployment:"
+        log_error "  1. cd /path/to/spiral-pool/docker"
+        log_error "  2. git pull                              # get latest source"
+        log_error "  3. docker compose --profile <coin> build --no-cache"
+        log_error "  4. docker compose --profile <coin> up -d"
+        log_error ""
+        log_error "Database migrations run automatically on container start."
+        return 1
+    fi
+
+    # Check 2: Running on host but Docker containers are the active deployment
+    if command -v docker &>/dev/null && docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^spiralpool-'; then
+        log_warn "Spiral Pool Docker containers are running (spiralpool-*)."
+        log_warn "upgrade.sh upgrades native installations, not Docker deployments."
+        log_warn ""
+        log_warn "To upgrade Docker: cd docker/ && docker compose --profile <coin> build --no-cache && docker compose --profile <coin> up -d"
+        log_warn ""
+        if [[ "$AUTO_MODE" != "true" ]] && [[ -t 0 ]]; then
+            read -p "  Continue with native upgrade anyway? [y/N]: " cont
+            if [[ "${cont,,}" != "y" ]]; then
+                log_info "Aborted."
+                return 1
+            fi
+        fi
+    fi
+    return 0
+}
+
+# WSL2 pre-flight checks: warn about clock drift, memory pressure, and missing systemd
 # that can cause daemon sync failures and OOM crashes after upgrade.
 wsl2_preflight_checks() {
     [[ "$IS_WSL2" != "true" ]] && return 0
 
     log_info "WSL2 environment detected — running pre-flight checks..."
+
+    # systemd check: services won't restart after upgrade if systemd is disabled.
+    # install.sh checks this during setup but upgrade.sh didn't — if the user
+    # reinstalled WSL2 or reset wsl.conf, systemd could be missing.
+    local systemd_ok=true
+    if ! pidof systemd &>/dev/null; then
+        systemd_ok=false
+        log_warn "systemd is NOT running — service restarts after upgrade will fail"
+        if [[ -f /etc/wsl.conf ]] && grep -q 'systemd[[:space:]]*=[[:space:]]*true' /etc/wsl.conf 2>/dev/null; then
+            log_warn "  /etc/wsl.conf has systemd=true but systemd is not active."
+            log_warn "  Fix: from Windows PowerShell run 'wsl --shutdown' then reopen Ubuntu."
+        else
+            log_warn "  Enable systemd in /etc/wsl.conf:"
+            log_warn "    [boot]"
+            log_warn "    systemd=true"
+            log_warn "  Then: wsl --shutdown (from Windows PowerShell) and reopen Ubuntu."
+        fi
+    fi
+    [[ "$systemd_ok" == "true" ]] && log_info "  systemd: OK"
 
     # Clock drift check: WSL2 clock can drift after Windows sleep/hibernate.
     # Daemons reject peers and blocks with timestamps too far from local clock.
@@ -321,6 +376,10 @@ wsl2_preflight_checks() {
             log_warn "WSL2 clock may be drifted (NTP not synchronized)"
             log_warn "Fix: sudo hwclock -s"
         fi
+    else
+        drift_ok=false
+        log_warn "Cannot check WSL2 clock drift (ntpdate and timedatectl not found)"
+        log_warn "Install: sudo apt install ntpdate   then:  sudo ntpdate pool.ntp.org"
     fi
     [[ "$drift_ok" == "true" ]] && log_info "  Clock drift: OK"
 
@@ -2562,7 +2621,14 @@ generate_dashboard_cert() {
     mkdir -p "$CERT_DIR"
 
     # Build Subject Alternative Names (SANs) for LAN access
-    local san_entries="DNS:localhost,DNS:$(hostname)"
+    local short_host fqdn_host
+    short_host="$(hostname)"
+    fqdn_host="$(hostname -f 2>/dev/null || echo "$short_host")"
+    local san_entries="DNS:localhost,DNS:${short_host}"
+    # Add FQDN if it differs from short hostname (domain-joined machines)
+    if [[ "$fqdn_host" != "$short_host" ]] && [[ -n "$fqdn_host" ]]; then
+        san_entries="${san_entries},DNS:${fqdn_host}"
+    fi
     local lan_ips
     lan_ips=$(ip -4 addr show 2>/dev/null | grep -oP 'inet \K[0-9.]+' | grep -v '^127\.' || hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^$' || true)
     for ip in $lan_ips; do
@@ -2571,21 +2637,23 @@ generate_dashboard_cert() {
     san_entries="${san_entries},IP:127.0.0.1"
 
     log_info "Generating self-signed TLS certificate for dashboard..."
-    openssl req -x509 \
-        -newkey rsa:2048 \
+    # ECDSA P-256: modern standard, faster handshakes, stronger than RSA-2048
+    # Wrapped in if-block: bare openssl under set -e would abort the entire script
+    # on failure (e.g., old OpenSSL lacking -addext or EC support). We want graceful
+    # fallback to HTTP instead.
+    if openssl req -x509 \
+        -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
         -keyout "$KEY_FILE" \
         -out "$CERT_FILE" \
         -sha256 \
         -days 3650 \
         -nodes \
-        -subj "/O=Spiral Pool/CN=$(hostname)" \
+        -subj "/O=Spiral Pool/CN=${short_host}" \
         -addext "subjectAltName=${san_entries}" \
-        -addext "basicConstraints=CA:FALSE" \
-        -addext "keyUsage=digitalSignature,keyEncipherment" \
+        -addext "basicConstraints=critical,CA:FALSE" \
+        -addext "keyUsage=critical,digitalSignature" \
         -addext "extendedKeyUsage=serverAuth" \
-        2>/dev/null
-
-    if [[ $? -eq 0 ]] && [[ -f "$CERT_FILE" ]]; then
+        2>/dev/null && [[ -f "$CERT_FILE" ]]; then
         chown "${POOL_USER}:${POOL_USER}" "$CERT_FILE" "$KEY_FILE"
         chmod 640 "$KEY_FILE"
         chmod 644 "$CERT_FILE"
@@ -2596,35 +2664,42 @@ generate_dashboard_cert() {
     fi
 }
 
-# Migrate existing HTTP-only dashboard to HTTPS
+# Pre-generate TLS certificate for dashboard HTTPS (opt-in via dashboard UI)
+# On upgrades: generates the cert but does NOT switch gunicorn to HTTPS.
+# The user enables HTTPS from the Management tab when ready, avoiding
+# broken bookmarks and unexpected cert warnings on existing installs.
+# Fresh installs (install.sh) enable HTTPS from day one.
 migrate_dashboard_https() {
     local SERVICE_FILE="/etc/systemd/system/spiraldash.service"
     [[ ! -f "$SERVICE_FILE" ]] && return
 
-    # Check if the service already uses HTTPS
-    if grep -q "certfile" "$SERVICE_FILE" 2>/dev/null; then
-        return  # Already HTTPS
-    fi
-
-    # Generate cert if missing
-    if ! generate_dashboard_cert; then
-        log_warn "Skipping HTTPS migration — cert generation failed"
+    # Check if the service already uses HTTPS — nothing to do
+    # Match "--certfile" not bare "certfile" to avoid matching template comments
+    if grep -q "^ExecStart.*\-\-certfile" "$SERVICE_FILE" 2>/dev/null; then
         return
     fi
 
-    log_info "Migrating dashboard to HTTPS..."
-
-    # Add --certfile and --keyfile to ExecStart line
-    sed -i "s|ExecStart=\(.*gunicorn\) --bind|ExecStart=\1 --bind|" "$SERVICE_FILE"
-    sed -i "s|--bind \([^ ]*\)|--bind \1 --certfile=${INSTALL_DIR}/certs/dashboard.crt --keyfile=${INSTALL_DIR}/certs/dashboard.key|" "$SERVICE_FILE"
-
-    # Add /certs to ReadWritePaths if not already there
-    if ! grep -q "certs" "$SERVICE_FILE" 2>/dev/null; then
-        sed -i "s|ReadWritePaths=\(.*\)|ReadWritePaths=\1 ${INSTALL_DIR}/certs|" "$SERVICE_FILE"
+    # Generate cert so it's ready when the user opts in via the dashboard
+    if generate_dashboard_cert; then
+        log_success "TLS certificate ready — enable HTTPS from the dashboard Management tab"
     fi
 
-    systemctl daemon-reload 2>/dev/null || true
-    log_success "Dashboard migrated to HTTPS"
+    # Deploy the enable-https script if not already present
+    local HTTPS_SCRIPT="$INSTALL_DIR/scripts/enable-https.sh"
+    if [[ ! -f "$HTTPS_SCRIPT" ]] || ! cmp -s "$PROJECT_ROOT/scripts/linux/enable-https.sh" "$HTTPS_SCRIPT" 2>/dev/null; then
+        cp "$PROJECT_ROOT/scripts/linux/enable-https.sh" "$HTTPS_SCRIPT" 2>/dev/null || true
+        chmod 755 "$HTTPS_SCRIPT" 2>/dev/null || true
+        chown root:root "$HTTPS_SCRIPT" 2>/dev/null || true
+    fi
+
+    # Deploy the apt-noninteractive wrapper (runs apt-get via systemd-run --pipe
+    # to escape spiraldash's ProtectSystem=strict mount namespace)
+    local APT_WRAPPER="$INSTALL_DIR/scripts/apt-noninteractive.sh"
+    if [[ ! -f "$APT_WRAPPER" ]] || ! cmp -s "$PROJECT_ROOT/scripts/linux/apt-noninteractive.sh" "$APT_WRAPPER" 2>/dev/null; then
+        cp "$PROJECT_ROOT/scripts/linux/apt-noninteractive.sh" "$APT_WRAPPER" 2>/dev/null || true
+        chmod 755 "$APT_WRAPPER" 2>/dev/null || true
+        chown root:root "$APT_WRAPPER" 2>/dev/null || true
+    fi
 }
 
 update_dashboard() {
@@ -2785,14 +2860,20 @@ $POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl restart qbitxd
 # Dashboard validates service names against ALLOWED_SERVICES whitelist before invoking
 $POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/journalctl *
 
-# System package updates - apt-get update/upgrade from dashboard
-$POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/apt-get *
+# System package updates - wrapper sets DEBIAN_FRONTEND and escapes ProtectSystem namespace
+$POOL_USER ALL=(ALL) NOPASSWD: ${INSTALL_DIR}/scripts/apt-noninteractive.sh *
 
 # Auto-update: update-checker.sh runs as spiraluser via cron, needs sudo for upgrade
 $POOL_USER ALL=(ALL) NOPASSWD: ${INSTALL_DIR}/upgrade.sh *
 
 # Database health check - allow psql as postgres user
 $POOL_USER ALL=(postgres) NOPASSWD: /usr/bin/psql -c SELECT\ 1
+
+# Enable HTTPS - dashboard UI can activate TLS via enable-https.sh
+$POOL_USER ALL=(ALL) NOPASSWD: ${INSTALL_DIR}/scripts/enable-https.sh
+
+# System reboot - dashboard UI can gracefully restart the machine
+$POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl --no-block reboot
 SUDOERS_EOF
         chmod 440 "$DASH_SUDOERS"
         chown root:root "$DASH_SUDOERS"
@@ -2815,12 +2896,12 @@ $POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/journalctl *
 SUDOERS_APPEND
             sudoers_changed=true
         fi
-        if ! grep -q "apt-get" "$DASH_SUDOERS" 2>/dev/null; then
+        if ! grep -q "apt-noninteractive" "$DASH_SUDOERS" 2>/dev/null; then
             log_info "  - Adding system update permissions (v2.0)..."
             cat >> "$DASH_SUDOERS" << SUDOERS_APPEND
 
-# System package updates - apt-get update/upgrade from dashboard (v2.0)
-$POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/apt-get *
+# System package updates - wrapper sets DEBIAN_FRONTEND and escapes ProtectSystem namespace (v2.0)
+$POOL_USER ALL=(ALL) NOPASSWD: ${INSTALL_DIR}/scripts/apt-noninteractive.sh *
 SUDOERS_APPEND
             sudoers_changed=true
         fi
@@ -2839,6 +2920,24 @@ SUDOERS_APPEND
 
 # Database health check - allow psql as postgres user (v2.0)
 $POOL_USER ALL=(postgres) NOPASSWD: /usr/bin/psql -c SELECT\ 1
+SUDOERS_APPEND
+            sudoers_changed=true
+        fi
+        if ! grep -q "enable-https" "$DASH_SUDOERS" 2>/dev/null; then
+            log_info "  - Adding HTTPS enable permissions (v2.0)..."
+            cat >> "$DASH_SUDOERS" << SUDOERS_APPEND
+
+# Enable HTTPS - dashboard UI can activate TLS via enable-https.sh (v2.0)
+$POOL_USER ALL=(ALL) NOPASSWD: ${INSTALL_DIR}/scripts/enable-https.sh
+SUDOERS_APPEND
+            sudoers_changed=true
+        fi
+        if ! grep -q "systemctl reboot" "$DASH_SUDOERS" 2>/dev/null; then
+            log_info "  - Adding system reboot permissions (v2.0)..."
+            cat >> "$DASH_SUDOERS" << SUDOERS_APPEND
+
+# System reboot - dashboard UI can gracefully restart the machine (v2.0)
+$POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl --no-block reboot
 SUDOERS_APPEND
             sudoers_changed=true
         fi
@@ -2864,7 +2963,9 @@ SUDOERS_APPEND
         systemctl start "$DASHBOARD_SERVICE" || log_warn "Failed to start $DASHBOARD_SERVICE"
         # Verify the worker actually booted (gunicorn master can start but worker hang)
         sleep 3
-        if curl -sf -o /dev/null --max-time 5 "http://127.0.0.1:${dash_port}/" 2>/dev/null; then
+        local _health_proto="http"
+        if grep -q "^ExecStart.*\-\-certfile" /etc/systemd/system/spiraldash.service 2>/dev/null; then _health_proto="https"; fi
+        if curl -sf -k -o /dev/null --max-time 5 "${_health_proto}://127.0.0.1:${dash_port}/" 2>/dev/null; then
             log_info "  - Dashboard service running"
         else
             log_warn "  - Dashboard not responding — restarting..."
@@ -3103,6 +3204,13 @@ update_systemd_services() {
     if [[ -z "$DETECTED_DAEMON" ]]; then
         log_warn "Skipping service file update — daemon unknown. Existing service files preserved."
     fi
+    # Detect if HTTPS was already enabled on spiraldash (preserve across service file update)
+    # IMPORTANT: Anchor to ^ExecStart to avoid matching template comments that mention certfile.
+    local DASH_HAD_HTTPS=false
+    if [[ -f "$SYSTEMD_DIR/spiraldash.service" ]] && grep -q "^ExecStart.*\-\-certfile" "$SYSTEMD_DIR/spiraldash.service" 2>/dev/null; then
+        DASH_HAD_HTTPS=true
+    fi
+
     for template in spiralstratum spiraldash spiralsentinel spiralpool-health spiralpool-ha-watcher; do
         if [[ -f "$SYSTEMD_TEMPLATES/${template}.service" ]] && [[ -n "$DETECTED_DAEMON" ]]; then
             sed -e "s|{{INSTALL_DIR}}|$INSTALL_DIR|g" \
@@ -3115,6 +3223,19 @@ update_systemd_services() {
             log_info "  - Updated: ${template}.service"
         fi
     done
+
+    # Re-apply HTTPS if it was previously enabled (template doesn't include --certfile)
+    # IMPORTANT: Anchor to ^ExecStart to avoid matching template comments
+    if [[ "$DASH_HAD_HTTPS" == "true" ]] && [[ -f "$INSTALL_DIR/certs/dashboard.crt" ]]; then
+        local DASH_SVC="$SYSTEMD_DIR/spiraldash.service"
+        if ! grep -q "^ExecStart.*\-\-certfile" "$DASH_SVC" 2>/dev/null; then
+            sed -i "s|--bind[= ]\([^ ]*\)|--bind \1 --certfile=${INSTALL_DIR}/certs/dashboard.crt --keyfile=${INSTALL_DIR}/certs/dashboard.key|" "$DASH_SVC"
+            if ! grep -q "${INSTALL_DIR}/certs" "$DASH_SVC" 2>/dev/null; then
+                sed -i "s|ReadWritePaths=\(.*\)|ReadWritePaths=\1 ${INSTALL_DIR}/certs|" "$DASH_SVC"
+            fi
+            log_info "  - Re-applied HTTPS to spiraldash.service (was previously enabled)"
+        fi
+    fi
 
     # HA: Replace postgresql.service dependency with patroni.service.
     # Templates hardcode postgresql.service, but on HA installations Patroni manages
@@ -3444,7 +3565,14 @@ echo -e "    ${GREEN}SHA-256d${NC}: BTC  BCH  BC2  DGB  QBX   ${GREEN}Scrypt${NC
 echo -e "    ${GREEN}AuxPoW${NC}:  BTC+NMC  BTC+FBTC  BTC+SYS  BTC+XMY  DGB+NMC  LTC+DOGE  LTC+PEP"
 echo ""
 echo -e "${CYAN}━━━ WEB INTERFACES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "    Dashboard: ${GREEN}http://${IP_ADDR}:1618${NC}    API: ${GREEN}http://${IP_ADDR}:4000${NC}"
+# Detect HTTPS at runtime from the service file
+DASH_PROTO="http"
+if grep -q "^ExecStart.*\-\-certfile" /etc/systemd/system/spiraldash.service 2>/dev/null; then
+    DASH_PROTO="https"
+fi
+DASH_PORT=$(grep -oP '0\.0\.0\.0:\K[0-9]+' /etc/systemd/system/spiraldash.service 2>/dev/null | head -1)
+DASH_PORT="${DASH_PORT:-1618}"
+echo -e "    Dashboard: ${GREEN}${DASH_PROTO}://${IP_ADDR}:${DASH_PORT}${NC}    API: ${GREEN}http://${IP_ADDR}:4000${NC}"
 echo ""
 MOTDEOF
 
@@ -3926,8 +4054,10 @@ show_summary() {
     local server_ip=$(ip -4 addr show scope global 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
     [[ -z "$server_ip" ]] && server_ip="localhost"
 
+    local _summary_proto="http"
+    if grep -q "^ExecStart.*\-\-certfile" /etc/systemd/system/spiraldash.service 2>/dev/null; then _summary_proto="https"; fi
     printf "  %-20s %s\n" "Version:" "${CURRENT_VERSION} → ${TARGET_VERSION}"
-    printf "  %-20s %s\n" "Dashboard:" "http://${server_ip}:${DASHBOARD_PORT}"
+    printf "  %-20s %s\n" "Dashboard:" "${_summary_proto}://${server_ip}:${DASHBOARD_PORT}"
     echo
     echo -e "${CYAN}Service Status:${NC}"
 
@@ -4244,7 +4374,10 @@ main() {
     detect_services
     detect_pool_user
 
-    # WSL2 pre-flight: check clock drift and memory before upgrade proceeds
+    # Docker deployment check: abort if running inside Docker or Docker containers are active
+    docker_deployment_check || exit 1
+
+    # WSL2 pre-flight: check clock drift, memory, and systemd before upgrade proceeds
     wsl2_preflight_checks
 
     # Check if pool user has a password set (needed for HA SSH, interactive sessions, sudo)
@@ -4351,6 +4484,23 @@ SSHDEOF
             FETCH_LATEST=false  # Switch to local mode so get_target_version reads VERSION file
             # Re-derive target version from local VERSION file to match the source being built
             get_target_version
+        fi
+    fi
+
+    # Major version jump (e.g. 1.x → 2.x) — force service file + config updates.
+    # New service files include security hardening (ProtectSystem, capabilities)
+    # and config fixes ensure v2.0 sections exist in pool.conf.
+    local current_major="${CURRENT_VERSION%%.*}"
+    local target_major="${TARGET_VERSION%%.*}"
+    target_major="${target_major#v}"  # strip leading 'v' if present
+    if [[ "$current_major" != "$target_major" ]] && [[ "$current_major" =~ ^[0-9]+$ ]] && [[ "$target_major" =~ ^[0-9]+$ ]]; then
+        if [[ "$UPDATE_SERVICES" != "true" ]]; then
+            log_info "Major version change detected ($current_major.x → $target_major.x) — enabling service file updates"
+            UPDATE_SERVICES=true
+        fi
+        if [[ "$FIX_CONFIG" != "true" ]]; then
+            log_info "Major version change detected — enabling config fixes"
+            FIX_CONFIG=true
         fi
     fi
 

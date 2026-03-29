@@ -1515,6 +1515,24 @@ func (a *auxPoolProvider) GetBlocksFound() int64         { return 0 }
 func (a *auxPoolProvider) GetBlockReward() float64       { return 0 }
 func (a *auxPoolProvider) GetPoolEffort() float64        { return 0 }
 func (a *auxPoolProvider) GetStratumPort() int           { return 0 }
+func (a *auxPoolProvider) GetActiveConnections() []api.WorkerConnection {
+	return a.parent.GetActiveConnections()
+}
+func (a *auxPoolProvider) GetRouterProfiles() []api.RouterProfile {
+	return a.parent.GetRouterProfiles()
+}
+func (a *auxPoolProvider) GetWorkersByClass() map[string]int {
+	return a.parent.GetWorkersByClass()
+}
+func (a *auxPoolProvider) GetPipelineStats() api.PipelineStats {
+	return a.parent.GetPipelineStats()
+}
+func (a *auxPoolProvider) GetPaymentStats() (*api.PaymentStats, error) {
+	return &api.PaymentStats{}, nil // Aux chains don't have independent payment processing
+}
+func (a *auxPoolProvider) KickWorkerByIP(ip string) int {
+	return a.parent.KickWorkerByIP(ip) // Workers are shared with parent
+}
 
 // ============================================================================
 // HA: VIP Manager, Database Manager, and Role Change Handling

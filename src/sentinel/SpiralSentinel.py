@@ -235,14 +235,29 @@ def validate_miner_ip(ip_str):
         return False
 
 def _http(url, timeout=10, headers=None, retries=2):
-    """HTTP GET with automatic retry on network failures for self-healing."""
+    """HTTP GET with automatic retry on network failures for self-healing.
+
+    Handles self-signed TLS certificates for localhost URLs (dashboard HTTPS).
+    For non-localhost HTTPS URLs, standard certificate verification applies.
+    """
+    import ssl
     h = {"User-Agent": f"SpiralSentinel/{__version__}"}
     if headers: h.update(headers)
+
+    # For localhost HTTPS (self-signed dashboard cert), skip cert verification.
+    # This is safe because localhost traffic never leaves the machine.
+    ssl_ctx = None
+    if url.startswith("https://"):
+        parsed_host = urllib.parse.urlparse(url).hostname
+        if parsed_host in ("localhost", "127.0.0.1", "::1"):
+            ssl_ctx = ssl.create_default_context()
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = ssl.CERT_NONE
 
     for attempt in range(retries + 1):
         try:
             req = urllib.request.Request(url, headers=h)
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with urllib.request.urlopen(req, timeout=timeout, context=ssl_ctx) as resp:
                 return json.loads(resp.read().decode())
         except (urllib.error.HTTPError, json.JSONDecodeError):
             # HTTP 4xx/5xx or parsing error - don't retry
@@ -256,10 +271,30 @@ def _http(url, timeout=10, headers=None, retries=2):
     return None
 
 
+def _dashboard_url():
+    """Get the dashboard base URL, auto-detecting HTTP vs HTTPS.
+
+    Checks if the dashboard is running HTTPS by looking at the systemd service
+    file for --certfile. Falls back to HTTP if not found or on any error.
+    The port is derived from pool_api_url (replace :4000 with :1618).
+    """
+    pool_url = CONFIG.get("pool_api_url", "http://localhost:4000")
+    base = pool_url.replace(":4000", ":1618")
+    # Check if dashboard is running HTTPS
+    try:
+        svc = Path("/etc/systemd/system/spiraldash.service")
+        if svc.is_file() and any("--certfile" in line for line in svc.read_text().splitlines() if line.strip().startswith("ExecStart")):
+            base = base.replace("http://", "https://")
+    except Exception:
+        pass
+    return base
+
+
 _RPC_ALLOWED_METHODS = frozenset({
     "getmininginfo", "getblockchaininfo", "getnetworkinfo", "getpeerinfo",
     "getblockcount", "getdifficulty", "getconnectioncount", "getmempoolinfo",
     "getnettotals", "uptime", "getbestblockhash", "validateaddress",
+    "getnetworkhashps",
 })
 
 def _rpc_call(host, port, method, params=None, timeout=10):
@@ -2729,8 +2764,8 @@ def detect_pool_mode():
     """
     try:
         pool_url = CONFIG.get("pool_api_url", "http://localhost:4000")
-        # Try the dashboard API first (port 1618 by default)
-        dashboard_url = pool_url.replace(":4000", ":1618")
+        # Try the dashboard API first (auto-detects HTTP vs HTTPS)
+        dashboard_url = _dashboard_url()
         url = f"{dashboard_url}/api/config/server-mode"
         # Pass dashboard API key if configured (auth may be required)
         dash_headers = {}
@@ -9675,8 +9710,7 @@ def fetch_power_cost():
     Returns None if dashboard is unreachable.
     """
     try:
-        pool_url = CONFIG.get("pool_api_url", "http://localhost:4000")
-        dash_url = pool_url.replace(":4000", ":1618")
+        dash_url = _dashboard_url()
         data = _http(f"{dash_url}/api/power/stats", timeout=5)
         if not data:
             return None
@@ -13039,6 +13073,106 @@ def create_group_online_embed(group_name, online_miners, total_miners):
         COLORS["green"],
         fields,
         footer="Spiral Sentinel • Fleet Group Monitoring"
+    )
+
+
+def create_group_temp_embed(group_name, miner_temps, level, ip_lookup=None):
+    """Sentinel alert: Multiple miners in a fleet group hit temp warning/critical."""
+    count = len(miner_temps)
+    is_critical = level == "CRITICAL"
+
+    miner_list = "\n".join(
+        f"  • `{get_miner_display_name(n)}` — **{t}°C**"
+        + (f" ({ip_lookup[n]})" if ip_lookup and n in ip_lookup else "")
+        for n, t in sorted(miner_temps.items(), key=lambda x: -x[1])[:8]
+    )
+    if count > 8:
+        miner_list += f"\n  • ... and **{count - 8}** more"
+
+    max_temp = max(miner_temps.values())
+    if is_critical:
+        banner = "- ⚠️  GROUP THERMAL CRITICAL  ⚠️"
+        color = COLORS["red"]
+        footer = "Spiral Sentinel • Group Thermal Alert"
+    else:
+        banner = "GROUP THERMAL WARNING"
+        color = COLORS["yellow"]
+        footer = "Spiral Sentinel • Group Thermal Alert"
+
+    desc = f"""```{"diff" if is_critical else "fix"}
+{banner}
+```
+
+{"🔴" if is_critical else "🌡️"} **{count} miners in "{group_name}" {"exceeded critical temp" if is_critical else "running hot"}** (max {max_temp}°C)
+
+This likely indicates a shared environment issue (HVAC failure, blocked airflow, ambient heat).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+
+    fields = [
+        {
+            "name": f"📍 Group: {group_name}",
+            "value": f"**Affected miners:** {count}\n{miner_list}",
+            "inline": False
+        },
+        {
+            "name": "🔧 Suggested Actions",
+            "value": "• Check HVAC / ventilation at this location\n• Verify fans are running on all units\n• Check ambient temperature at this location",
+            "inline": False
+        },
+    ]
+
+    return _embed(
+        f"{'🔥' if is_critical else '🌡️'} Group Thermal {'Critical' if is_critical else 'Warning'}: {group_name}",
+        desc,
+        color,
+        fields,
+        footer=footer
+    )
+
+
+def create_group_degradation_embed(group_name, miner_details, ip_lookup=None):
+    """Sentinel alert: Multiple miners in a fleet group show hashrate degradation."""
+    count = len(miner_details)
+
+    miner_list = "\n".join(
+        f"  • `{get_miner_display_name(d['name'])}` — {d['current']:.0f}/{d['baseline']:.0f} GH/s (**-{d['drop_pct']:.0f}%**)"
+        for d in sorted(miner_details, key=lambda x: -x['drop_pct'])[:8]
+    )
+    if count > 8:
+        miner_list += f"\n  • ... and **{count - 8}** more"
+
+    avg_drop = sum(d['drop_pct'] for d in miner_details) / count
+
+    desc = f"""```fix
+GROUP PERFORMANCE DEGRADATION
+```
+
+📉 **{count} miners in "{group_name}" running below baseline** (avg -{avg_drop:.0f}%)
+
+Correlated degradation across a group may indicate a shared power issue, overheating, or network instability.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+
+    fields = [
+        {
+            "name": f"📍 Group: {group_name}",
+            "value": f"**Affected miners:** {count}\n{miner_list}",
+            "inline": False
+        },
+        {
+            "name": "🔧 Suggested Actions",
+            "value": "• Check power supply / voltage at this location\n• Check cooling — heat throttling causes degradation\n• Verify network stability (packet loss = stale shares)",
+            "inline": False
+        },
+    ]
+
+    return _embed(
+        f"📉 Group Degradation: {group_name}",
+        desc,
+        COLORS["orange"],
+        fields,
+        footer="Spiral Sentinel • Group Performance Alert"
     )
 
 
@@ -18072,7 +18206,8 @@ def monitor_loop(state):
             logger.warning("  Spiral Sentinel monitors miners but none are configured yet.")
             logger.warning("")
             logger.warning("  To add miners, complete one of these steps:")
-            logger.warning("  1. Open Spiral Dash (http://your-pool:1618) and complete setup")
+            _dash_proto = "https" if "https" in _dashboard_url() else "http"
+            logger.warning("  1. Open Spiral Dash (%s://your-pool:1618) and complete setup", _dash_proto)
             logger.warning("     - The setup wizard will scan your network for miners")
             logger.warning("  2. Run the CLI scanner: spiralpool-scan --subnet 192.168.1.0/24")
             logger.warning("  3. Manually edit: /spiralpool/data/miners.json")
@@ -19297,6 +19432,67 @@ def monitor_loop(state):
                     if fleet_ths >= state.expected_fleet_ths * 0.6:  # 60% of expected = recovered
                         state.pool_drop_alert_sent = False
 
+            # ── Group-aware offline detection ──
+            # When miners belong to multi-member groups, we defer individual alerts
+            # by a grace window (GROUP_GRACE_MIN) so we can detect location-wide
+            # outages. If all group members go offline within the grace window,
+            # ONE group alert fires instead of N individual alerts.
+            #
+            # Without this, staggered offline events (power outage propagating
+            # across a switch over 30-60s) produce individual alerts for each
+            # miner AND a redundant group alert once the last one crosses threshold.
+            GROUP_GRACE_MIN = 2  # minutes to wait after first group member hits threshold
+
+            # Build lookup: miner_name → set of group names it belongs to
+            _pending_miner_groups = load_miner_groups()
+            _miner_to_groups = {}  # name → [(group_name, resolved_members)]
+            for _gname, _gdata in _pending_miner_groups.items():
+                _resolved = _resolve_group_miners(_gdata, miner_status, _miner_ip_lookup)
+                if len(_resolved) >= 2:
+                    for _n in _resolved:
+                        _miner_to_groups.setdefault(_n, []).append((_gname, _resolved))
+
+            # Pre-compute which miners should defer their individual alert this cycle.
+            # A miner defers if: it's in a multi-member group, it's offline past threshold,
+            # AND at least one sibling is also offline (even if not yet past threshold).
+            # The deferral lasts GROUP_GRACE_MIN after the miner's own threshold.
+            _group_defer_miners = set()
+            _group_ready_miners = set()  # miners in groups where ALL are past threshold
+            for _gname, _gdata in _pending_miner_groups.items():
+                _resolved = _resolve_group_miners(_gdata, miner_status, _miner_ip_lookup)
+                if len(_resolved) < 2:
+                    continue
+                _group_key = f"group_offline:{_gname}"
+                if _group_key in state.miner_offline_alert_sent:
+                    # Group alert already sent — mark members so individual alerts stay suppressed
+                    _group_ready_miners.update(_resolved)
+                    continue
+
+                # Count how many are offline (regardless of threshold)
+                _offline_members = [n for n in _resolved if miner_status.get(n) == "offline"]
+                _past_threshold = [
+                    n for n in _resolved
+                    if n in state.miner_offline_since and
+                    (time.time() - state.miner_offline_since[n]) / 60 >= MINER_OFFLINE_TH
+                ]
+
+                if len(_offline_members) == len(_resolved):
+                    # ALL offline — check if all past threshold (ready for group alert)
+                    if len(_past_threshold) == len(_resolved):
+                        _group_ready_miners.update(_resolved)
+                    else:
+                        # Some past threshold, rest offline but not yet past — defer all
+                        _group_defer_miners.update(_resolved)
+                elif len(_offline_members) >= 2 and len(_past_threshold) >= 1:
+                    # Multiple offline, at least one past threshold — defer those past threshold
+                    # for GROUP_GRACE_MIN to see if the rest follow
+                    for n in _past_threshold:
+                        mins_past = (time.time() - state.miner_offline_since[n]) / 60 - MINER_OFFLINE_TH
+                        if mins_past <= GROUP_GRACE_MIN:
+                            _group_defer_miners.add(n)
+                    # If any have been waiting longer than grace period, they won't be deferred
+                    # and will get individual alerts below (siblings didn't follow in time)
+
             # Miner offline/online & auto-restart
             # M-4: Uses hysteresis to prevent flapping alerts
             for name, st in miner_status.items():
@@ -19307,9 +19503,16 @@ def monitor_loop(state):
                     if name not in state.miner_offline_since: state.miner_offline_since[name] = time.time()
                     mins = int((time.time() - state.miner_offline_since[name]) / 60)
                     if mins >= MINER_OFFLINE_TH and name not in state.miner_offline_alert_sent:
-                        send_alert("miner_offline", create_miner_offline_embed(name, mins, miner_ip=_miner_ip_lookup.get(name)), state, miner_name=name)
-                        state.track_chronic_issue(name, "miner_offline")  # Track for chronic detection
-                        state.miner_offline_alert_sent[name] = True
+                        # Skip if: (a) group alert ready and will fire below, (b) still in grace window,
+                        # or (c) group alert already sent for this miner's group
+                        if name not in _group_ready_miners and name not in _group_defer_miners:
+                            send_alert("miner_offline", create_miner_offline_embed(name, mins, miner_ip=_miner_ip_lookup.get(name)), state, miner_name=name)
+                            state.miner_offline_alert_sent[name] = True
+                        elif name in _group_ready_miners:
+                            # Will be covered by group alert below — mark as sent without alerting
+                            state.miner_offline_alert_sent[name] = True
+                        # else: in grace window — don't mark as sent yet, check again next cycle
+                        state.track_chronic_issue(name, "miner_offline")  # Always track for chronic detection
                         state.weekly_stats["offline_events"] += 1
                     # Auto-restart (only if health monitoring enabled)
                     if HEALTH_MONITORING_ENABLED and AUTO_RESTART and mins >= AUTO_RESTART_MIN and (time.time() - state.get_last_restart_time(name)) > AUTO_RESTART_COOL and not in_startup_grace:
@@ -19341,12 +19544,20 @@ def monitor_loop(state):
                             # Miner has been stable online long enough - clear offline state
                             mins = int((time.time() - state.miner_offline_since[name]) / 60)
                             if mins >= MINER_OFFLINE_TH:
-                                send_alert("miner_online", create_miner_online_embed(
-                                    name, mins,
-                                    miner_ip=_miner_ip_lookup.get(name),
-                                    hashrate_ghs=md.get(name, 0),
-                                    temp_c=temps.get(name, {}).get("chip", temps.get(name, {}).get("board", 0))
-                                ), state, miner_name=name)
+                                # Suppress individual online alert if this miner is part of an
+                                # active group alert — the group_online recovery alert handles it
+                                _in_active_group = False
+                                for _gn, _members in _miner_to_groups.get(name, []):
+                                    if f"group_offline:{_gn}" in state.miner_offline_alert_sent:
+                                        _in_active_group = True
+                                        break
+                                if not _in_active_group:
+                                    send_alert("miner_online", create_miner_online_embed(
+                                        name, mins,
+                                        miner_ip=_miner_ip_lookup.get(name),
+                                        hashrate_ghs=md.get(name, 0),
+                                        temp_c=temps.get(name, {}).get("chip", temps.get(name, {}).get("board", 0))
+                                    ), state, miner_name=name)
                             del state.miner_offline_since[name]
                             state.miner_offline_alert_sent.pop(name, None)
                             state.miner_stable_online_since.pop(name, None)
@@ -19399,6 +19610,55 @@ def monitor_loop(state):
 
             # Temp alerts (skip Avalon devices - they are personal heaters, high temps expected)
             # Enhanced with thermal protection: emergency_stop_axeos at TEMP_EMERGENCY or sustained TEMP_CRIT
+            # Group-aware: if multiple miners in a group hit temp thresholds, send ONE group alert
+
+            # ── GROUP TEMP PRE-SCAN ──
+            # Collect per-group temp data so we can send group alerts instead of individual ones
+            _group_temp_critical = {}  # group_name → {miner_name: temp}
+            _group_temp_warning = {}   # group_name → {miner_name: temp}
+            _group_temp_handled = set()  # miners covered by a group temp alert this cycle
+
+            if _pending_miner_groups:
+                for _gname, _gdata in _pending_miner_groups.items():
+                    _resolved = _resolve_group_miners(_gdata, miner_status, _miner_ip_lookup)
+                    if len(_resolved) < 2:
+                        continue
+                    for n in _resolved:
+                        if is_avalon_miner(n):
+                            continue
+                        td = temps.get(n, {})
+                        ct = td.get("chip", td.get("board", 0))
+                        if ct >= TEMP_CRIT and n not in state.temp_alert_sent:
+                            _group_temp_critical.setdefault(_gname, {})[n] = ct
+                        elif ct >= TEMP_WARN and n not in state.temp_alert_sent:
+                            _group_temp_warning.setdefault(_gname, {})[n] = ct
+
+                # Send group temp alerts where 2+ miners in a group hit the same threshold
+                for _gname, _mtemps in _group_temp_critical.items():
+                    if len(_mtemps) >= 2:
+                        send_alert("temp_critical",
+                            create_group_temp_embed(_gname, _mtemps, "CRITICAL", ip_lookup=_miner_ip_lookup),
+                            state, miner_name=_gname)
+                        for n in _mtemps:
+                            state.temp_alert_sent[n] = True
+                            state.track_chronic_issue(n, "temp_critical")
+                            _group_temp_handled.add(n)
+                        logger.info(f"GROUP TEMP CRITICAL: {len(_mtemps)} miners in '{sanitize_log_input(_gname)}'")
+
+                for _gname, _mtemps in _group_temp_warning.items():
+                    if len(_mtemps) >= 2:
+                        # Don't double-alert miners already covered by a critical group alert
+                        _warn_only = {n: t for n, t in _mtemps.items() if n not in _group_temp_handled}
+                        if len(_warn_only) >= 2:
+                            send_alert("temp_warning",
+                                create_group_temp_embed(_gname, _warn_only, "WARNING", ip_lookup=_miner_ip_lookup),
+                                state, miner_name=_gname)
+                            for n in _warn_only:
+                                state.temp_alert_sent[n] = True
+                                state.track_chronic_issue(n, "temp_warning")
+                                _group_temp_handled.add(n)
+                            logger.info(f"GROUP TEMP WARNING: {len(_warn_only)} miners in '{sanitize_log_input(_gname)}'")
+
             for name, td in temps.items():
                 if is_avalon_miner(name):
                     continue
@@ -19407,7 +19667,7 @@ def monitor_loop(state):
                 miner_type = _miner_type_lookup.get(name, "unknown")
                 is_axeos = miner_type in ["axeos", "bitaxe", "nmaxe", "nerdaxe", "nerdqaxe", "nerdoctaxe", "qaxe", "qaxeplus", "hammer", "esp32miner", "luckyminer", "jingleminer", "zyber"]
 
-                # ── THERMAL SHUTDOWN LOGIC ──
+                # ── THERMAL SHUTDOWN LOGIC (always individual — safety-critical) ──
                 if THERMAL_SHUTDOWN_ENABLED and name not in state.thermal_shutdown_sent:
                     # Tier 1: Immediate stop at TEMP_EMERGENCY (95°C default)
                     if ct >= TEMP_EMERGENCY:
@@ -19432,8 +19692,11 @@ def monitor_loop(state):
                             state.thermal_critical_since.pop(name, None)
                             logger.warning(f"THERMAL SHUTDOWN: {sanitize_log_input(name)} at {ct}°C (sustained {THERMAL_SHUTDOWN_SUSTAINED_SEC}s, stopped={stopped})")
 
-                # ── EXISTING TEMP ALERTS (notification-only, separate from shutdown) ──
-                if ct >= TEMP_CRIT and name not in state.temp_alert_sent:
+                # ── TEMP ALERTS (notification-only, group-aware) ──
+                # Skip if already handled by a group alert above
+                if name in _group_temp_handled:
+                    pass  # Already alerted via group embed
+                elif ct >= TEMP_CRIT and name not in state.temp_alert_sent:
                     send_alert("temp_critical", create_temp_embed(name, ct, "CRITICAL", miner_ip=miner_ip), state, miner_name=name)
                     state.track_chronic_issue(name, "temp_critical")
                     state.temp_alert_sent[name] = True
@@ -19610,15 +19873,39 @@ def monitor_loop(state):
                         state.track_chronic_issue(name, "miner_reboot")  # Track for chronic detection
 
             # Hashrate degradation (skip ESP32 — pool-reported hashrate fluctuates wildly at kH/s scale)
+            # Group-aware: if 2+ miners in a group degrade simultaneously, send ONE group alert
+            _degradation_events = {}  # name → deg info dict
             for name, hr_ghs in miner_hashrates.items():
                 if _miner_type_lookup.get(name) == "esp32miner":
                     continue
                 if hr_ghs > 0 and (time.time() - state.get_last_restart_time(name)) > 900:  # 15 min cooldown
                     deg = state.update_hashrate_baseline(name, hr_ghs)
                     if deg:
-                        _deg_temp = temps.get(name, {}).get("chip", temps.get(name, {}).get("board", 0))
-                        send_alert("degradation", create_degradation_embed(deg, temp_c=_deg_temp or None), state, miner_name=name)
-                        state.track_chronic_issue(name, "degradation")  # Track for chronic detection
+                        _degradation_events[name] = deg
+
+            # Group degradation alerts — check if 2+ miners in any group are degrading
+            _group_deg_handled = set()
+            if _pending_miner_groups and _degradation_events:
+                for _gname, _gdata in _pending_miner_groups.items():
+                    _resolved = _resolve_group_miners(_gdata, miner_status, _miner_ip_lookup)
+                    if len(_resolved) < 2:
+                        continue
+                    _group_degs = [_degradation_events[n] for n in _resolved if n in _degradation_events]
+                    if len(_group_degs) >= 2:
+                        send_alert("degradation",
+                            create_group_degradation_embed(_gname, _group_degs, ip_lookup=_miner_ip_lookup),
+                            state, miner_name=_gname)
+                        for d in _group_degs:
+                            state.track_chronic_issue(d['name'], "degradation")
+                            _group_deg_handled.add(d['name'])
+                        logger.info(f"GROUP DEGRADATION: {len(_group_degs)} miners in '{sanitize_log_input(_gname)}'")
+
+            # Individual degradation alerts for miners not covered by a group alert
+            for name, deg in _degradation_events.items():
+                if name not in _group_deg_handled:
+                    _deg_temp = temps.get(name, {}).get("chip", temps.get(name, {}).get("board", 0))
+                    send_alert("degradation", create_degradation_embed(deg, temp_c=_deg_temp or None), state, miner_name=name)
+                    state.track_chronic_issue(name, "degradation")
 
             # === EXCESSIVE RESTART DETECTION ===
             # Alert if miner reboots too frequently (indicates hardware/power issues)

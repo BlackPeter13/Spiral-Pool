@@ -22,13 +22,14 @@ if %errorLevel% neq 0 (
 )
 
 REM --- Locate the PowerShell script relative to this .bat file ---
-set "PS_SCRIPT=%~dp0scripts\windows\wsl2-stratum-proxy.ps1"
+REM Both .bat and .ps1 live in scripts\windows\, so use %~dp0 directly.
+set "PS_SCRIPT=%~dp0wsl2-stratum-proxy.ps1"
 
 if not exist "%PS_SCRIPT%" (
     echo.
-    echo  [ERROR] Could not find: scripts\windows\wsl2-stratum-proxy.ps1
+    echo  [ERROR] Could not find: %PS_SCRIPT%
     echo.
-    echo  Make sure you are running this from the Spiral Pool repository root.
+    echo  Make sure wsl2-stratum-proxy.ps1 is in the same directory as this .bat file.
     echo.
     pause
     exit /b 1

@@ -29,7 +29,10 @@
     "chart-pool-hashrate": "#ff8c42",
     "chart-network-hashrate": "#00d4ff",
     "chart-difficulty": "#7c3aed",
-    "chart-workers": "#10b981"
+    "chart-workers": "#10b981",
+    "chart-blocks-actual": "#ffd93d",
+    "chart-blocks-expected": "#00e5cc",
+    "chart-hashrate-pool-share": "#00e5cc"
   },
   "gradients": {
     "primary": "linear-gradient(135deg, #00d4ff 0%, #00e5cc 100%)",

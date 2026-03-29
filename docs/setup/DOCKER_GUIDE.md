@@ -829,6 +829,53 @@ To remove: `.\scripts\windows\wsl2-shutdown-hook.ps1 -Uninstall`
 
 ---
 
+## Known Limitations
+
+### Docker Limitations
+
+Docker deployments are **single-node only** and carry the following restrictions compared to a native `install.sh` deployment:
+
+| Limitation | Detail |
+|------------|--------|
+| **No multi-node HA** | VIP failover (Keepalived), multi-node stratum clustering, and cross-server replication require native installation on bare metal. The Docker HA overlay (`docker-compose.ha.yml`) provides single-node PostgreSQL failover only. |
+| **No "Enable HTTPS" button** | The dashboard's "Enable HTTPS" feature uses `systemctl` to restart Gunicorn with TLS bindings. Docker containers do not run systemd, so this button has no effect. To serve the dashboard over HTTPS in Docker, place a reverse proxy (Nginx, Caddy, Traefik) in front of the container. |
+| **No coin binary checksum verification** | Coin daemon Dockerfiles download binaries from upstream release pages without SHA-256 checksum verification. A compromised mirror or CDN could serve tampered binaries. Pin and verify checksums manually if running in a high-security environment. |
+| **Prometheus URL hardcoded** | The Sentinel container defaults to `http://localhost:9090` for Prometheus. In Docker networking, Prometheus is reachable at `http://prometheus:9090`. Override with `PROMETHEUS_URL=http://prometheus:9090` in `.env` if Sentinel metrics collection shows connection errors. |
+| **Bridge networking only** | Docker Compose uses bridge networking. `--network host` is not supported in the Compose files. All ports are explicitly mapped. |
+| **Experimental status** | Docker deployment has not been validated for 24/7 production mining. For production use, install natively on dedicated Ubuntu hardware. |
+
+### WSL2 Limitations (Native Path)
+
+WSL2 runs a full Linux kernel inside a lightweight Hyper-V VM. This introduces platform-specific constraints that do not apply to native Linux:
+
+| Limitation | Detail | Mitigation |
+|------------|--------|------------|
+| **Abrupt termination** | Windows can kill the WSL2 VM without warning during shutdown, restart, sleep, hibernate, Windows Update, or memory pressure. This corrupts LevelDB `blocks/` and `chainstate/` directories, forcing a full blockchain resync (hours to days). | Install the [graceful shutdown hook](#graceful-shutdown-hook). |
+| **Clock drift** | After Windows sleep or hibernate, the WSL2 clock can drift by minutes or hours. The stratum server rejects shares with stale timestamps, and coin daemons may refuse peers. | Run `sudo ntpdate pool.ntp.org` after waking, or enable `hwclock` sync in `/etc/wsl.conf`. The installer and upgrade script check for drift automatically. |
+| **I/O performance** | Filesystem I/O through the WSL2 virtual disk (ext4.vhdx) is 2–4× slower than native Linux. Blockchain initial sync takes significantly longer, and database writes have higher latency. | Use an SSD. Avoid storing blockchain data on a Windows NTFS mount (`/mnt/c/`); keep it on the Linux filesystem (`/spiralpool/`). |
+| **NAT networking** | WSL2 runs behind a Windows NAT by default. ASIC miners and external hardware on the LAN cannot reach the stratum server without port forwarding. The WSL2 IP changes on every restart. | Use [`start-wsl2-proxy.bat`](#asic--external-miner-port-forwarding) to manage `netsh portproxy` rules. The proxy monitors for IP drift and re-applies rules automatically. |
+| **No automatic start** | WSL2 does not start Spiral Pool services on Windows boot. Services only start when a WSL2 shell is opened or a `wsl` command is run. | Use the auto-start Task Scheduler entry created by `start-wsl2-proxy.bat` (option offered during setup). |
+| **HA non-functional** | Keepalived (VIP failover), etcd multi-node consensus, and Patroni cross-server replication require real network interfaces and multiple hosts. These do not work inside a single WSL2 instance. | Use native Linux on bare metal for HA deployments. |
+| **Miner subnet scanning** | The dashboard's miner auto-detection scans the local subnet. WSL2's NAT-ed interface is on a virtual subnet (`172.x.x.x`), not the LAN. ASIC miners on `192.168.x.x` are not discoverable. | Enter miner IPs manually in the dashboard, or use the Windows-side `configure-coin-firewall.ps1` to verify connectivity. |
+| **TLS certificate IP mismatch** | Self-signed TLS certificates are generated with the WSL2 internal IP as a SAN. Miners connecting via the Windows LAN IP (through portproxy) will see a certificate hostname mismatch. Most miners ignore TLS errors, but strict TLS clients will reject the connection. | Regenerate the certificate after setup with the Windows LAN IP added as a SAN, or use plain stratum (port 3333) for LAN miners. |
+| **Memory cap** | WSL2 defaults to 50% of host RAM (Windows 11) or 80% (Windows 10). Running BTC + LTC daemons simultaneously can exceed this. | Set a manual cap in `%USERPROFILE%\.wslconfig`: `[wsl2]` / `memory=24GB`. The installer warns if available memory is low. |
+| **dbcache sizing** | Only DGB, BTC, and BCH have WSL2-aware `dbcache` sizing that accounts for the memory cap. Other coins use fixed defaults that may be too aggressive for constrained WSL2 environments. | Manually set `dbcache=` in each coin's config file under `/spiralpool/<coin>/` if daemons are OOM-killed. |
+| **Mirrored networking** | Windows 11 23H2+ supports WSL2 mirrored networking mode, which eliminates the NAT and makes `portproxy` unnecessary. However, mirrored mode can conflict with Docker Desktop and VPN software. | If using mirrored mode, do **not** run `start-wsl2-proxy.bat` — it detects mirrored mode and exits. Test thoroughly before relying on it for production. |
+
+### WSL2 Limitations (Docker Desktop Path)
+
+When running Docker Desktop with the WSL2 backend, all of the above WSL2 limitations apply **plus**:
+
+| Limitation | Detail |
+|------------|--------|
+| **Docker Desktop overhead** | Docker Desktop adds its own WSL2 distros (`docker-desktop` and `docker-desktop-data`), consuming additional memory and disk. |
+| **Double virtualization** | Containers run inside Docker inside WSL2 inside Hyper-V — three layers of abstraction. I/O and CPU overhead compounds. |
+| **Port mapping through two NATs** | Traffic from the LAN must traverse the Windows NAT to WSL2, then Docker's bridge NAT to the container. Docker Desktop maps published ports to `localhost` automatically, but ASIC miners on the LAN still need `netsh portproxy` rules. |
+| **No systemd in containers** | Docker containers do not use systemd. The "Enable HTTPS" dashboard feature, `systemctl`-based health checks, and any systemd-dependent tooling will not function. |
+| **Licensing** | Docker Desktop requires a paid subscription for commercial use in organizations with more than 250 employees or $10M annual revenue. The Linux Docker Engine path (inside WSL2 Ubuntu, without Docker Desktop) has no such restriction. |
+
+---
+
 ## Upgrading to Native Installation
 
 Docker is at full feature parity for single-node deployments — single-coin, multi-coin, merge mining, and Stratum V1/V2 all work. Native installation is only needed for multi-node HA with VIP failover (Keepalived).

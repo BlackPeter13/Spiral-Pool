@@ -20,6 +20,7 @@
 package database
 
 import (
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -649,52 +650,70 @@ func TestBlockQueue_Peek_Empty(t *testing.T) {
 func TestBlockQueue_ConcurrentEnqueueDequeue(t *testing.T) {
 	t.Parallel()
 
-	q := NewBlockQueue(1000)
-
-	var wg sync.WaitGroup
+	const totalItems = 1000
 	const goroutines = 20
-	const opsPerGoroutine = 50
+	q := NewBlockQueue(totalItems)
 
+	// Phase 1: Concurrent enqueue — fill the queue.
+	var enqueueWg sync.WaitGroup
 	var enqueued atomic.Int64
-	var dequeued atomic.Int64
+	itemsPerGoroutine := totalItems / goroutines
 
-	// Concurrent enqueue.
 	for g := 0; g < goroutines; g++ {
-		wg.Add(1)
+		enqueueWg.Add(1)
 		go func(id int) {
-			defer wg.Done()
-			for i := 0; i < opsPerGoroutine; i++ {
+			defer enqueueWg.Done()
+			for i := 0; i < itemsPerGoroutine; i++ {
 				if q.Enqueue(&Block{Height: uint64(id*1000 + i)}) {
 					enqueued.Add(1)
 				}
 			}
 		}(g)
 	}
+	enqueueWg.Wait()
 
-	// Concurrent dequeue.
+	if enqueued.Load() != totalItems {
+		t.Fatalf("Enqueued = %d, want %d", enqueued.Load(), totalItems)
+	}
+
+	// Phase 2: Concurrent dequeue — drain the queue.
+	// Under heavy contention, a goroutine may see nil (queue appears empty)
+	// while another goroutine holds an uncommitted entry. Use a retry with
+	// backoff: only exit after consecutive nil reads with no global progress.
+	var dequeueWg sync.WaitGroup
+	var dequeued atomic.Int64
+
 	for g := 0; g < goroutines; g++ {
-		wg.Add(1)
+		dequeueWg.Add(1)
 		go func() {
-			defer wg.Done()
-			for i := 0; i < opsPerGoroutine; i++ {
+			defer dequeueWg.Done()
+			nilStreak := 0
+			for {
 				entry, commit := q.DequeueWithCommit()
-				if entry != nil {
-					if commit() {
-						dequeued.Add(1)
+				if entry == nil {
+					nilStreak++
+					if nilStreak > 100 {
+						return
 					}
+					runtime.Gosched()
+					continue
+				}
+				nilStreak = 0
+				if commit() {
+					dequeued.Add(1)
 				}
 			}
 		}()
 	}
+	dequeueWg.Wait()
 
-	wg.Wait()
-
-	// Verify: enqueued - dequeued == remaining in queue.
+	// All items should have been dequeued.
 	remaining := q.Len()
-	expectedRemaining := int(enqueued.Load() - dequeued.Load())
-	if remaining != expectedRemaining {
-		t.Errorf("Remaining = %d, want %d (enqueued=%d, dequeued=%d)",
-			remaining, expectedRemaining, enqueued.Load(), dequeued.Load())
+	if remaining != 0 {
+		t.Errorf("Remaining = %d, want 0", remaining)
+	}
+	if dequeued.Load() != totalItems {
+		t.Errorf("Dequeued = %d, want %d", dequeued.Load(), totalItems)
 	}
 }
 

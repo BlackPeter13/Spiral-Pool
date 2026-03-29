@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/spiralpool/stratum/internal/api"
 	"github.com/spiralpool/stratum/internal/auxpow"
 	"github.com/spiralpool/stratum/internal/coin"
 	"github.com/spiralpool/stratum/internal/config"
@@ -2463,6 +2464,33 @@ func (cp *CoinPool) GetConnections() int64 {
 	return cp.stratumServer.Stats().ActiveConnections
 }
 
+// GetActiveConnections implements api.CoinPoolProvider.
+// Returns real-time connection status for all active workers.
+// SECURITY: This endpoint is protected by adminAuthMiddlewareV2 (API key required).
+// Full IP addresses are returned since admin access is already authenticated —
+// masking would break Sentinel's ESP32 device matching (pool-based monitoring
+// for devices without HTTP API relies on IP correlation).
+func (cp *CoinPool) GetActiveConnections() []api.WorkerConnection {
+	sessions := cp.stratumServer.GetActiveConnections()
+	connections := make([]api.WorkerConnection, 0, len(sessions))
+
+	for _, s := range sessions {
+		connections = append(connections, api.WorkerConnection{
+			SessionID:    s.ID,
+			WorkerName:   s.WorkerName,
+			MinerAddress: s.MinerAddress,
+			UserAgent:    s.UserAgent,
+			RemoteAddr:   s.RemoteAddr,
+			ConnectedAt:  s.ConnectedAt,
+			LastActivity: s.GetLastActivity(),
+			Difficulty:   s.GetDifficulty(),
+			ShareCount:   s.GetShareCount(),
+		})
+	}
+
+	return connections
+}
+
 // GetHashrate returns the pool's current hashrate.
 // This returns the hashrate calculated from the database (shares over time window).
 func (cp *CoinPool) GetHashrate() float64 {
@@ -2543,6 +2571,90 @@ func (cp *CoinPool) GetPoolEffort() float64 {
 // GetStratumPort returns the stratum port for this coin pool.
 func (cp *CoinPool) GetStratumPort() int {
 	return cp.cfg.Stratum.Port
+}
+
+// GetRouterProfiles returns the Spiral Router difficulty profiles for this pool.
+func (cp *CoinPool) GetRouterProfiles() []api.RouterProfile {
+	if cp.stratumServer == nil {
+		return nil
+	}
+
+	stratumProfiles := cp.stratumServer.GetRouterProfiles()
+	result := make([]api.RouterProfile, len(stratumProfiles))
+	for i, sp := range stratumProfiles {
+		result[i] = api.RouterProfile{
+			Class:           sp.Class,
+			InitialDiff:     sp.InitialDiff,
+			MinDiff:         sp.MinDiff,
+			MaxDiff:         sp.MaxDiff,
+			TargetShareTime: sp.TargetShareTime,
+		}
+	}
+	return result
+}
+
+// GetWorkersByClass returns worker count breakdown by miner class.
+func (cp *CoinPool) GetWorkersByClass() map[string]int {
+	if cp.stratumServer == nil {
+		return nil
+	}
+	return cp.stratumServer.GetWorkersByClass()
+}
+
+// GetPipelineStats returns share pipeline statistics.
+func (cp *CoinPool) GetPipelineStats() api.PipelineStats {
+	if cp.sharePipeline == nil {
+		return api.PipelineStats{}
+	}
+
+	stats := cp.sharePipeline.Stats()
+	return api.PipelineStats{
+		Processed:      stats.Processed,
+		Written:        stats.Written,
+		Dropped:        stats.Dropped,
+		BufferCurrent:  stats.BufferCurrent,
+		BufferCapacity: stats.BufferCapacity,
+	}
+}
+
+// GetPaymentStats returns payment/block status statistics.
+func (cp *CoinPool) GetPaymentStats() (*api.PaymentStats, error) {
+	postgresDB, ok := cp.db.(*database.PostgresDB)
+	if !ok {
+		cp.logger.Debugw("GetPaymentStats: DB is not PostgresDB, returning empty stats")
+		return &api.PaymentStats{}, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	scopedDB := postgresDB.WithPoolID(cp.poolID)
+	blockStats, err := scopedDB.GetBlockStats(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	blockMaturity := 100 // default
+	if cp.coin != nil {
+		blockMaturity = int(cp.coin.CoinbaseMaturity())
+	}
+
+	return &api.PaymentStats{
+		PendingBlocks:   blockStats.Pending,
+		ConfirmedBlocks: blockStats.Confirmed,
+		OrphanedBlocks:  blockStats.Orphaned,
+		PaidBlocks:      blockStats.Paid,
+		BlockMaturity:   blockMaturity,
+		TotalPaid:       0,
+	}, nil
+}
+
+// KickWorkerByIP closes all stratum sessions from the given IP. Returns count closed.
+func (cp *CoinPool) KickWorkerByIP(ip string) int {
+	if cp.stratumServer == nil {
+		return 0
+	}
+	return cp.stratumServer.KickWorkerByIP(ip)
 }
 
 // BlockWALDir returns the directory containing this coin's WAL files.

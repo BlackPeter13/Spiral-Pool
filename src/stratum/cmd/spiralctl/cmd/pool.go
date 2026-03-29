@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,10 +16,17 @@ import (
 // maxResponseSize limits API response body size to prevent memory exhaustion (10MB)
 const maxResponseSize = 10 * 1024 * 1024
 
-// secureHTTPClient creates an HTTP client with appropriate timeouts and security settings
+// secureHTTPClient creates an HTTP client with appropriate timeouts and security settings.
+// Accepts self-signed TLS certificates because spiralctl only connects to localhost
+// where the dashboard uses a self-signed cert generated during installation.
 func secureHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true, // #nosec G402 — localhost only, self-signed dashboard cert
+			},
+		},
 		// Disable redirects to prevent SSRF - we only connect to localhost
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
@@ -156,13 +164,28 @@ func runPoolStats(args []string) error {
 	return nil
 }
 
+// dashboardBaseURL returns the dashboard URL, trying HTTPS first (self-signed cert),
+// falling back to HTTP. Only connects to localhost (127.0.0.1).
+func dashboardBaseURL(port int) string {
+	client := secureHTTPClient()
+	httpsURL := fmt.Sprintf("https://127.0.0.1:%d/api/health/live", port)
+	resp, err := client.Get(httpsURL)
+	if err == nil {
+		resp.Body.Close()
+		return fmt.Sprintf("https://127.0.0.1:%d", port)
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d", port)
+}
+
 func fetchPoolStats(apiPort, dashboardPort int) (*PoolStatsResult, error) {
 	client := secureHTTPClient()
 	result := &PoolStatsResult{}
 
 	// Try to get stats from dashboard API (more comprehensive)
 	// Only connect to localhost (127.0.0.1) to prevent SSRF
-	dashURL := fmt.Sprintf("http://127.0.0.1:%d/api/miners", dashboardPort)
+	// Auto-detects HTTPS (self-signed cert) vs HTTP
+	dashBase := dashboardBaseURL(dashboardPort)
+	dashURL := fmt.Sprintf("%s/api/miners", dashBase)
 	resp, err := client.Get(dashURL)
 	if err == nil {
 		defer resp.Body.Close()
@@ -194,7 +217,7 @@ func fetchPoolStats(apiPort, dashboardPort int) (*PoolStatsResult, error) {
 	}
 
 	// Try to get ETB stats
-	etbURL := fmt.Sprintf("http://127.0.0.1:%d/api/etb", dashboardPort)
+	etbURL := fmt.Sprintf("%s/api/etb", dashBase)
 	resp, err = client.Get(etbURL)
 	if err == nil {
 		defer resp.Body.Close()

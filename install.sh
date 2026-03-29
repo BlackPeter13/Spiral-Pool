@@ -20,9 +20,6 @@ head -c50 "$0"|od -c|grep -q '\\r'&&{ find "$(dirname "$0")" -type f \( -name "*
 # ╚════════════════════════════════════════════════════════════════════════════╝
 #
 
-# CRLF self-heal: fix Windows line endings if present (single-line, tolerates \r at EOL)
-head -c50 "$0"|od -c|grep -q '\\r'&&{ find "$(dirname "$0")" -type f \( -name "*.sh" -o -name "*.py" -o -name "*.sql" -o -name "*.conf" -o -name "*.yaml" -o -name "*.yml" -o -name "*.service" -o -name "*.template" \) -exec sed -i 's/\r$//' {} +;exec bash "$0" "$@"; } #
-
 set -e
 
 # Save terminal file descriptor for interactive reads
@@ -13880,7 +13877,7 @@ JAILEOF
 
         # Append connlimit rules before the COMMIT line in after.rules
         local rules_block
-        rules_block="$connlimit_marker — max 200 concurrent connections per source IP per stratum port\n"
+        rules_block="$connlimit_marker - max 200 concurrent connections per source IP per stratum port\n"
         for port in $unique_ports; do
             rules_block+="# Port $port\n"
             rules_block+="-A ufw-after-input -p tcp --dport $port -m connlimit --connlimit-above 200 --connlimit-mask 32 -j REJECT --reject-with tcp-reset\n"
@@ -13918,7 +13915,7 @@ JAILEOF
         log "Adding metrics rate-limit rules to UFW before.rules..."
 
         local metrics_rules_block
-        metrics_rules_block="${metrics_before_marker} — connlimit + hashlimit for port ${METRICS_PORT}\n"
+        metrics_rules_block="${metrics_before_marker} - connlimit + hashlimit for port ${METRICS_PORT}\n"
         metrics_rules_block+="# Max 10 concurrent connections per source IP\n"
         metrics_rules_block+="-A ufw-before-input -p tcp --dport ${METRICS_PORT} -m connlimit --connlimit-above 10 --connlimit-mask 32 -j REJECT --reject-with tcp-reset\n"
         metrics_rules_block+="# Token bucket: allow up to 120 req/min (burst 20); within-rate traffic passes through\n"
@@ -14680,6 +14677,12 @@ MINERDBEOF
     # Configure firewall (IMPORTANT: Allow SSH first to prevent lockout!)
     log "Configuring firewall..."
 
+    # WORKAROUND: UFW's Python backend uses bytes(out, 'ascii') when rewriting
+    # config files. Any non-ASCII character (e.g. Unicode em-dash from a previous
+    # install or other software) causes UnicodeEncodeError and kills the script.
+    # Clean all UFW config files before running any ufw commands.
+    sudo sed -i 's/\xe2\x80\x94/-/g' /etc/ufw/after.rules /etc/ufw/before.rules /etc/default/ufw 2>/dev/null || true
+
     # CRITICAL: Ensure SSH is allowed BEFORE any reset or enable
     # This prevents SSH disconnection during firewall configuration.
     # SECURITY: On cloud deployments where the operator confirmed their admin IP
@@ -14714,8 +14717,8 @@ MINERDBEOF
     fi
     sudo ufw limit $API_PORT/tcp > /dev/null 2>&1         # Pool API (rate-limited: max 6 new conn/30s per IP)
     # Dashboard — home: plain allow (LAN, minimal bot traffic); cloud: port stays CLOSED (use SSH tunnel)
-    # The dashboard is HTTP only. Exposing it on the public internet is insecure regardless of rate limiting.
-    # Cloud operators access it via: ssh -L 1618:localhost:1618 user@server  then  http://localhost:1618
+    # Fresh installs use HTTPS with a self-signed cert. Cloud operators should still use SSH tunnels.
+    # Cloud operators access it via: ssh -L 1618:localhost:1618 user@server  then  https://localhost:1618
     # NOTE: Use CLOUD_DETECTED (not ADMIN_SSH_IP) — port must stay closed even if SSH lockdown was skipped.
     if [[ -z "$CLOUD_DETECTED" ]]; then
         sudo ufw allow $DASHBOARD_PORT/tcp > /dev/null 2>&1
@@ -15042,10 +15045,17 @@ echo -e "${CYAN}━━━ SUPPORTED COINS ━━━━━━━━━━━━�
 echo -e "  ${GREEN}SHA-256d:${NC}  BTC  BCH  BC2  DGB  QBX    ${GREEN}Scrypt:${NC}  LTC  DOGE  DGB-S  PEP  CAT"
 echo -e "  ${GREEN}AuxPoW:${NC}   BTC+NMC  BTC+FBTC  BTC+SYS  BTC+XMY  DGB+NMC  LTC+DOGE  LTC+PEP"
 echo -e "${CYAN}━━━ WEB INTERFACES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+# Detect HTTPS at runtime from the service file
+DASH_PROTO="http"
+if grep -q "^ExecStart.*\-\-certfile" /etc/systemd/system/spiraldash.service 2>/dev/null; then
+    DASH_PROTO="https"
+fi
+DASH_PORT=$(grep -oP '0\.0\.0\.0:\K[0-9]+' /etc/systemd/system/spiraldash.service 2>/dev/null | head -1)
+DASH_PORT="${DASH_PORT:-1618}"
 if [[ -n "$CLOUD_DETECTED" ]]; then
-echo -e "  ${YELLOW}Dashboard${NC}  ssh -L 1618:localhost:1618 ${ADMIN_USER}@${CLOUD_SERVER_IP:-YOUR_SERVER_IP}  then  http://localhost:1618"
+echo -e "  ${YELLOW}Dashboard${NC}  ssh -L ${DASH_PORT}:localhost:${DASH_PORT} ${ADMIN_USER}@${CLOUD_SERVER_IP:-YOUR_SERVER_IP}  then  ${DASH_PROTO}://localhost:${DASH_PORT}"
 else
-echo -e "  ${DIM}Dashboard${NC}  ${GREEN}http://${IP_ADDR}:1618${NC}    ${DIM}API${NC}  ${GREEN}http://${IP_ADDR}:4000${NC}"
+echo -e "  ${DIM}Dashboard${NC}  ${GREEN}${DASH_PROTO}://${IP_ADDR}:${DASH_PORT}${NC}    ${DIM}API${NC}  ${GREEN}http://${IP_ADDR}:4000${NC}"
 fi
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
@@ -21186,15 +21196,34 @@ generate_tls_certificate() {
 
     log "Generating self-signed TLS certificate for encrypted V1 stratum..."
     sudo mkdir -p "$tls_dir"
-    sudo openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 \
-        -nodes -keyout "$key_file" -out "$cert_file" \
-        -subj "/CN=spiralpool/O=SpiralPool/C=CA" \
-        -addext "subjectAltName=DNS:localhost,IP:0.0.0.0" 2>/dev/null
+
+    # Build SANs: localhost + hostname + all LAN IPs (miners need IP-based TLS validation)
+    local san="DNS:localhost,DNS:$(hostname)"
+    local fqdn
+    fqdn="$(hostname -f 2>/dev/null || echo "")"
+    [[ -n "$fqdn" && "$fqdn" != "$(hostname)" ]] && san="${san},DNS:${fqdn}"
+    local lan_ips
+    lan_ips=$(ip -4 addr show 2>/dev/null | grep -oP 'inet \K[0-9.]+' | grep -v '^127\.' || hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^$' || true)
+    for ip in $lan_ips; do
+        san="${san},IP:${ip}"
+    done
+    san="${san},IP:127.0.0.1"
+
+    sudo openssl req -x509 \
+        -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+        -keyout "$key_file" -out "$cert_file" \
+        -sha256 -days 3650 -nodes \
+        -subj "/O=Spiral Pool/CN=$(hostname)" \
+        -addext "subjectAltName=${san}" \
+        -addext "basicConstraints=critical,CA:FALSE" \
+        -addext "keyUsage=critical,digitalSignature" \
+        -addext "extendedKeyUsage=serverAuth" \
+        2>/dev/null
 
     sudo chmod 600 "$key_file"
     sudo chmod 644 "$cert_file"
     sudo chown "$POOL_USER:$POOL_USER" "$tls_dir" "$cert_file" "$key_file"
-    log "TLS certificate generated: $cert_file"
+    log "TLS certificate generated: $cert_file (SANs: ${san})"
 }
 
 configure_stratum_single() {
@@ -22982,36 +23011,44 @@ generate_dashboard_cert() {
     fi
 
     sudo mkdir -p "$CERT_DIR"
+    sudo chown "$POOL_USER:$POOL_USER" "$CERT_DIR"
 
     # Build Subject Alternative Names (SANs) for LAN access
-    local san_entries="DNS:localhost,DNS:$(hostname)"
+    local short_host fqdn_host
+    short_host="$(hostname)"
+    fqdn_host="$(hostname -f 2>/dev/null || echo "$short_host")"
+    local san_entries="DNS:localhost,DNS:${short_host}"
+    # Add FQDN if it differs from short hostname (domain-joined machines)
+    if [[ "$fqdn_host" != "$short_host" ]] && [[ -n "$fqdn_host" ]]; then
+        san_entries="${san_entries},DNS:${fqdn_host}"
+    fi
     # Add all non-loopback IPv4 addresses
     local lan_ips
     lan_ips=$(ip -4 addr show 2>/dev/null | grep -oP 'inet \K[0-9.]+' | grep -v '^127\.' || hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^$' || true)
-    local ip_index=1
     for ip in $lan_ips; do
         san_entries="${san_entries},IP:${ip}"
-        ip_index=$((ip_index + 1))
     done
     # Always include loopback
     san_entries="${san_entries},IP:127.0.0.1"
 
     log_info "Generating self-signed TLS certificate for dashboard..."
-    openssl req -x509 \
-        -newkey rsa:2048 \
+    # ECDSA P-256: modern standard, faster handshakes, stronger than RSA-2048
+    # Wrapped in if-block: bare openssl under set -e would abort the entire script
+    # on failure (e.g., old OpenSSL lacking -addext or EC support). We want graceful
+    # fallback to HTTP instead.
+    if sudo openssl req -x509 \
+        -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
         -keyout "$KEY_FILE" \
         -out "$CERT_FILE" \
         -sha256 \
         -days 3650 \
         -nodes \
-        -subj "/O=Spiral Pool/CN=$(hostname)" \
+        -subj "/O=Spiral Pool/CN=${short_host}" \
         -addext "subjectAltName=${san_entries}" \
-        -addext "basicConstraints=CA:FALSE" \
-        -addext "keyUsage=digitalSignature,keyEncipherment" \
+        -addext "basicConstraints=critical,CA:FALSE" \
+        -addext "keyUsage=critical,digitalSignature" \
         -addext "extendedKeyUsage=serverAuth" \
-        2>/dev/null
-
-    if [[ $? -eq 0 ]] && [[ -f "$CERT_FILE" ]]; then
+        2>/dev/null && [[ -f "$CERT_FILE" ]]; then
         sudo chown "${POOL_USER}:${POOL_USER}" "$CERT_FILE" "$KEY_FILE"
         sudo chmod 640 "$KEY_FILE"
         sudo chmod 644 "$CERT_FILE"
@@ -23068,7 +23105,12 @@ install_dashboard() {
     sudo chmod 700 "$DASH_DIR/data"
 
     # Generate self-signed TLS certificate for HTTPS
-    generate_dashboard_cert
+    local DASH_HTTPS_ARGS=""
+    if generate_dashboard_cert; then
+        DASH_HTTPS_ARGS="--certfile=$INSTALL_DIR/certs/dashboard.crt --keyfile=$INSTALL_DIR/certs/dashboard.key"
+    else
+        log_warn "Dashboard will start in HTTP-only mode. You can enable HTTPS later from the Management tab."
+    fi
 
     # Create service
     sudo tee /etc/systemd/system/spiraldash.service > /dev/null << EOF
@@ -23087,8 +23129,22 @@ User=$POOL_USER
 Group=$POOL_USER
 WorkingDirectory=$DASH_DIR
 ExecStartPre=-/bin/rm -f $DASH_DIR/gunicorn.ctl
-# HTTPS: self-signed cert generated by install.sh (browser will show cert warning on first visit)
-ExecStart=$DASH_DIR/venv/bin/gunicorn --bind 0.0.0.0:$DASHBOARD_PORT --certfile=$INSTALL_DIR/certs/dashboard.crt --keyfile=$INSTALL_DIR/certs/dashboard.key --worker-class gthread --workers 1 --threads 4 --timeout 120 dashboard:app
+ExecStart=$DASH_DIR/venv/bin/gunicorn --bind 0.0.0.0:$DASHBOARD_PORT ${DASH_HTTPS_ARGS} --worker-class gthread --workers 1 --threads 4 --timeout 120 dashboard:app
+# POST-BOOT HEALTH CHECK: After reboot, gunicorn worker can deadlock during fork
+# (post-fork threading lock inheritance). The master process stays alive and systemd
+# sees the service as "active", but no HTTP requests are served. This loop polls
+# the dashboard for up to 60 seconds; if it never responds, kills the main process
+# so Restart=always can recover it. Uses -k (insecure) for HTTPS self-signed certs.
+ExecStartPost=/bin/bash -c '\
+  proto=http; \
+  grep -q "\\-\\-certfile" /proc/\$MAINPID/cmdline 2>/dev/null && proto=https; \
+  for i in \$(seq 1 30); do \
+    sleep 2; \
+    curl -sfk -o /dev/null "\$\${proto}://127.0.0.1:$DASHBOARD_PORT/" 2>/dev/null && exit 0; \
+  done; \
+  echo "spiraldash: health check failed after 60s — killing hung worker" >&2; \
+  kill -KILL \$MAINPID 2>/dev/null; \
+  exit 1'
 
 # === INSTALLATION PATHS ===
 # Tell dashboard where to find data files (miners.json, etc.)
@@ -23118,12 +23174,20 @@ TimeoutStopSec=30
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=$DASH_DIR $INSTALL_DIR/config $INSTALL_DIR/data $INSTALL_DIR/certs /home/$POOL_USER/.spiralpool
+# /etc/systemd/system: enable-https.sh (sudo) patches spiraldash.service via sed -i.
+# ProtectSystem=strict makes /etc read-only in this namespace; without this exception
+# sed can't create its temp file ("Read-only file system"). File permissions (root:root 644)
+# still prevent the unprivileged dashboard process from writing directly.
+ReadWritePaths=$DASH_DIR $INSTALL_DIR/config $INSTALL_DIR/data $INSTALL_DIR/certs /home/$POOL_USER/.spiralpool /etc/systemd/system /var/lib/apt /var/cache/apt /var/log/apt
 # NoNewPrivileges must be 'no' — dashboard uses sudo systemctl restart/stop
 # for service control via web UI. sudo is a setuid binary that requires
 # privilege escalation. Allowed commands are restricted via sudoers rules
 # in /etc/sudoers.d/spiralpool-dashboard (created below).
 NoNewPrivileges=no
+# Bounding set: only the capabilities sudo needs to escalate (setuid/setgid/audit).
+# Empty CapabilityBoundingSet= would block sudo entirely ("unable to change to root gid").
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_DAC_OVERRIDE CAP_AUDIT_WRITE CAP_FOWNER
+AmbientCapabilities=
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
@@ -23252,11 +23316,18 @@ $POOL_USER ALL=(ALL) NOPASSWD: ${INSTALL_DIR}/upgrade.sh *
 # Dashboard validates service names against ALLOWED_SERVICES whitelist before invoking
 $POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/journalctl *
 
-# System package updates - apt-get update/upgrade from dashboard
-$POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/apt-get *
+# System package updates - wrapper script sets DEBIAN_FRONTEND=noninteractive
+# inside the root process so it never needs to cross sudo's env_reset barrier
+$POOL_USER ALL=(ALL) NOPASSWD: ${INSTALL_DIR}/scripts/apt-noninteractive.sh *
 
 # Database health check - allow psql as postgres user
 $POOL_USER ALL=(postgres) NOPASSWD: /usr/bin/psql -c SELECT\ 1
+
+# Enable HTTPS - dashboard UI can activate TLS via enable-https.sh
+$POOL_USER ALL=(ALL) NOPASSWD: ${INSTALL_DIR}/scripts/enable-https.sh
+
+# System reboot - dashboard UI can gracefully restart the machine
+$POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl --no-block reboot
 SUDOERS_EOF
     sudo chmod 440 "$DASH_SUDOERS"
     sudo chown root:root "$DASH_SUDOERS"
@@ -26280,6 +26351,13 @@ show_status() {
             echo -e "    ${DIM}Check status: ${WHITE}systemctl status spiralstratum${NC}"
         fi
 
+        # Start dashboard and sentinel if not running (they depend on stratum)
+        for _svc in spiraldash spiralsentinel; do
+            if systemctl is-enabled --quiet "$_svc" 2>/dev/null && ! systemctl is-active --quiet "$_svc" 2>/dev/null; then
+                sudo systemctl start "$_svc" 2>/dev/null || true
+            fi
+        done
+
         # Show pool address — single-coin config uses pool.address directly (no symbol: block)
         local pool_addr
         pool_addr=$(grep -E '^\s*address:' "${INSTALL_DIR}/config/config.yaml" 2>/dev/null \
@@ -26369,7 +26447,9 @@ show_status() {
             if [[ -n "$CLOUD_DETECTED" ]]; then
             echo -e "   ${GREEN}✓${NC} Dashboard accessible via SSH tunnel: ${WHITE}ssh -L 1618:localhost:1618 ${ADMIN_USER}@${CLOUD_SERVER_IP:-YOUR_SERVER_IP}${NC}"
             else
-            echo -e "   ${GREEN}✓${NC} Dashboard goes live at ${WHITE}http://${LOCAL_IP}:1618${NC}"
+            local _sync_proto="http"
+            if grep -q "^ExecStart.*\-\-certfile" /etc/systemd/system/spiraldash.service 2>/dev/null; then _sync_proto="https"; fi
+            echo -e "   ${GREEN}✓${NC} Dashboard goes live at ${WHITE}${_sync_proto}://${LOCAL_IP}:1618${NC}"
             fi
             echo ""
             echo -e " ${YELLOW}Everything is automated - just wait for sync to finish!${NC}"
@@ -26439,25 +26519,25 @@ watch_sync() {
     echo -e "${CYAN}+============================================================================+${NC}"
     echo -e "${CYAN}|${NC}  ${DIM}Controls:${NC} ${WHITE}q${NC}${DIM}=quit${NC}  ${WHITE}b${NC}${DIM}=background${NC}  ${DIM}|${NC}  ${DIM}Sync continues even if you exit${NC}        ${CYAN}|${NC}"
     echo -e "${CYAN}+============================================================================+${NC}"
-    echo ""
-    echo ""  # Line 10: Progress bar
-    echo ""  # Line 11: Blocks info
-    echo ""  # Line 12: Speed/ETA
-    echo ""  # Line 13: Remaining
-    echo ""  # Line 14: Peers/Network
-    echo ""
-    echo ""
+    echo ""  # Line 9: Progress bar
+    echo ""  # Line 10: Blocks info
+    echo ""  # Line 11: Speed/ETA
+    echo ""  # Line 12: Remaining
+    echo ""  # Line 13: Peers/Network
+    echo ""  # Line 14: spacer
+    echo ""  # Line 15: Updated timestamp
     # Line 17-26: Info box with spiral animation placeholder
     echo -e "${DIM}------------------------------------------------------------------------${NC}"
     echo -e " ${WHITE}What happens when sync completes:${NC}"
     echo -e "   ${GREEN}+${NC} Spiral Stratum starts automatically (no action needed)"
     echo -e "   ${GREEN}+${NC} Pool becomes ready to accept miner connections"
+    local _watch_proto="http"
+    if grep -q "^ExecStart.*\-\-certfile" /etc/systemd/system/spiraldash.service 2>/dev/null; then _watch_proto="https"; fi
     if [[ -n "$CLOUD_DETECTED" ]]; then
-    echo -e "   ${GREEN}+${NC} Dashboard: ssh -L 1618:localhost:1618 ${ADMIN_USER}@${CLOUD_SERVER_IP:-YOUR_SERVER_IP}  then  http://localhost:1618"
+    echo -e "   ${GREEN}+${NC} Dashboard: ssh -L 1618:localhost:1618 ${ADMIN_USER}@${CLOUD_SERVER_IP:-YOUR_SERVER_IP}  then  ${_watch_proto}://localhost:1618"
     else
-    echo -e "   ${GREEN}+${NC} Dashboard goes live at ${WHITE}http://${LOCAL_IP}:1618${NC}"
+    echo -e "   ${GREEN}+${NC} Dashboard goes live at ${WHITE}${_watch_proto}://${LOCAL_IP}:1618${NC}"
     fi
-    echo ""
     echo -e " ${YELLOW}Everything is automated - just wait for sync to finish!${NC}"
     echo -e "${DIM}------------------------------------------------------------------------${NC}"
     echo ""
@@ -26510,7 +26590,7 @@ watch_sync() {
             local WAIT_MINS=$((WAIT_SECS / 60))
 
             # Move to content area and update
-            printf "\033[10;1H"  # Move to line 10
+            printf "\033[9;1H"  # Move to line 9
 
             # Show friendly loading message - this is NORMAL, not an error!
             echo -e "  ${CYAN}⏳ ${DAEMON_LOADING_MESSAGE}${NC}                                              "
@@ -26544,7 +26624,7 @@ watch_sync() {
             fi
 
             # Move to content area and update
-            printf "\033[10;1H"  # Move to line 10
+            printf "\033[9;1H"  # Move to line 9
 
             # Check if this is a network issue vs daemon issue
             local DAEMON_RUNNING=$(systemctl is-active "$SERVICE_NAME" 2>/dev/null || echo "unknown")
@@ -26633,7 +26713,7 @@ watch_sync() {
 
         # Handle case where daemon just started and hasn't discovered chain yet
         if [[ -z "$HEADERS" ]] || [[ "$HEADERS" == "0" ]]; then
-            printf "\033[10;1H"
+            printf "\033[9;1H"
             echo -e "  ${YELLOW}⏳ Connecting to network peers...${NC}                                      "
             echo -e "                                                                            "
             echo -e "  ${DIM}The daemon is running but hasn't discovered the blockchain yet.${NC}        "
@@ -26758,6 +26838,13 @@ watch_sync() {
                 echo -e "    ${DIM}The service has Restart=always and will come online automatically${NC}"
                 echo -e "    ${DIM}Check status: ${WHITE}systemctl status spiralstratum${NC}"
             fi
+            # Start dashboard and sentinel if not running (they depend on stratum)
+            for _svc in spiraldash spiralsentinel; do
+                if systemctl is-enabled --quiet "$_svc" 2>/dev/null && ! systemctl is-active --quiet "$_svc" 2>/dev/null; then
+                    sudo systemctl start "$_svc" 2>/dev/null || true
+                fi
+            done
+
             echo ""
             echo -e "  ${DIM}Your pool is ready. Connect miners to:${NC}"
             # Read stratum port from config - look for "port:" under stratum section
@@ -27027,18 +27114,18 @@ watch_sync() {
 
         # Move to content area — use explicit \033[row;1H for each line
         # instead of relying on \n for carriage return (defense-in-depth)
-        printf "\033[10;1H"
+        printf "\033[9;1H"
         echo -ne "  "
         draw_progress_bar "$PCT"
         printf " ${WHITE}${BOLD}%6.2f%%${NC}              " "$PCT"
 
-        printf "\033[11;1H"
+        printf "\033[10;1H"
         printf "  ${DIM}Blocks:${NC}    ${WHITE}%-14s${NC} / ${WHITE}%-14s${NC}        " "$BLOCKS_FMT" "$HEADERS_FMT"
 
-        printf "\033[12;1H"
+        printf "\033[11;1H"
         printf "  ${DIM}Speed:${NC}     ${CYAN}%-18s${NC} ${DIM}ETA:${NC} ${YELLOW}%-12s${NC}                    " "$SPEED_STR" "~$ETA_STR"
 
-        printf "\033[13;1H"
+        printf "\033[12;1H"
         printf "  ${DIM}Remaining:${NC} ${MAGENTA}%-14s${NC} blocks                      " "$(format_number $REMAINING_BLOCKS)"
 
         # Get peer count and network stats (with retry on failure)
@@ -27092,13 +27179,13 @@ watch_sync() {
         elif [[ $PEER_COUNT -ge 20 ]]; then
             PEER_COLOR="${YELLOW}"
         fi
-        printf "\033[14;1H"
+        printf "\033[13;1H"
         printf "  ${DIM}Peers:${NC}     ${PEER_COLOR}%-4s${NC}  ${DIM}↓${NC} ${CYAN}%-10s${NC}${GREEN}%-12s${NC} ${DIM}↑${NC} ${CYAN}%-10s${NC}${GREEN}%-12s${NC}    " "$PEER_COUNT" "$RECV_STR" "$RECV_SPEED_STR" "$SENT_STR" "$SENT_SPEED_STR"
 
-        # Clear line 15 (leftover from waiting-for-peers phase) and update timestamp
-        printf "\033[15;1H"
+        # Clear line 14 (leftover from waiting-for-peers phase) and update timestamp
+        printf "\033[14;1H"
         printf "                                                                              "
-        printf "\033[16;1H"
+        printf "\033[15;1H"
         printf "  ${DIM}Updated: $(date '+%H:%M:%S')${NC}                                              "
 
         # Use normal check interval when connection is healthy
@@ -33450,6 +33537,21 @@ EXPORTEOF
         sudo ln -sf "${INSTALL_DIR}/scripts/update-checker.sh" /usr/local/bin/spiralpool-update
     fi
 
+    # Copy enable-https script (privileged — patches spiraldash.service for HTTPS, runs via sudo from dashboard UI)
+    if [[ -f "${SCRIPTS_SRC}/enable-https.sh" ]]; then
+        sudo cp "${SCRIPTS_SRC}/enable-https.sh" "${INSTALL_DIR}/scripts/"
+        sudo chmod 755 "${INSTALL_DIR}/scripts/enable-https.sh"
+        sudo chown root:root "${INSTALL_DIR}/scripts/enable-https.sh"
+    fi
+
+    # Copy apt-noninteractive wrapper (privileged — sets DEBIAN_FRONTEND inside root
+    # process so env vars never need to cross sudo's env_reset barrier)
+    if [[ -f "${SCRIPTS_SRC}/apt-noninteractive.sh" ]]; then
+        sudo cp "${SCRIPTS_SRC}/apt-noninteractive.sh" "${INSTALL_DIR}/scripts/"
+        sudo chmod 755 "${INSTALL_DIR}/scripts/apt-noninteractive.sh"
+        sudo chown root:root "${INSTALL_DIR}/scripts/apt-noninteractive.sh"
+    fi
+
     # Copy maintenance mode script (non-privileged — called directly by upgrade.sh/update-checker)
     if [[ -f "${SCRIPTS_SRC}/maintenance-mode.sh" ]]; then
         sudo cp "${SCRIPTS_SRC}/maintenance-mode.sh" "${INSTALL_DIR}/scripts/"
@@ -35525,8 +35627,10 @@ print_completion() {
     echo -e "${WHITE}  WEB INTERFACES${NC}"
     echo -e "${CYAN}═══════════════════════════════════════════════════════════════════════════════${NC}"
     echo ""
+    local _finish_proto="http"
+    if grep -q "^ExecStart.*\-\-certfile" /etc/systemd/system/spiraldash.service 2>/dev/null; then _finish_proto="https"; fi
     if [[ "$HA_MODE" == "ha-backup" ]]; then
-        echo -e "  ${WHITE}Dashboard:${NC}       http://$connect_ip:$DASHBOARD_PORT ${DIM}(active on MASTER node only)${NC}"
+        echo -e "  ${WHITE}Dashboard:${NC}       ${_finish_proto}://$connect_ip:$DASHBOARD_PORT ${DIM}(active on MASTER node only)${NC}"
         echo -e "  ${WHITE}Pool API:${NC}        http://$connect_ip:$API_PORT/api/pools ${DIM}(via VIP)${NC}"
         echo ""
         echo -e "  ${DIM}Dashboard and Sentinel run on the MASTER node. On failover, this node${NC}"

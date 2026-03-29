@@ -2002,17 +2002,29 @@
     </div>
     <script>
         (function() {
-            if (window.location.protocol === 'http:') {
+            if (window.location.protocol !== 'http:') return;
+            // Only show HTTP warning if HTTPS is actually available on this port.
+            // When HTTPS is not enabled, gunicorn only speaks HTTP — the HTTPS link would fail.
+            fetch('/api/system/https/status').then(function(r) { return r.json(); }).then(function(data) {
+                if (!data.success) return;
                 var banner = document.getElementById('http-warning-banner');
-                if (banner) {
+                if (!banner) return;
+                if (data.https_enabled) {
+                    // HTTPS is active but user arrived via HTTP (shouldn't normally happen)
+                    banner.style.display = 'block';
+                    document.body.style.paddingTop = '70px';
+                    var link = document.getElementById('https-redirect-link');
+                    if (link) link.href = 'https://' + window.location.host + window.location.pathname;
+                } else if (data.cert_exists) {
+                    // Cert ready but HTTPS not enabled — nudge to Management tab
+                    banner.querySelector('span').innerHTML = 'Enable HTTPS from the <a href="#" onclick="switchTab(\'management\');return false;" style="color:#ffcc00;text-decoration:underline;font-weight:600;">Management tab</a> to secure your connection.';
+                    var link = document.getElementById('https-redirect-link');
+                    if (link) link.style.display = 'none';
                     banner.style.display = 'block';
                     document.body.style.paddingTop = '70px';
                 }
-                var link = document.getElementById('https-redirect-link');
-                if (link) {
-                    link.href = 'https://' + window.location.host + window.location.pathname;
-                }
-            }
+                // No cert, no HTTPS — don't show banner (nothing user can do from here)
+            }).catch(function() {});
         })();
     </script>
 
@@ -2591,6 +2603,21 @@
                             <input type="color" id="ct-chart-shares-rate" value="#4ade80" data-var="chart-shares-rate" onchange="customThemeLive()" style="width: 100%; height: 24px; border: none; border-radius: 4px; cursor: pointer;">
                         </div>
                     </div>
+                    <div style="font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 4px;">Block Analytics Colors</div>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.4rem; margin-bottom: 0.75rem;">
+                        <div>
+                            <label style="color: var(--text-muted); font-size: 0.65rem; display: block; margin-bottom: 2px;">Actual</label>
+                            <input type="color" id="ct-chart-blocks-actual" value="#ffd700" data-var="chart-blocks-actual" onchange="customThemeLive()" style="width: 100%; height: 24px; border: none; border-radius: 4px; cursor: pointer;">
+                        </div>
+                        <div>
+                            <label style="color: var(--text-muted); font-size: 0.65rem; display: block; margin-bottom: 2px;">Expected</label>
+                            <input type="color" id="ct-chart-blocks-expected" value="#00d4ff" data-var="chart-blocks-expected" onchange="customThemeLive()" style="width: 100%; height: 24px; border: none; border-radius: 4px; cursor: pointer;">
+                        </div>
+                        <div>
+                            <label style="color: var(--text-muted); font-size: 0.65rem; display: block; margin-bottom: 2px;">Pool Share</label>
+                            <input type="color" id="ct-chart-hashrate-pool-share" value="#00d4ff" data-var="chart-hashrate-pool-share" onchange="customThemeLive()" style="width: 100%; height: 24px; border: none; border-radius: 4px; cursor: pointer;">
+                        </div>
+                    </div>
 
                     <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.5rem; margin-bottom: 0.75rem; align-items: end;">
                         <div>
@@ -2641,6 +2668,7 @@
     <!-- Tab Navigation -->
     <nav class="tab-nav">
         <button class="tab-nav-btn active" onclick="switchTab('overview')">Overview</button>
+        <button class="tab-nav-btn" onclick="switchTab('blocks')">Blocks</button>
         <button class="tab-nav-btn" onclick="switchTab('management')">Management</button>
     </nav>
 
@@ -3066,6 +3094,83 @@
         </div><!-- /sortable-sections -->
     </div><!-- /tab-overview -->
 
+    <!-- ═══════════════ TAB: BLOCKS ═══════════════ -->
+    <div id="tab-blocks" class="tab-content">
+
+        <!-- Block Analytics Summary Stats -->
+        <section class="stats-overview" style="margin-bottom: 1rem;">
+            <div class="stat-card hashrate">
+                <div class="stat-label">Pool Hashrate</div>
+                <div class="stat-value">
+                    <span id="ba-pool-hashrate">--</span>
+                    <span class="stat-unit" id="ba-pool-hashrate-unit">TH/s</span>
+                </div>
+                <div class="stat-sub">Your mining power</div>
+            </div>
+
+            <div class="stat-card difficulty">
+                <div class="stat-label">Network Hashrate</div>
+                <div class="stat-value">
+                    <span id="ba-network-hashrate">--</span>
+                    <span class="stat-unit" id="ba-network-hashrate-unit">TH/s</span>
+                </div>
+                <div class="stat-sub">Total network</div>
+            </div>
+
+            <div class="stat-card shares">
+                <div class="stat-label">Pool Share</div>
+                <div class="stat-value">
+                    <span id="ba-pool-share">--</span>
+                    <span class="stat-unit">%</span>
+                </div>
+                <div class="stat-sub">of network hashrate</div>
+            </div>
+
+            <div class="stat-card blocks">
+                <div class="stat-label">Expected Blocks</div>
+                <div class="stat-value">
+                    <span id="ba-expected-blocks">--</span>
+                </div>
+                <div class="stat-sub" id="ba-luck-status">--</div>
+            </div>
+        </section>
+
+        <!-- Cumulative Blocks Chart -->
+        <section class="collapsible-section" style="margin-bottom: 1rem;">
+            <div class="collapsible-header" onclick="toggleSection('ba-cumulative-section')">
+                <h3>Blocks: Pool vs Expected</h3>
+                <span class="collapsible-toggle">▼</span>
+            </div>
+            <div class="collapsible-content" id="ba-cumulative-section" style="padding: 1rem;">
+                <div style="display: flex; gap: 1rem; margin-bottom: 0.75rem; font-family: var(--font-mono); font-size: 0.75rem;">
+                    <span><span style="display: inline-block; width: 12px; height: 12px; background: var(--chart-blocks-actual); border-radius: 2px; vertical-align: middle; margin-right: 4px;"></span> Pool Blocks (actual)</span>
+                    <span><span style="display: inline-block; width: 12px; height: 12px; background: var(--chart-blocks-expected); border-radius: 2px; vertical-align: middle; margin-right: 4px;"></span> Expected Blocks</span>
+                </div>
+                <div style="position: relative; height: 350px;">
+                    <canvas id="chart-blocks-cumulative"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <!-- Hashrate Share Donut -->
+        <section class="collapsible-section">
+            <div class="collapsible-header" onclick="toggleSection('ba-donut-section')">
+                <h3>Network Hashrate Share</h3>
+                <span class="collapsible-toggle">▼</span>
+            </div>
+            <div class="collapsible-content" id="ba-donut-section" style="padding: 1rem;">
+                <div style="display: flex; gap: 1rem; margin-bottom: 0.75rem; font-family: var(--font-mono); font-size: 0.75rem;">
+                    <span><span style="display: inline-block; width: 12px; height: 12px; background: var(--chart-hashrate-pool-share); border-radius: 2px; vertical-align: middle; margin-right: 4px;"></span> Your Hashrate</span>
+                    <span><span style="display: inline-block; width: 12px; height: 12px; background: rgba(255,255,255,0.15); border-radius: 2px; vertical-align: middle; margin-right: 4px;"></span> Rest of Network</span>
+                </div>
+                <div style="position: relative; height: 300px; max-width: 400px; margin: 0 auto;">
+                    <canvas id="chart-hashrate-donut"></canvas>
+                </div>
+            </div>
+        </section>
+
+    </div><!-- /tab-blocks -->
+
     <!-- ═══════════════ TAB: MANAGEMENT ═══════════════ -->
     <div id="tab-management" class="tab-content">
 
@@ -3119,6 +3224,12 @@
                     <div id="mgmt-updates" style="font-family: var(--font-mono, 'Share Tech Mono', monospace); font-size: 0.85rem;">
                         <div style="color: var(--text-muted);">Loading...</div>
                     </div>
+                    <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-primary, rgba(255,255,255,0.06));">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 0.75rem; color: var(--text-muted, #6b7280);">Gracefully restart the system</span>
+                            <button onclick="rebootSystem()" id="btn-reboot-system" style="background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #ef4444; padding: 2px 8px; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">Reboot</button>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Spiral Pool Upgrade -->
@@ -3132,6 +3243,17 @@
                     </div>
                     <div id="mgmt-pool-upgrade" style="font-family: var(--font-mono, 'Share Tech Mono', monospace); font-size: 0.85rem;">
                         <div style="color: var(--text-muted);">Click Check to look for updates</div>
+                    </div>
+                </div>
+
+                <!-- HTTPS / TLS Security -->
+                <div style="background: var(--bg-card, rgba(0,0,0,0.2)); border-radius: 6px; padding: 1rem; border: 1px solid var(--border-primary, rgba(255,255,255,0.03));">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                        <div style="font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted, #6b7280);">Dashboard Security</div>
+                        <span id="https-status-badge" style="font-size: 0.65rem; padding: 2px 8px; border-radius: 4px; font-family: var(--font-mono, 'Share Tech Mono', monospace);"></span>
+                    </div>
+                    <div id="https-status-content" style="font-family: var(--font-mono, 'Share Tech Mono', monospace); font-size: 0.85rem;">
+                        <div style="color: var(--text-muted);">Checking...</div>
                     </div>
                 </div>
 
@@ -3250,6 +3372,7 @@
                 loadWorkerGroups();
                 refreshMinerManagement();
                 checkSystemUpdates();
+                checkHttpsStatus();
                 // Start 10-second refresh for management data
                 if (!mgmtRefreshInterval) {
                     mgmtRefreshInterval = setInterval(() => {
@@ -3260,14 +3383,23 @@
                     }, 10000);
                 }
             }
+            // When switching to blocks tab, load analytics and start refresh
+            if (tabName === 'blocks') {
+                loadBlockAnalytics();
+                if (!blockAnalyticsInterval) {
+                    blockAnalyticsInterval = setInterval(() => {
+                        if (currentTab === 'blocks') loadBlockAnalytics();
+                    }, 60000);
+                }
+            }
             localStorage.setItem('activeTab', tabName);
         }
 
         // Restore active tab on load
         (function() {
             const saved = localStorage.getItem('activeTab');
-            if (saved === 'management') {
-                setTimeout(() => switchTab('management'), 100);
+            if (saved === 'management' || saved === 'blocks') {
+                setTimeout(() => switchTab(saved), 100);
             }
         })();
 
@@ -4120,7 +4252,7 @@
                 const sev = getLogSeverity(line);
                 if (sev === 'error') color = 'var(--neon-red, #f87171)';
                 else if (sev === 'warning') color = 'var(--neon-orange, #fb923c)';
-                else if (sev === 'info') color = 'var(--text-primary, #e2e8f0)';
+                else if (sev === 'info') color = 'var(--text-muted, #94a3b8)';
                 return `<div style="color:${color};margin-bottom:1px;">${line.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`;
             }).join('') || '<span style="color: var(--text-muted);">No logs matching filter</span>';
             if (!logPaused) logsEl.scrollTop = logsEl.scrollHeight;
@@ -4236,6 +4368,25 @@
             }
         }
 
+        async function rebootSystem() {
+            if (!confirm('Reboot the system? All services will be gracefully stopped and the machine will restart.')) return;
+            const btn = document.getElementById('btn-reboot-system');
+            if (btn) { btn.disabled = true; btn.textContent = 'Rebooting...'; }
+            try {
+                const response = await fetch('/api/system/reboot', { method: 'POST' });
+                const result = await response.json();
+                if (result.success) {
+                    alert('System is rebooting. The dashboard will be unavailable for a moment.');
+                } else {
+                    alert(result.error || 'Reboot failed');
+                    if (btn) { btn.disabled = false; btn.textContent = 'Reboot'; }
+                }
+            } catch (e) {
+                // Connection lost likely means reboot started
+                alert('System is rebooting. The dashboard will be unavailable for a moment.');
+            }
+        }
+
         // ═══════════════════════════════════════════════════════════════════════════
         // SPIRAL POOL UPGRADE — Check and apply updates from GitHub
         // ═══════════════════════════════════════════════════════════════════════════
@@ -4286,6 +4437,83 @@
                 if (el) el.innerHTML = `<div style="color:var(--neon-orange, #fb923c);">Upgrade failed: ${e.message}</div>`;
             } finally {
                 if (btn) { btn.disabled = false; btn.textContent = 'Upgrade'; }
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // HTTPS / TLS SECURITY
+        // ═══════════════════════════════════════════════════════════════════════════
+
+        async function checkHttpsStatus() {
+            const badge = document.getElementById('https-status-badge');
+            const content = document.getElementById('https-status-content');
+            if (!badge || !content) return;
+
+            try {
+                const response = await fetch('/api/system/https/status');
+                const data = await response.json();
+                if (!data.success) {
+                    content.innerHTML = '<div style="color:var(--text-muted);">Could not check HTTPS status</div>';
+                    return;
+                }
+
+                if (data.https_enabled) {
+                    badge.textContent = 'HTTPS ACTIVE';
+                    badge.style.background = 'rgba(74,222,128,0.15)';
+                    badge.style.color = 'var(--neon-green, #4ade80)';
+                    badge.style.border = '1px solid rgba(74,222,128,0.3)';
+                    let html = '<div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span style="color:var(--text-muted)">Protocol</span><span style="color:var(--neon-green, #4ade80);">HTTPS (TLS)</span></div>';
+                    if (data.cert_expiry) {
+                        html += `<div style="display:flex;justify-content:space-between;"><span style="color:var(--text-muted)">Certificate Expires</span><span style="color:var(--text-primary)">${escapeHtml(data.cert_expiry)}</span></div>`;
+                    }
+                    html += '<div style="margin-top:8px;font-size:0.75rem;color:var(--text-muted);">Dashboard is secured with a self-signed TLS certificate.</div>';
+                    content.innerHTML = html;
+                } else {
+                    badge.textContent = 'HTTP ONLY';
+                    badge.style.background = 'rgba(251,146,60,0.15)';
+                    badge.style.color = 'var(--neon-orange, #fb923c)';
+                    badge.style.border = '1px solid rgba(251,146,60,0.3)';
+                    let html = '<div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span style="color:var(--text-muted)">Protocol</span><span style="color:var(--neon-orange, #fb923c);">HTTP (not encrypted)</span></div>';
+
+                    if (data.cert_exists) {
+                        html += '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="color:var(--text-muted)">Certificate</span><span style="color:var(--neon-green, #4ade80);">Ready</span></div>';
+                        html += '<div style="margin-bottom:8px;font-size:0.75rem;color:var(--text-muted);">A self-signed TLS certificate is ready. Click below to enable HTTPS. The dashboard will restart and you will need to reconnect using <strong>https://</strong> on the same port. Your browser will show a certificate warning on first visit — accept it to continue.</div>';
+                        html += '<button onclick="enableHttps()" id="btn-enable-https" style="width:100%;padding:8px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);color:var(--neon-green, #4ade80);border-radius:4px;cursor:pointer;font-size:0.85rem;font-family:var(--font-mono, \'Share Tech Mono\', monospace);">Enable HTTPS</button>';
+                    } else {
+                        html += '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="color:var(--text-muted)">Certificate</span><span style="color:var(--neon-red, #e05252);">Not generated</span></div>';
+                        html += '<div style="font-size:0.75rem;color:var(--text-muted);">Run <code style="background:rgba(255,255,255,0.05);padding:1px 4px;border-radius:2px;">sudo ./upgrade.sh</code> to generate a TLS certificate. You can then enable HTTPS from here.</div>';
+                    }
+                    content.innerHTML = html;
+                }
+            } catch (e) {
+                content.innerHTML = '<div style="color:var(--text-muted);">HTTPS status unavailable</div>';
+            }
+        }
+
+        async function enableHttps() {
+            if (!confirm('Enable HTTPS? The dashboard will restart and you will need to reconnect using https:// on the same port. Your browser will show a one-time certificate warning.')) return;
+            const btn = document.getElementById('btn-enable-https');
+            const content = document.getElementById('https-status-content');
+            if (btn) { btn.disabled = true; btn.textContent = 'Enabling...'; }
+
+            try {
+                const response = await fetch('/api/system/https/enable', { method: 'POST' });
+                const result = await response.json();
+                if (result.success) {
+                    const port = window.location.port || '1618';
+                    const hostname = window.location.hostname;
+                    const newUrl = `https://${hostname}:${port}`;
+                    content.innerHTML = `<div style="color:var(--neon-green, #4ade80);margin-bottom:8px;">HTTPS enabled! The dashboard is restarting.</div>` +
+                        `<div style="font-size:0.8rem;color:var(--text-primary);">Redirecting to <a href="${newUrl}" style="color:var(--neon-cyan, #00d4ff);">${newUrl}</a> in 10 seconds...</div>` +
+                        `<div style="margin-top:6px;font-size:0.75rem;color:var(--text-muted);">Your browser will show a certificate warning — click Advanced → Proceed to accept the self-signed certificate.</div>`;
+                    setTimeout(() => { window.location.href = newUrl; }, 10000);
+                } else {
+                    content.innerHTML = `<div style="color:var(--neon-orange, #fb923c);">${escapeHtml(result.error || 'Failed to enable HTTPS')}</div>`;
+                    if (btn) { btn.disabled = false; btn.textContent = 'Enable HTTPS'; }
+                }
+            } catch (e) {
+                if (content) content.innerHTML = `<div style="color:var(--neon-orange, #fb923c);">Error: ${escapeHtml(e.message)}</div>`;
+                if (btn) { btn.disabled = false; btn.textContent = 'Enable HTTPS'; }
             }
         }
 
@@ -8422,6 +8650,189 @@
             setInterval(fetchAlgoBadges, 30000);
             setInterval(fetchHealthData, 30000);
         });
+    </script>
+    <script>
+        /* ═══════════════ BLOCK ANALYTICS TAB ═══════════════ */
+        let blockAnalyticsChart = null;
+        let hashDonutChart = null;
+        let blockAnalyticsInterval = null;
+
+        function formatHpsForDisplay(hps) {
+            if (hps >= 1e18) return { value: (hps / 1e18).toFixed(2), unit: 'EH/s' };
+            if (hps >= 1e15) return { value: (hps / 1e15).toFixed(2), unit: 'PH/s' };
+            if (hps >= 1e12) return { value: (hps / 1e12).toFixed(2), unit: 'TH/s' };
+            if (hps >= 1e9) return { value: (hps / 1e9).toFixed(2), unit: 'GH/s' };
+            if (hps >= 1e6) return { value: (hps / 1e6).toFixed(2), unit: 'MH/s' };
+            return { value: hps.toFixed(0), unit: 'H/s' };
+        }
+
+        async function loadBlockAnalytics() {
+            try {
+                const headers = {};
+                if (typeof apiKey !== 'undefined' && apiKey) headers['X-API-Key'] = apiKey;
+                const resp = await fetch('/api/luck', { headers });
+                if (!resp.ok) return;
+                const data = await resp.json();
+                if (!data.success) return;
+
+                const luck = data.luck || {};
+                const history = data.history || [];
+                const hr = data.hashrate || {};
+
+                // --- Summary stats ---
+                const poolHps = hr.pool_hps || 0;
+                const netHps = hr.network_hps || 0;
+
+                const poolFmt = formatHpsForDisplay(poolHps);
+                const netFmt = formatHpsForDisplay(netHps);
+
+                const baPoolHr = document.getElementById('ba-pool-hashrate');
+                const baPoolUnit = document.getElementById('ba-pool-hashrate-unit');
+                const baNetHr = document.getElementById('ba-network-hashrate');
+                const baNetUnit = document.getElementById('ba-network-hashrate-unit');
+                const baShare = document.getElementById('ba-pool-share');
+                const baExpected = document.getElementById('ba-expected-blocks');
+                const baLuck = document.getElementById('ba-luck-status');
+
+                if (baPoolHr) baPoolHr.textContent = poolFmt.value;
+                if (baPoolUnit) baPoolUnit.textContent = poolFmt.unit;
+                if (baNetHr) baNetHr.textContent = netFmt.value;
+                if (baNetUnit) baNetUnit.textContent = netFmt.unit;
+
+                const sharePercent = netHps > 0 ? ((poolHps / netHps) * 100) : 0;
+                if (baShare) baShare.textContent = sharePercent < 0.01 ? sharePercent.toExponential(2) : sharePercent.toFixed(sharePercent >= 1 ? 2 : 4);
+                if (baExpected) baExpected.textContent = '~' + (luck.blocks_expected || 0).toFixed(2);
+                if (baLuck) {
+                    baLuck.textContent = 'Found: ' + (luck.blocks_found || 0) + ' | Luck: ' + (luck.percent || 0).toFixed(1) + '%';
+                }
+
+                // --- Cumulative blocks chart ---
+                const labels = history.map(h => {
+                    const d = new Date(h.timestamp * 1000);
+                    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+                });
+                const actualData = history.map(h => h.blocks_found);
+                const expectedData = history.map(h => h.blocks_expected);
+
+                const cumCanvas = document.getElementById('chart-blocks-cumulative');
+                if (cumCanvas) {
+                    const ctx = cumCanvas.getContext('2d');
+                    if (blockAnalyticsChart) blockAnalyticsChart.destroy();
+                    const actualColor = getChartColor('--chart-blocks-actual');
+                    const expectedColor = getChartColor('--chart-blocks-expected');
+                    blockAnalyticsChart = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: labels,
+                            datasets: [
+                                {
+                                    label: 'Pool Blocks (actual)',
+                                    data: actualData,
+                                    borderColor: actualColor,
+                                    backgroundColor: hexToRgba(actualColor, 0.08),
+                                    borderWidth: 2,
+                                    pointRadius: 0,
+                                    pointHoverRadius: 4,
+                                    fill: true,
+                                    tension: 0.3
+                                },
+                                {
+                                    label: 'Expected Blocks',
+                                    data: expectedData,
+                                    borderColor: expectedColor,
+                                    backgroundColor: hexToRgba(expectedColor, 0.05),
+                                    borderWidth: 2,
+                                    pointRadius: 0,
+                                    pointHoverRadius: 4,
+                                    fill: true,
+                                    tension: 0.3,
+                                    borderDash: [6, 3]
+                                }
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            interaction: { mode: 'index', intersect: false },
+                            plugins: {
+                                legend: { display: false },
+                                tooltip: {
+                                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                                    borderColor: 'rgba(255,255,255,0.1)',
+                                    borderWidth: 1,
+                                    titleFont: { family: 'Share Tech Mono', size: 11 },
+                                    bodyFont: { family: 'Share Tech Mono', size: 11 },
+                                    callbacks: {
+                                        label: function(ctx) {
+                                            return ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(2);
+                                        }
+                                    }
+                                }
+                            },
+                            scales: {
+                                x: {
+                                    ticks: { color: 'rgba(255,255,255,0.4)', font: { family: 'Share Tech Mono', size: 9 }, maxTicksLimit: 8, maxRotation: 0 },
+                                    grid: { color: 'rgba(255,255,255,0.03)' }
+                                },
+                                y: {
+                                    beginAtZero: true,
+                                    title: { display: true, text: 'Blocks', color: 'rgba(255,255,255,0.5)', font: { family: 'Share Tech Mono', size: 10 } },
+                                    ticks: { color: 'rgba(255,255,255,0.4)', font: { family: 'Share Tech Mono', size: 9 } },
+                                    grid: { color: 'rgba(255,255,255,0.03)' }
+                                }
+                            }
+                        }
+                    });
+                }
+
+                // --- Hashrate donut chart ---
+                const donutCanvas = document.getElementById('chart-hashrate-donut');
+                if (donutCanvas) {
+                    const dCtx = donutCanvas.getContext('2d');
+                    if (hashDonutChart) hashDonutChart.destroy();
+                    const restHps = Math.max(0, netHps - poolHps);
+                    const shareColor = getChartColor('--chart-hashrate-pool-share');
+                    hashDonutChart = new Chart(dCtx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: ['Your Hashrate', 'Rest of Network'],
+                            datasets: [{
+                                data: [poolHps, restHps],
+                                backgroundColor: [shareColor, 'rgba(255,255,255,0.08)'],
+                                borderColor: [hexToRgba(shareColor, 0.6), 'rgba(255,255,255,0.12)'],
+                                borderWidth: 1,
+                                hoverOffset: 6
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            cutout: '65%',
+                            plugins: {
+                                legend: { display: false },
+                                tooltip: {
+                                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                                    borderColor: 'rgba(255,255,255,0.1)',
+                                    borderWidth: 1,
+                                    titleFont: { family: 'Share Tech Mono', size: 11 },
+                                    bodyFont: { family: 'Share Tech Mono', size: 11 },
+                                    callbacks: {
+                                        label: function(ctx) {
+                                            const val = ctx.parsed;
+                                            const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+                                            const pct = total > 0 ? ((val / total) * 100).toFixed(4) : '0';
+                                            return ctx.label + ': ' + formatHpsForDisplay(val).value + ' ' + formatHpsForDisplay(val).unit + ' (' + pct + '%)';
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+            } catch (err) {
+                console.error('[BlockAnalytics] Error loading data:', err);
+            }
+        }
     </script>
     <script>
         if ('serviceWorker' in navigator) {
