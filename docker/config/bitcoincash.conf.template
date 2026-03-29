@@ -10,8 +10,6 @@ chain=main
 listen=1
 port=8433
 
-# Maximum peer connections (higher = faster sync, more bandwidth)
-maxconnections=125
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RPC CONFIGURATION
@@ -70,7 +68,6 @@ debug=0
 logtimestamps=1
 shrinkdebugfile=1
 debuglogfile=debug.log
-maxdebugfilesize=50
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # STORAGE (Full node - no pruning for mining)

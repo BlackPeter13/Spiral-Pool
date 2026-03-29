@@ -10,9 +10,6 @@ chain=main
 listen=1
 port=8333
 
-# Maximum peer connections (higher = faster sync, more bandwidth)
-maxconnections=125
-maxoutconnections=50
 
 # Increase upload target for better network health
 maxuploadtarget=0
@@ -58,8 +55,6 @@ maxsigcachesize=250
 # Script verification threads (0 = auto-detect CPU cores)
 par=0
 
-# Block download window (higher = more parallel downloads)
-maxorphantx=100
 
 # Disable mempool during initial sync for speed
 # Comment this out after sync completes!
@@ -79,7 +74,6 @@ debug=0
 logtimestamps=1
 shrinkdebugfile=1
 debuglogfile=debug.log
-maxdebugfilesize=50
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # STORAGE (Full node - no pruning for mining)

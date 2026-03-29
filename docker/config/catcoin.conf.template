@@ -9,8 +9,6 @@
 listen=1
 port=9933
 
-# Maximum peer connections
-maxconnections=125
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RPC CONFIGURATION

@@ -394,15 +394,12 @@ maxsigcachesize=250
 
 # === CLEARNET - FAST SYNC MODE ===
 maxconnections=256
-maxoutconnections=24
 maxreceivebuffer=25000
 maxsendbuffer=5000
 onlynet=ipv4
 bind=0.0.0.0
 dnsseed=1
-forcednsseed=1
 blocksonly=0
-nblocks=64
 
 # === LOGGING & CONSOLE ===
 printtoconsole=0
@@ -410,27 +407,16 @@ logtimestamps=1
 logips=1
 shrinkdebugfile=1
 debuglogfile=debug.log
-maxdebugfilesize=50
 
 # === WALLET ===
 disablewallet=0
 addresstype=legacy
 
-# === SECURITY ===
-deprecatedrpc=
-
-# === CHECKPOINTS & SIGNATURE VALIDATION ===
-checkpoints=1
+# === ASSUME VALID ===
 assumevalid=457f6864b52e5076a433afe3c28e3ae0bbeeaba9036a782ddb691242326fcb80
-
-# === BLOCK DOWNLOAD OPTIMIZATION ===
-maxblocksinprogress=32
-maxorphantx=100
-blockreconstructionextratxn=100
 
 # === SYNC OPTIMIZATION ===
 peertimeout=60
-blockstallingtimeout=10
 
 # === SEED NODES (verified working - Jan 2026) ===
 seednode=seed.digibyte.io
@@ -503,17 +489,13 @@ par=4
 
 # === CLEARNET - FAST SYNC MODE ===
 maxconnections=256
-maxoutconnections=24
 maxreceivebuffer=25000
 maxsendbuffer=5000
 listen=1
 bind=0.0.0.0
 onlynet=ipv4
 dnsseed=1
-forcednsseed=1
 peertimeout=60
-blockstallingtimeout=10
-nblocks=64
 
 # === WALLET ===
 disablewallet=0
@@ -529,9 +511,6 @@ debuglogfile=debug.log
 
 # === ASSUME VALID ===
 assumevalid=00000000000000000000611fd22f2df7c8fbd0688745c3a6c3bb5109cc2a12cb
-
-# === CHECKPOINTS ===
-checkpoints=1
 
 # === SEED NODES ===
 seednode=seed.bitcoin.sipa.be
@@ -572,8 +551,7 @@ test_bch() {
     mkdir -p "$datadir"
 
     # BCH config - NO chain=main, NO debuglogfile, NO rpcworkqueue,
-    # NO maxoutconnections, NO checkpoints, NO forcednsseed,
-    # NO peertimeout/blockstallingtimeout, NO nblocks, NO i2psam
+    # NO peertimeout, NO i2psam
     cat > "$conf" << EOF
 # Bitcoin Cash Node (BCHN) Configuration
 # Spiral Pool v3 - Multi-Coin Solo Mining
@@ -704,7 +682,6 @@ par=0
 
 # === CLEARNET - FAST SYNC MODE ===
 maxconnections=256
-maxoutconnections=24
 maxreceivebuffer=25000
 maxsendbuffer=5000
 listen=1
@@ -712,10 +689,7 @@ bind=0.0.0.0:$p2p_port
 port=$p2p_port
 onlynet=ipv4
 dnsseed=1
-forcednsseed=1
 peertimeout=60
-blockstallingtimeout=10
-nblocks=64
 
 # === WALLET ===
 disablewallet=0
@@ -728,9 +702,6 @@ logtimestamps=1
 logips=1
 shrinkdebugfile=1
 debuglogfile=debug.log
-
-# === CHECKPOINTS ===
-checkpoints=1
 
 # === SEED NODES (official Bitcoin II DNS seeds) ===
 seednode=dnsseed.bitcoin-ii.org
@@ -806,7 +777,6 @@ disablewallet=0
 # Logging
 shrinkdebugfile=1
 debuglogfile=debug.log
-maxdebugfilesize=50
 logips=1
 
 # PID file
@@ -874,7 +844,6 @@ disablewallet=0
 # Logging
 shrinkdebugfile=1
 debuglogfile=debug.log
-maxdebugfilesize=50
 logips=1
 
 # PID file
@@ -942,7 +911,6 @@ disablewallet=0
 # Logging
 shrinkdebugfile=1
 debuglogfile=debug.log
-maxdebugfilesize=50
 logips=1
 
 # PID file
@@ -1007,7 +975,6 @@ port=$p2p_port
 maxconnections=125
 listen=1
 dnsseed=1
-forcednsseed=1
 
 seednode=dnsseed-mainnet.fractalbitcoin.io
 seednode=dnsseed-mainnet.unisat.io
@@ -1025,7 +992,6 @@ disablewallet=0
 # Logging
 shrinkdebugfile=1
 debuglogfile=debug.log
-maxdebugfilesize=50
 logips=1
 
 # PID file
@@ -1161,10 +1127,8 @@ maxmempool=300
 
 # Logging
 debug=rpc
-debug=zmq
 shrinkdebugfile=1
 debuglogfile=debug.log
-maxdebugfilesize=50
 logips=1
 
 # PID file
@@ -1229,10 +1193,8 @@ maxmempool=300
 
 # Logging
 debug=rpc
-debug=zmq
 shrinkdebugfile=1
 debuglogfile=debug.log
-maxdebugfilesize=50
 logips=1
 
 # PID file
@@ -1297,10 +1259,8 @@ maxmempool=200
 
 # Logging
 debug=rpc
-debug=zmq
 shrinkdebugfile=1
 debuglogfile=debug.log
-maxdebugfilesize=50
 logips=1
 
 # PID file
@@ -1368,10 +1328,8 @@ maxmempool=200
 
 # Logging
 debug=rpc
-debug=zmq
 shrinkdebugfile=1
 debuglogfile=debug.log
-maxdebugfilesize=50
 logips=1
 
 # PID file

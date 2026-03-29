@@ -4194,7 +4194,6 @@ EOF
 listen=1
 port=8369
 maxconnections=200
-maxoutconnections=40
 datadir=$SPIRALPOOL_DIR/sys
 server=1
 rpcuser=$rpc_user
@@ -4254,7 +4253,6 @@ EOF
 listen=1
 port=10888
 maxconnections=150
-maxoutconnections=30
 datadir=$SPIRALPOOL_DIR/xmy
 server=1
 rpcuser=$rpc_user
@@ -4313,7 +4311,6 @@ EOF
 listen=1
 port=8341
 maxconnections=200
-maxoutconnections=40
 datadir=$SPIRALPOOL_DIR/fbtc
 server=1
 rpcuser=$rpc_user
@@ -4373,7 +4370,6 @@ EOF
 listen=1
 port=8345
 maxconnections=100
-maxoutconnections=20
 datadir=$SPIRALPOOL_DIR/qbx
 server=1
 rpcuser=$rpc_user

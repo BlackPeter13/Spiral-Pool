@@ -11,8 +11,6 @@
 listen=1
 port=8338
 
-# Maximum peer connections
-maxconnections=125
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RPC CONFIGURATION

@@ -195,6 +195,10 @@ Device Configuration modal in the Miner Management tab  -  per-firmware controls
 - **Log viewer inconsistent text color**  -  info-level and debug-level log lines used different shades, making the log viewer visually noisy. Unified to the same muted color (errors still red, warnings still orange)
 - **Custom theme editor layout**  -  section headers and grid layout cleaned up for better usability in the theme customization panel
 
+**Coin Daemon Config Audit**
+- **Removed invalid/unsupported config options across all coins**  -  full audit of all 14 coin daemon configs (install.sh, docker templates, pool-mode.sh, tests) removed options that are not valid config-file parameters or are daemon-specific copy-paste errors: `maxoutconnections` (BCHN doesn't support it), `maxconnections` (unnecessary in docker), `maxdebugfilesize` (DGB-only, was on 4 non-DGB coins), `nblocks` (not a valid config option), `blockstallingtimeout` (not a valid config option), `checkpoints=1` (not a valid config option), `maxblocksinprogress` (DGB-specific), `maxorphantx` (DGB-specific), `blockreconstructionextratxn` (DGB-specific), `deprecatedrpc=` (empty value, DGB-specific), `debug=zmq` (unnecessary verbose ZMQ logging on DOGE/PEP/CAT/NMC), `forcednsseed=1` (aggressive, replaced by existing `dnsseed=1`)
+- **WSL2 tee permission denied**  -  `mktemp` without sudo creates a temp file that `sudo tee` cannot write to on some WSL2 setups. Changed to `sudo mktemp` and `sudo rm -f` in the sshd hardening block
+
 ### Removed
 - `CalculateBlockReward()`  -  processor.go (7 test-only callers, zero production use)
 - `Dequeue()`  -  circuitbreaker.go (12 test-only callers, zero production use)
@@ -825,9 +829,7 @@ Device Configuration modal in the Miner Management tab  -  per-firmware controls
 
 **Installer  -  Coin Daemon Configuration Hardening**
 - `dbcache` minimum raised to 4,096 MB for all coins (8,192 MB for BTC, BCH, and DGB)  -  a ceiling applied during IBD to reduce disk I/O; coins that already had a higher value are unchanged
-- `maxconnections` tuned per-coin based on network peer availability
-- `maxoutboundconnections` added for all coins
-- `forcednsseed=1` added to all clearnet (non-Tor) coin configs  -  ensures DNS seed lookup is performed even when the local peer cache appears populated, improving connectivity on fresh installs
+- `dnsseed=1` enabled on all clearnet (non-Tor) coin configs for fast peer discovery
 
 **Installer  -  DNS Seeds Verified and Updated**
 - DNS seed lists reviewed and updated for all 14 supported coins (BTC, BCH, DGB, BC2, LTC, DOGE, DGB-SCRYPT, PEP, CAT, NMC, SYS, XMY, FBTC, QBX)

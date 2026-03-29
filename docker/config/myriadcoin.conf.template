@@ -11,8 +11,6 @@
 listen=1
 port=10888
 
-# Maximum peer connections
-maxconnections=125
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RPC CONFIGURATION
