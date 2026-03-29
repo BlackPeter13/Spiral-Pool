@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 Spiral Pool Contributors
 """
 ╔═════════════════════════════════════════════════════════════════════════════╗
-║  Spiral Sentinel v2.0.0 - PHI HASH REACTOR EDITION                                 ║
+║  Spiral Sentinel v2.0.1 - PHI HASH REACTOR EDITION                                 ║
 ║  Autonomous SHA-256 Solo Mining Monitor (DGB/BTC/BCH/BC2)                   ║
 ║  Self-Healing + Share Monitoring (No Pool Software Dependency)              ║
 ╠═════════════════════════════════════════════════════════════════════════════╣
@@ -28,7 +28,7 @@
 ║  • Whatsminer API: whatsminer.com                                           ║
 ╚═════════════════════════════════════════════════════════════════════════════╝
 """
-__version__ = "2.0.0-PHI_HASH_REACTOR"
+__version__ = "2.0.1-PHI_HASH_REACTOR"
 __codename__ = "PHI_HASH_REACTOR"
 
 import copy, json, socket, sys, time, os, urllib.request, urllib.error, ssl, random, ipaddress, re, threading, http.server
@@ -279,7 +279,10 @@ def _dashboard_url():
     The port is derived from pool_api_url (replace :4000 with :1618).
     """
     pool_url = CONFIG.get("pool_api_url", "http://localhost:4000")
-    base = pool_url.replace(":4000", ":1618")
+    # Replace the port (default 4000 → 1618) regardless of what port is configured
+    from urllib.parse import urlparse, urlunparse
+    parsed = urlparse(pool_url)
+    base = urlunparse(parsed._replace(netloc=parsed.hostname + ":1618"))
     # Check if dashboard is running HTTPS
     try:
         svc = Path("/etc/systemd/system/spiraldash.service")
@@ -5517,7 +5520,7 @@ def reload_miners():
                 "old_count": old_count,
                 "new_count": new_count,
                 "success": True,
-                "sentinel_version": "V2.0.0-PHI_HASH_REACTOR"
+                "sentinel_version": "V2.0.1-PHI_HASH_REACTOR"
             }
             _atomic_json_save(MINER_RELOAD_ACK, ack_data)
             logger.debug(f"Wrote reload ACK: {MINER_RELOAD_ACK}")
@@ -5536,7 +5539,7 @@ def reload_miners():
                 "timestamp_iso": datetime.now(timezone.utc).isoformat(),
                 "success": False,
                 "error": "Failed to reload miner configuration",
-                "sentinel_version": "V2.0.0-PHI_HASH_REACTOR"
+                "sentinel_version": "V2.0.1-PHI_HASH_REACTOR"
             }
             _atomic_json_save(MINER_RELOAD_ACK, ack_data)
         except (PermissionError, OSError):
@@ -11600,6 +11603,10 @@ def send_webhook(embed):
                 logger.warning(f"Webhook HTTP error {e.code}: {e.reason} — not retrying")
                 return False
             logger.warning(f"Webhook HTTP error {e.code}: {e.reason}")
+            if attempt < max_retries - 1:
+                time.sleep(2 * (attempt + 1))
+                continue
+            return False
         except (urllib.error.URLError, socket.timeout, OSError) as e:
             if attempt < max_retries - 1:
                 time.sleep(2 * (attempt + 1))

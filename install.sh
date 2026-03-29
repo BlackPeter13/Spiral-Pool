@@ -14,7 +14,7 @@ head -c50 "$0"|od -c|grep -q '\\r'&&{ find "$(dirname "$0")" -type f \( -name "*
 # ║                                                                            ║
 # ║   Spiral Pool Contributors                                                 ║
 # ║                                                                            ║
-# ║   Version: 2.0.0                                                         ║
+# ║   Version: 2.0.1                                                         ║
 # ║   License: BSD-3-Clause (see LICENSE file)                                 ║
 # ║                                                                            ║
 # ╚════════════════════════════════════════════════════════════════════════════╝
@@ -36,7 +36,7 @@ SCRIPT_DIR_EARLY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "$SCRIPT_DIR_EARLY/VERSION" ]]; then
     VERSION=$(tr -d '[:space:]' < "$SCRIPT_DIR_EARLY/VERSION")
 else
-    VERSION="2.0.0"
+    VERSION="2.0.1"
 fi
 INSTALL_DIR="/spiralpool"
 DIGIBYTE_VERSION="8.26.2"
@@ -662,7 +662,6 @@ ENABLE_NMC="$ENABLE_NMC"
 ENABLE_SYS="$ENABLE_SYS"
 ENABLE_XMY="$ENABLE_XMY"
 ENABLE_FBTC="$ENABLE_FBTC"
-ENABLE_QBX="$ENABLE_QBX"
 ENABLE_PEP="$ENABLE_PEP"
 ENABLE_CAT="$ENABLE_CAT"
 COIN_MODE="$COIN_MODE"
@@ -724,6 +723,7 @@ LTC_POOL_ADDRESS="$LTC_POOL_ADDRESS"
 DOGE_POOL_ADDRESS="$DOGE_POOL_ADDRESS"
 PEP_POOL_ADDRESS="$PEP_POOL_ADDRESS"
 CAT_POOL_ADDRESS="$CAT_POOL_ADDRESS"
+QBX_POOL_ADDRESS="$QBX_POOL_ADDRESS"
 GRAFANA_ADMIN_PASSWORD="$GRAFANA_ADMIN_PASSWORD"
 MULTI_DISK_CONFIGURED="$MULTI_DISK_CONFIGURED"
 CHAIN_MOUNT_POINT="$CHAIN_MOUNT_POINT"
@@ -3006,9 +3006,31 @@ check_prerequisites() {
                 # Convert to absolute value
                 drift=${drift#-}
                 if [[ $drift -gt 60 ]]; then
-                    log_error "Clock drift detected: ${drift} seconds"
-                    log_error "Blockchain consensus requires accurate time. Run: sudo timedatectl set-ntp true"
-                    exit 1
+                    if grep -qi "microsoft\|wsl" /proc/version 2>/dev/null; then
+                        # WSL2 clock drifts after Windows sleep/hibernate — attempt re-sync
+                        log_warn "Clock drift detected: ${drift}s (WSL2 — attempting re-sync via hwclock)"
+                        sudo hwclock -s 2>/dev/null || true
+                        sleep 1
+                        # Re-check after sync attempt
+                        remote_date=$(curl -sI --connect-timeout 5 https://google.com 2>/dev/null | grep -i "^date:" | cut -d' ' -f2-)
+                        if [[ -n "$remote_date" ]]; then
+                            remote_epoch=$(date -d "$remote_date" +%s 2>/dev/null || echo "0")
+                            local_epoch=$(date +%s)
+                            drift=$((local_epoch - remote_epoch))
+                            drift=${drift#-}
+                        fi
+                        if [[ $drift -gt 60 ]]; then
+                            log_error "Clock still drifted ${drift}s after re-sync."
+                            log_error "In PowerShell, run: wsl --shutdown  then reopen WSL2."
+                            exit 1
+                        else
+                            log_success "Clock re-synced (drift now ${drift}s)"
+                        fi
+                    else
+                        log_error "Clock drift detected: ${drift} seconds"
+                        log_error "Blockchain consensus requires accurate time. Run: sudo timedatectl set-ntp true"
+                        exit 1
+                    fi
                 elif [[ $drift -gt 10 ]]; then
                     log_warn "Minor clock drift: ${drift}s (acceptable)"
                 fi
@@ -14444,6 +14466,14 @@ kernel.randomize_va_space = 2
 fs.suid_dumpable = 0
 SYSCTL
 
+    # WSL2: remove kernel-security params that are read-only on the shared kernel.
+    # The file was written with all params for native Linux; strip the ones WSL2 can't apply.
+    if grep -qi "microsoft\|wsl" /proc/version 2>/dev/null; then
+        sudo sed -i '/^kernel\.dmesg_restrict/d; /^kernel\.kptr_restrict/d; /^kernel\.randomize_va_space/d; /^fs\.suid_dumpable/d' \
+            /etc/sysctl.d/99-spiralpool.conf
+        log "WSL2: skipped read-only kernel security params (shared kernel with Windows)"
+    fi
+
     # Apply sysctl settings immediately
     sudo sysctl -p /etc/sysctl.d/99-spiralpool.conf >/dev/null 2>&1 || true
 
@@ -15021,7 +15051,7 @@ echo -e "${CYAN}             ░███${NC}"
 echo -e "${CYAN}             █████${NC}"
 echo -e "${CYAN}            ░░░░░${NC}"
 echo -e "                                 ${MAGENTA}Multi-Algorithm Solo Mining Pool${NC}"
-echo -e "                                     ${DIM}V2.0.0 — PHI HASH REACTOR EDITION${NC}"
+echo -e "                                     ${DIM}V2.0.1 — PHI HASH REACTOR EDITION${NC}"
 echo ""
 echo -e "  ${POOL_C}${POOL_I}${NC} Stratum    ${POOL_C}${POOL_P}${NC}   ${DASH_C}${DASH_I}${NC} Dashboard   ${DASH_C}${DASH_P}${NC}   ${SENT_C}${SENT_I}${NC} Sentinel   ${SENT_C}${SENT_P}${NC}"
 echo -e "  ${DIM}Uptime:${NC} ${GREEN}${UPTIME}${NC}   ${DIM}Load:${NC} ${GREEN}${LOAD}${NC}   ${DIM}Mem:${NC} ${GREEN}${MEM_USED}/${MEM_TOTAL}${NC}   ${DIM}Disk:${NC} ${GREEN}${DISK_USED}${NC}"
@@ -15347,17 +15377,7 @@ seednode=eu.digibyteseed.com
 seednode=seed.digibyte.link
 seednode=seed.quakeguy.com
 seednode=seed.aroundtheblock.app
-seednode=seed.digibyte.services
-
-# DNS seeds for peer discovery
-dnsseed=seed.digibyte.io
-dnsseed=seed.diginode.tools
-dnsseed=seed.digibyteblockchain.org
-dnsseed=eu.digibyteseed.com
-dnsseed=seed.digibyte.link
-dnsseed=seed.quakeguy.com
-dnsseed=seed.aroundtheblock.app
-dnsseed=seed.digibyte.services"; fi)
+seednode=seed.digibyte.services"; fi)
 EOF
     sudo chmod 640 "$DGB_DIR/digibyte.conf"  # 640 allows group read for CLI tools
     sudo chown -R "$POOL_USER:$POOL_USER" "$DGB_DIR"
@@ -15779,12 +15799,7 @@ seednode=seed.btc.petertodd.net
 seednode=seed.bitcoin.sprovoost.nl
 seednode=dnsseed.emzy.de
 seednode=seed.bitcoin.wiz.biz
-seednode=seed.mainnet.achownodes.xyz
-
-# Additional DNS seeds for redundancy
-dnsseed=seed.bitcoin.sipa.be
-dnsseed=dnsseed.bluematt.me
-dnsseed=seed.btc.petertodd.net"; fi)
+seednode=seed.mainnet.achownodes.xyz"; fi)
 EOF
 
     sudo chmod 640 "$BTC_DATA/bitcoin.conf"  # 640 allows group read for CLI tools
@@ -16432,10 +16447,6 @@ $(if [[ "$BC2_TOR_ENABLED" != "true" ]]; then echo "# Primary official seeds (Bi
 seednode=dnsseed.bitcoin-ii.org
 seednode=bitcoinII.ddns.net
 
-# DNS seeds for peer discovery
-dnsseed=dnsseed.bitcoin-ii.org
-dnsseed=bitcoinII.ddns.net
-
 # Static peer fallback (BC2 DNS seed discovery is unreliable in v29.x)
 addnode=144.76.79.60:8338
 addnode=75.130.145.1:8338
@@ -16635,13 +16646,7 @@ seednode=seed-a.litecoin.loshan.co.uk
 seednode=dnsseed.thrasher.io
 seednode=dnsseed.litecointools.com
 seednode=dnsseed.litecoinpool.org
-seednode=dnsseed.koin-project.com
-
-dnsseed=seed-a.litecoin.loshan.co.uk
-dnsseed=dnsseed.thrasher.io
-dnsseed=dnsseed.litecointools.com
-dnsseed=dnsseed.litecoinpool.org
-dnsseed=dnsseed.koin-project.com"
+seednode=dnsseed.koin-project.com"
     fi
 
     # Create configuration
@@ -16852,10 +16857,7 @@ dnsseed=1
 
 # === SEED NODES (verified against dogecoin/dogecoin master chainparams.cpp) ===
 seednode=seed.multidoge.org
-seednode=seed2.multidoge.org
-
-dnsseed=seed.multidoge.org
-dnsseed=seed2.multidoge.org"
+seednode=seed2.multidoge.org"
     fi
 
     # Create configuration
@@ -17070,10 +17072,7 @@ dnsseed=1
 
 # === SEED NODES (verified against pepecoinppc/pepecoin master chainparams.cpp) ===
 seednode=seeds.pepecoin.org
-seednode=seeds.pepeblocks.com
-
-dnsseed=seeds.pepecoin.org
-dnsseed=seeds.pepeblocks.com"
+seednode=seeds.pepeblocks.com"
     fi
 
     # Create configuration
@@ -17298,12 +17297,7 @@ seednode=dnsseed.catsonmylap.top
 seednode=dnsseed.catcoin.party
 seednode=dnsseed.remembermeasyoupassby.top
 seednode=seed.catcoinwallets.com
-seednode=cat.geekhash.org
-
-dnsseed=catcoin.seeds.multicoin.co
-dnsseed=dnsseed.catalyst.ovh
-dnsseed=dnsseed.wildcat.ovh
-dnsseed=seed.catcoinwallets.com"
+seednode=cat.geekhash.org"
     fi
 
     # Create configuration
@@ -17513,14 +17507,7 @@ seednode=seed.nmc.markasoftware.com
 seednode=dnsseed1.nmc.dotbit.zone
 seednode=dnsseed2.nmc.dotbit.zone
 seednode=dnsseed.nmc.testls.space
-seednode=namecoin.seed.cypherstack.com
-
-dnsseed=nmc.seed.quisquis.de
-dnsseed=seed.nmc.markasoftware.com
-dnsseed=dnsseed1.nmc.dotbit.zone
-dnsseed=dnsseed2.nmc.dotbit.zone
-dnsseed=dnsseed.nmc.testls.space
-dnsseed=namecoin.seed.cypherstack.com"
+seednode=namecoin.seed.cypherstack.com"
     fi
 
     # Create configuration
@@ -17729,12 +17716,7 @@ dnsseed=1
 seednode=seed1.syscoin.org
 seednode=seed2.syscoin.org
 seednode=seed3.syscoin.org
-seednode=seed4.syscoin.org
-
-dnsseed=seed1.syscoin.org
-dnsseed=seed2.syscoin.org
-dnsseed=seed3.syscoin.org
-dnsseed=seed4.syscoin.org"
+seednode=seed4.syscoin.org"
     fi
 
     # Create configuration
@@ -17959,12 +17941,7 @@ seednode=seed6.myriadcoin.org
 seednode=seed7.myriadcoin.org
 seednode=seed8.myriadcoin.org
 seednode=myriadseed1.cryptapus.org
-seednode=xmy-seed1.coinid.org
-
-dnsseed=seed1.myriadcoin.org
-dnsseed=seed2.myriadcoin.org
-dnsseed=seed3.myriadcoin.org
-dnsseed=seed4.myriadcoin.org"
+seednode=xmy-seed1.coinid.org"
     fi
 
     # Create configuration
@@ -18171,11 +18148,7 @@ dnsseed=1
 
 # === SEED NODES (official Fractal Bitcoin DNS seeds) ===
 seednode=dnsseed-mainnet.fractalbitcoin.io
-seednode=dnsseed-mainnet.unisat.io
-
-# DNS seeds for peer discovery
-dnsseed=dnsseed-mainnet.fractalbitcoin.io
-dnsseed=dnsseed-mainnet.unisat.io"
+seednode=dnsseed-mainnet.unisat.io"
     fi
 
     # Create configuration
@@ -20827,7 +20800,7 @@ build_stratum() {
     }
 
     # Read version for ldflags injection (matches upgrade.sh behavior)
-    local BUILD_VERSION="2.0.0"
+    local BUILD_VERSION="2.0.1"
     if [[ -f "$SCRIPT_DIR/VERSION" ]]; then
         BUILD_VERSION=$(tr -d '[:space:]' < "$SCRIPT_DIR/VERSION")
     fi
@@ -29084,11 +29057,11 @@ echo -e "    Worker:  ${WHITE}$NEW_ADDRESS.worker_name${NC}"
 echo ""
 WALLETEOF
 
-    # V2.0.0-PHI_HASH_REACTOR: Create backup command
+    # V2.0.1-PHI_HASH_REACTOR: Create backup command
     sudo tee /usr/local/bin/spiralpool-backup > /dev/null << 'BACKUPEOF'
 #!/bin/bash
 #
-# Spiral Pool Backup Utility - V2.0.0-PHI_HASH_REACTOR
+# Spiral Pool Backup Utility - V2.0.1-PHI_HASH_REACTOR
 # Creates encrypted, compressed backups of wallet, database, and config
 #
 
@@ -29133,7 +29106,7 @@ log_success() { echo -e "${GREEN}[$(date '+%H:%M:%S')] ✓${NC} $1"; }
 show_help() {
     echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${NC}${WHITE}       SPIRAL POOL BACKUP UTILITY - V2.0.0-PHI_HASH_REACTOR${NC}${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}${WHITE}       SPIRAL POOL BACKUP UTILITY - V2.0.1-PHI_HASH_REACTOR${NC}${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo "Usage: spiralpool-backup [OPTIONS]"
@@ -29482,7 +29455,7 @@ create_manifest() {
 
     cat > "${TEMP_DIR}/manifest.json" << MANIFEST
 {
-    "version": "2.0.0",
+    "version": "2.0.1",
     "created": "$(date -Iseconds)",
     "hostname": "$(hostname)",
     "components": {
@@ -29749,7 +29722,7 @@ mkdir -p "$TEMP_DIR"
 
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║${NC}${WHITE}              SPIRAL POOL BACKUP - V2.0.0-PHI_HASH_REACTOR${NC}${CYAN}║${NC}"
+echo -e "${CYAN}║${NC}${WHITE}              SPIRAL POOL BACKUP - V2.0.1-PHI_HASH_REACTOR${NC}${CYAN}║${NC}"
 echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -29802,11 +29775,11 @@ echo "  To restore: spiralpool-restore ${OUTPUT_FILE}"
 echo ""
 BACKUPEOF
 
-    # V2.0.0-PHI_HASH_REACTOR: Create restore command
+    # V2.0.1-PHI_HASH_REACTOR: Create restore command
     sudo tee /usr/local/bin/spiralpool-restore > /dev/null << 'RESTOREEOF'
 #!/bin/bash
 #
-# Spiral Pool Restore Utility - V2.0.0-PHI_HASH_REACTOR
+# Spiral Pool Restore Utility - V2.0.1-PHI_HASH_REACTOR
 # Restores backups created by spiralpool-backup
 #
 
@@ -29853,7 +29826,7 @@ log_success() { echo -e "${GREEN}[$(date '+%H:%M:%S')] ✓${NC} $1"; }
 show_help() {
     echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${NC}${WHITE}         SPIRAL POOL RESTORE UTILITY - V2.0.0-PHI_HASH_REACTOR${NC}${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}${WHITE}         SPIRAL POOL RESTORE UTILITY - V2.0.1-PHI_HASH_REACTOR${NC}${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo "Usage: spiralpool-restore BACKUP_FILE [OPTIONS]"
@@ -30175,7 +30148,7 @@ fi
 
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║${NC}${WHITE}           SPIRAL POOL RESTORE - V2.0.0-PHI_HASH_REACTOR${NC}${CYAN}║${NC}"
+echo -e "${CYAN}║${NC}${WHITE}           SPIRAL POOL RESTORE - V2.0.1-PHI_HASH_REACTOR${NC}${CYAN}║${NC}"
 echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -33552,9 +33525,16 @@ EXPORTEOF
     if [[ -f "${SCRIPT_DIR}/scripts/spiralctl.sh" ]]; then
         sudo cp "${SCRIPT_DIR}/scripts/spiralctl.sh" "${INSTALL_DIR}/scripts/"
         sudo chmod +x "${INSTALL_DIR}/scripts/spiralctl.sh"
-        sudo chown "$POOL_USER:$POOL_USER" "${INSTALL_DIR}/scripts/spiralctl.sh"
+        sudo chown root:root "${INSTALL_DIR}/scripts/spiralctl.sh"
         sudo ln -sf "${INSTALL_DIR}/scripts/spiralctl.sh" /usr/local/bin/spiralctl
         log_success "Installed spiralctl"
+    fi
+
+    # Copy install.sh to INSTALL_DIR so spiralctl coin enable can find it
+    if [[ -f "${SCRIPT_DIR}/install.sh" ]]; then
+        sudo cp "${SCRIPT_DIR}/install.sh" "${INSTALL_DIR}/install.sh"
+        sudo chmod +x "${INSTALL_DIR}/install.sh"
+        sudo chown "$POOL_USER:$POOL_USER" "${INSTALL_DIR}/install.sh"
     fi
 
 
@@ -35869,7 +35849,7 @@ print_completion() {
     echo -e "${CYAN}            ░░░░░${NC}"
     echo ""
     echo -e "                                     ${GREEN}✓ Installation Completed${NC}"
-    echo -e "                                     ${DIM}V2.0.0 - PHI HASH REACTOR${NC}"
+    echo -e "                                     ${DIM}V2.0.1 - PHI HASH REACTOR${NC}"
     echo ""
 }
 

@@ -19,7 +19,7 @@ ASIC Miner API Protocol References (protocol documentation, not derived code):
 See LICENSE file for full BSD-3-Clause license terms.
 """
 
-__version__ = "2.0.0-PHI_HASH_REACTOR"
+__version__ = "2.0.1-PHI_HASH_REACTOR"
 
 import os
 import json
@@ -4472,7 +4472,7 @@ def _atomic_json_save(filepath, data, indent=None):
             json.dump(data, f, indent=indent)
             f.flush()
             os.fsync(f.fileno())
-        shutil.move(tmp_path, filepath)
+        os.replace(tmp_path, filepath)
     except Exception:
         try:
             os.unlink(tmp_path)
@@ -12000,6 +12000,15 @@ def reboot_system():
     """Gracefully reboot the system (systemctl reboot stops all services first)"""
     import subprocess
 
+    # WSL2: systemctl reboot kills the VM with no automatic restart.
+    # The user must manually reopen their WSL2 terminal or run 'wsl -d <distro>'.
+    _is_wsl2 = False
+    try:
+        with open('/proc/version', 'r') as f:
+            _is_wsl2 = 'microsoft' in f.read().lower()
+    except Exception:
+        pass
+
     client_ip = request.remote_addr or "unknown"
     if not check_rate_limit(client_ip, "system_reboot"):
         return jsonify({"success": False, "error": "Rate limit exceeded"}), 429
@@ -12014,7 +12023,10 @@ def reboot_system():
             timeout=30
         )
         if result.returncode == 0:
-            return jsonify({"success": True, "message": "System is rebooting..."})
+            msg = "System is rebooting..."
+            if _is_wsl2:
+                msg = "WSL2 is shutting down. To restart, run 'wsl -d <distro>' from PowerShell."
+            return jsonify({"success": True, "message": msg})
         else:
             return jsonify({"success": False, "error": f"Reboot failed: {result.stderr[:200]}"})
     except subprocess.TimeoutExpired:
@@ -12022,7 +12034,7 @@ def reboot_system():
         return jsonify({"success": True, "message": "System is rebooting..."})
     except Exception as e:
         app.logger.error(f"Reboot error: {e}", exc_info=True)
-        return jsonify({"success": False, "error": str(e)[:200]})
+        return jsonify({"success": False, "error": "Internal error during reboot"})
 
 
 @app.route('/api/system/pool-upgrade/check', methods=['GET'])
@@ -12103,7 +12115,8 @@ def apply_pool_upgrade():
     except FileNotFoundError:
         return jsonify({"success": False, "error": "upgrade.sh not found"})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+        app.logger.error(f"Upgrade error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Internal error during upgrade"})
 
 
 @app.route('/api/system/https/status', methods=['GET'])
@@ -12196,7 +12209,8 @@ def enable_https():
     except subprocess.TimeoutExpired:
         return jsonify({"success": False, "error": "Timed out enabling HTTPS"})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+        app.logger.error(f"HTTPS enable error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Internal error enabling HTTPS"})
 
 
 @app.route('/api/nodes/<symbol>/sync', methods=['GET'])
@@ -13299,7 +13313,7 @@ def test_discord_webhook(url: str, test_message: str = None) -> dict:
         "title": "🧪 Spiral Pool Test Notification",
         "description": test_message or "This is a test message from Spiral Dashboard. If you see this, your webhook is configured correctly!",
         "color": 0x00d4ff,  # Cyan color
-        "footer": {"text": f"Spiral Pool v2.0.0 PHI HASH REACTOR"},
+        "footer": {"text": f"Spiral Pool v2.0.1 PHI HASH REACTOR"},
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
