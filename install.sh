@@ -6005,7 +6005,6 @@ maxmempool=512
 maxconnections=125
 par=0
 maxsigcachesize=250
-maxorphantx=100
 rpcthreads=8
 rpcworkqueue=64
 
@@ -14086,11 +14085,11 @@ SSHDHARDENEOF
         # so they appear before any Match blocks (OpenSSH processes top-to-bottom)
         if ! grep -q "Spiral Pool — global SSH hardening" "$sshd_main" 2>/dev/null; then
             local tmp_sshd
-            tmp_sshd=$(mktemp)
+            tmp_sshd=$(sudo mktemp)
             printf '# Spiral Pool — global SSH hardening\nPermitRootLogin no\nMaxAuthTries 5\nLoginGraceTime 30\nX11Forwarding no\nAllowTcpForwarding no\nUseDNS no\n\n' | \
                 cat - "$sshd_main" | sudo tee "$tmp_sshd" > /dev/null
             sudo cp "$tmp_sshd" "$sshd_main"
-            rm -f "$tmp_sshd"
+            sudo rm -f "$tmp_sshd"
             log_success "Global SSH hardening prepended to ${sshd_main}"
         fi
     fi
@@ -15225,7 +15224,6 @@ externalip=
 dnsseed=1
 # Reduce connections for Tor (high latency network)
 maxconnections=60
-maxoutconnections=20
 # Increase timeouts for Tor latency (milliseconds)
 timeout=120000"
     else
@@ -15235,8 +15233,6 @@ timeout=120000"
 
 # Maximum peer connections for faster block propagation
 maxconnections=256
-# Prefer outbound connections for faster sync (more downloaders)
-maxoutconnections=50
 # Increase receive buffer (KB) for faster block download
 maxreceivebuffer=25000
 # Increase send buffer (KB)
@@ -15249,14 +15245,11 @@ bind=0.0.0.0
 listen=1
 # DNS seeding enabled for fast peer discovery
 dnsseed=1
-forcednsseed=1
 
 # === IBD (Initial Block Download) OPTIMIZATIONS ===
 # Relay more headers at once (10000 vs default 2000) - faster sync
 # Enable compact block relay for faster propagation
-blocksonly=0
-# Increase parallel block downloads
-nblocks=64"
+blocksonly=0"
     fi
 
     # WSL2-aware resource sizing: default 8192MB dbcache but cap to 25% of total
@@ -15326,7 +15319,6 @@ $(if [[ "$TOR_ENABLED" != "true" ]]; then echo "logips=1"; else echo "# logips d
 shrinkdebugfile=1
 # Reduce debug log size during sync
 debuglogfile=debug.log
-maxdebugfilesize=50
 
 # === PID FILE ===
 pid=$(get_blockchain_dir dgb)/digibyted.pid
@@ -15335,30 +15327,15 @@ pid=$(get_blockchain_dir dgb)/digibyted.pid
 disablewallet=0
 addresstype=legacy
 
-# === SECURITY ===
-# Disable deprecated RPC features
-deprecatedrpc=
-
-# === CHECKPOINTS & SIGNATURE VALIDATION ===
-# Enable checkpoints for faster sync verification
-checkpoints=1
+# === ASSUME VALID ===
 # Skip script verification for blocks before this known-good block (block 21,700,000)
 # This is the official defaultAssumeValid from DigiByte Core v8.22+ chainparams.cpp
 # Dramatically speeds up initial sync by skipping expensive script validation
 $(if [[ "$TOR_ENABLED" != "true" ]]; then echo "assumevalid=457f6864b52e5076a433afe3c28e3ae0bbeeaba9036a782ddb691242326fcb80"; fi)
 
-# === BLOCK DOWNLOAD OPTIMIZATION ===
-# Increase block download window
-maxblocksinprogress=$(if [[ "$TOR_ENABLED" == "true" ]]; then echo "8"; else echo "32"; fi)
-# Increase orphan transaction pool
-maxorphantx=100
-# Minimize block reconstruction overhead
-blockreconstructionextratxn=100
-
 # === SYNC OPTIMIZATION ===
 # $(if [[ "$TOR_ENABLED" == "true" ]]; then echo "Longer timeouts for Tor latency"; else echo "Reasonable timeouts for clearnet"; fi)
 peertimeout=$(if [[ "$TOR_ENABLED" == "true" ]]; then echo "120"; else echo "60"; fi)
-blockstallingtimeout=$(if [[ "$TOR_ENABLED" == "true" ]]; then echo "30"; else echo "10"; fi)
 # Skip transaction relay during initial block download (faster sync)
 $(if [[ "$TOR_ENABLED" != "true" ]]; then echo "# blocksonly=1 during IBD speeds sync but disabled for full node operation"; fi)
 
@@ -15700,8 +15677,6 @@ peertimeout=120"
 
 # Maximum peer connections for faster sync
 maxconnections=256
-# Prefer outbound connections for faster sync (more downloaders)
-maxoutconnections=50
 # Increase receive buffer (KB) for faster block download
 maxreceivebuffer=25000
 # Increase send buffer (KB)
@@ -15713,14 +15688,8 @@ bind=0.0.0.0
 onlynet=ipv4
 # DNS seeding enabled for fast peer discovery
 dnsseed=1
-forcednsseed=1
 # Standard timeouts
-peertimeout=60
-blockstallingtimeout=10
-
-# === IBD (Initial Block Download) OPTIMIZATIONS ===
-# Increase parallel block downloads
-nblocks=64"
+peertimeout=60"
     fi
 
     # WSL2-aware resource sizing: default 8192MB dbcache but cap to 25% of total
@@ -15798,9 +15767,6 @@ debuglogfile=debug.log
 # This dramatically speeds up initial sync
 # Block height 912683 (Bitcoin Core v28+)
 $(if [[ "$BTC_TOR_ENABLED" != "true" ]]; then echo "assumevalid=00000000000000000000611fd22f2df7c8fbd0688745c3a6c3bb5109cc2a12cb"; fi)
-
-# === CHECKPOINTS ===
-checkpoints=1
 
 # === SEED NODES (official Bitcoin Core DNS seeds) ===
 $(if [[ "$BTC_TOR_ENABLED" != "true" ]]; then echo "# Primary official seeds (Bitcoin Knots — verified against 29.x-knots kernel/chainparams.cpp)
@@ -16063,8 +16029,6 @@ maxconnections=60"
 
 # Maximum peer connections for faster sync
 maxconnections=256
-# Prefer outbound connections for faster sync
-maxoutconnections=50
 # Increase receive buffer (KB) for faster block download
 maxreceivebuffer=25000
 # Increase send buffer (KB)
@@ -16387,8 +16351,6 @@ peertimeout=120"
 
 # Maximum peer connections for faster sync
 maxconnections=256
-# Prefer outbound connections for faster sync (more downloaders)
-maxoutconnections=50
 # Increase receive buffer (KB) for faster block download
 maxreceivebuffer=25000
 # Increase send buffer (KB)
@@ -16401,14 +16363,8 @@ port=$BC2_P2P_PORT
 onlynet=ipv4
 # DNS seeding enabled for fast peer discovery
 dnsseed=1
-forcednsseed=1
 # Standard timeouts
-peertimeout=60
-blockstallingtimeout=10
-
-# === IBD (Initial Block Download) OPTIMIZATIONS ===
-# Increase parallel block downloads
-nblocks=64"
+peertimeout=60"
     fi
 
     sudo tee "$BC2_DATA/bitcoinii.conf" > /dev/null << EOF
@@ -16470,9 +16426,6 @@ $(if [[ "$BC2_TOR_ENABLED" != "true" ]]; then echo "logips=1"; else echo "# logi
 shrinkdebugfile=1
 # Reduce debug log size during sync
 debuglogfile=debug.log
-
-# === CHECKPOINTS ===
-checkpoints=1
 
 # === SEED NODES (official Bitcoin II DNS seeds) ===
 $(if [[ "$BC2_TOR_ENABLED" != "true" ]]; then echo "# Primary official seeds (Bitcoin II)
@@ -16672,12 +16625,10 @@ timeout=120000"
 # Direct IPv4 connections for fastest possible sync
 
 maxconnections=256
-maxoutconnections=50
 listen=1
 bind=0.0.0.0
 onlynet=ipv4
 dnsseed=1
-forcednsseed=1
 
 # === SEED NODES (verified against litecoin-project/litecoin master chainparams.cpp) ===
 seednode=seed-a.litecoin.loshan.co.uk
@@ -16726,10 +16677,8 @@ maxmempool=300
 
 # Logging
 debug=rpc
-debug=zmq
 shrinkdebugfile=1
 debuglogfile=debug.log
-maxdebugfilesize=50
 $(if [[ "$TOR_ENABLED" != "true" ]]; then echo "logips=1"; else echo "# logips disabled for privacy"; fi)
 
 # PID file
@@ -16898,10 +16847,8 @@ maxconnections=60"
 # Direct IPv4 connections for fastest possible sync
 
 maxconnections=256
-maxoutconnections=50
 listen=1
 dnsseed=1
-forcednsseed=1
 
 # === SEED NODES (verified against dogecoin/dogecoin master chainparams.cpp) ===
 seednode=seed.multidoge.org
@@ -16947,10 +16894,8 @@ maxmempool=300
 
 # Logging
 debug=rpc
-debug=zmq
 shrinkdebugfile=1
 debuglogfile=debug.log
-maxdebugfilesize=50
 $(if [[ "$TOR_ENABLED" != "true" ]]; then echo "logips=1"; else echo "# logips disabled for privacy"; fi)
 
 # PID file
@@ -17120,10 +17065,8 @@ maxconnections=60"
 # Direct IPv4 connections for fastest possible sync
 
 maxconnections=150
-maxoutconnections=30
 listen=1
 dnsseed=1
-forcednsseed=1
 
 # === SEED NODES (verified against pepecoinppc/pepecoin master chainparams.cpp) ===
 seednode=seeds.pepecoin.org
@@ -17171,10 +17114,8 @@ maxmempool=200
 
 # Logging
 debug=rpc
-debug=zmq
 shrinkdebugfile=1
 debuglogfile=debug.log
-maxdebugfilesize=50
 $(if [[ "$TOR_ENABLED" != "true" ]]; then echo "logips=1"; else echo "# logips disabled for privacy"; fi)
 
 # PID file
@@ -17341,10 +17282,8 @@ maxconnections=60"
 # Direct IPv4 connections for fastest possible sync
 
 maxconnections=150
-maxoutconnections=30
 listen=1
 dnsseed=1
-forcednsseed=1
 
 # === SEED NODES (verified against CatcoinCore/catcoincore main chainparams.cpp) ===
 seednode=catcoin.seeds.multicoin.co
@@ -17403,10 +17342,8 @@ maxmempool=200
 
 # Logging
 debug=rpc
-debug=zmq
 shrinkdebugfile=1
 debuglogfile=debug.log
-maxdebugfilesize=50
 $(if [[ "$TOR_ENABLED" != "true" ]]; then echo "logips=1"; else echo "# logips disabled for privacy"; fi)
 
 # PID file
@@ -17567,10 +17504,8 @@ maxconnections=60"
         log "Configuring Namecoin for clearnet (fast sync)..."
         NMC_NETWORK_CONFIG="# === CLEARNET - FAST SYNC MODE ===
 maxconnections=150
-maxoutconnections=30
 listen=1
 dnsseed=1
-forcednsseed=1
 
 # === SEED NODES (verified against namecoin/namecoin-core master kernel/chainparams.cpp) ===
 seednode=nmc.seed.quisquis.de
@@ -17628,7 +17563,6 @@ disablewallet=0
 # Logging
 shrinkdebugfile=1
 debuglogfile=debug.log
-maxdebugfilesize=50
 $(if [[ "$TOR_ENABLED" != "true" ]]; then echo "logips=1"; else echo "# logips disabled for privacy"; fi)
 
 # PID file
@@ -17788,10 +17722,8 @@ maxconnections=60"
         log "Configuring Syscoin for clearnet (fast sync)..."
         SYS_NETWORK_CONFIG="# === CLEARNET - FAST SYNC MODE ===
 maxconnections=200
-maxoutconnections=40
 listen=1
 dnsseed=1
-forcednsseed=1
 
 # === SEED NODES (verified against syscoin/syscoin master kernel/chainparams.cpp) ===
 seednode=seed1.syscoin.org
@@ -17845,7 +17777,6 @@ disablewallet=0
 # Logging
 shrinkdebugfile=1
 debuglogfile=debug.log
-maxdebugfilesize=50
 $(if [[ "$TOR_ENABLED" != "true" ]]; then echo "logips=1"; else echo "# logips disabled for privacy"; fi)
 
 # PID file
@@ -18015,10 +17946,8 @@ maxconnections=60"
         log "Configuring Myriad for clearnet (fast sync)..."
         XMY_NETWORK_CONFIG="# === CLEARNET - FAST SYNC MODE ===
 maxconnections=150
-maxoutconnections=30
 listen=1
 dnsseed=1
-forcednsseed=1
 
 # === SEED NODES (verified against myriadteam/myriadcoin master chainparams.cpp) ===
 seednode=seed1.myriadcoin.org
@@ -18078,7 +18007,6 @@ disablewallet=0
 # Logging
 shrinkdebugfile=1
 debuglogfile=debug.log
-maxdebugfilesize=50
 $(if [[ "$TOR_ENABLED" != "true" ]]; then echo "logips=1"; else echo "# logips disabled for privacy"; fi)
 
 # PID file
@@ -18238,10 +18166,8 @@ maxconnections=60"
         log "Configuring Fractal Bitcoin for clearnet (fast sync)..."
         FBTC_NETWORK_CONFIG="# === CLEARNET - FAST SYNC MODE ===
 maxconnections=200
-maxoutconnections=40
 listen=1
 dnsseed=1
-forcednsseed=1
 
 # === SEED NODES (official Fractal Bitcoin DNS seeds) ===
 seednode=dnsseed-mainnet.fractalbitcoin.io
@@ -18292,7 +18218,6 @@ disablewallet=0
 # Logging
 shrinkdebugfile=1
 debuglogfile=debug.log
-maxdebugfilesize=50
 $(if [[ "$TOR_ENABLED" != "true" ]]; then echo "logips=1"; else echo "# logips disabled for privacy"; fi)
 
 # PID file
@@ -18470,7 +18395,6 @@ port=$QBX_P2P_PORT
 
 # === NETWORK CONFIGURATION ===
 maxconnections=100
-maxoutconnections=20
 listen=1
 
 # Performance
