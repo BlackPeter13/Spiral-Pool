@@ -356,7 +356,12 @@ func (cc *ConnectionClassifier) applyLevel2(ev *connectionEvidence) {
 	// Only update result if score actually increased.
 	if score > ev.result.Confidence {
 		connType := ev.result.Type
-		if connType == ConnectionTypeUnknown && score >= 0.15 {
+		// Require score >= 0.40 to classify as proxy from Level 2 alone.
+		// Previously 0.15 — a single fast auth on LAN (+0.25) was enough to
+		// misclassify physical ASICs (Antminer S19, etc.) as proxies.
+		// Now timing alone (0.25) is insufficient; needs a second signal
+		// (e.g., proxy worker name pattern +0.15) to reach the threshold.
+		if connType == ConnectionTypeUnknown && score >= 0.40 {
 			connType = ConnectionTypeProxy
 		}
 		ev.result = ConnectionClassification{

@@ -29,7 +29,10 @@
     "chart-pool-hashrate": "#ff6600",
     "chart-network-hashrate": "#00aaff",
     "chart-difficulty": "#ff00ff",
-    "chart-workers": "#00ff00"
+    "chart-workers": "#00ff00",
+    "chart-blocks-actual": "#ffff00",
+    "chart-blocks-expected": "#00ffcc",
+    "chart-hashrate-pool-share": "#00ffcc"
   },
   "gradients": {
     "primary": "linear-gradient(180deg, #00aaff 0%, #00ffcc 100%)",
@@ -44,7 +47,7 @@
   },
   "effects": {
     "glowIntensity": 0.2,
-    "animationSpeed": 1.0,
+    "animationSpeed": 1,
     "borderRadius": "0px",
     "useGlitchEffect": false,
     "useParticles": false,

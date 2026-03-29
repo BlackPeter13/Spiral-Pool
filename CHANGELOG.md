@@ -13,6 +13,8 @@ Versioning follows `MAJOR.MINOR.PATCH`  -  patch releases are applied in-place o
 
 This is a major release. All changes are backward-compatible: no database migrations, no config format changes, no reinstall required.
 
+**Dashboard overhaul**  -  Spiral Dash has been rebuilt with a three-tab layout (Overview, Blocks, Management), interactive Chart.js analytics, fleet group views with per-group stats, per-firmware miner controls (AxeOS, Avalon, Vnish, ePIC, LuxOS), Avalon power scheduling, HTTPS/TLS with self-signed certificates, a full Management section (service control, log viewer, system updates, system reboot, resource monitoring), 23 built-in themes with custom theme editor, and CSV/JSON data export.
+
 ### Added
 
 **Sentinel  -  Security & Firmware Monitoring**
@@ -20,7 +22,10 @@ This is a major release. All changes are backward-compatible: no database migrat
 - **BraiinsOS/Vnish auto-scan**  -  when the CGMiner probe fails on port 4028, Sentinel falls back to HTTP on port 80 and probes BraiinsOS (`GET /api/v1/auth/login`) and Vnish (`POST /api/v1/unlock`) with default credentials. Successful detection auto-classifies the device; failed detection logs "requires manual credential setup"
 - **Wallet mismatch warning**  -  at startup, Sentinel validates each coin's configured pool wallet against the node's `validateaddress`/`getaddressinfo` RPC. Mismatches trigger a Discord/notification alert and a red warning banner on the dashboard
 - **Generic webhook notifications**  -  new notification channel: raw HTTP POST to any URL with a JSON payload (`event`, `title`, `description`, `fields`, `timestamp`). Supports custom headers. Enables Zapier, Home Assistant, IFTTT, PagerDuty, n8n, and custom scripts. Configured alongside existing channels in install.sh setup menu
-- **Fleet group offline/online alerting**  -  when all miners in a user-defined worker group go offline past the threshold, Sentinel fires a `group_offline` alert naming the group and listing affected miners (max 8 in embed). When the group recovers, a `group_online` alert fires showing online/total count. Group alerts are escalations  -  individual miner alerts still fire independently. Groups loaded from `miner_groups.json` with 60-second cache
+- **Fleet group offline/online alerting**  -  when all miners in a user-defined worker group go offline past the threshold, Sentinel fires a `group_offline` alert naming the group and listing affected miners (max 8 in embed). When the group recovers, a `group_online` alert fires showing online/total count. Individual miner alerts are suppressed for group members to avoid duplicates. A 2-minute grace window allows staggered outages (e.g., power propagating across a switch) to coalesce into a single group alert. Groups loaded from `miner_groups.json` with 60-second cache
+- **Group-aware temperature alerting**  -  when 2+ miners in a user-defined group hit temp warning or critical thresholds in the same monitoring cycle, Sentinel sends a single group thermal alert ("check HVAC at this location") instead of individual alerts per miner. Thermal shutdowns remain individual (safety-critical, never suppressed). Falls back to individual alerts when no groups are defined or only 1 miner in a group is affected
+- **Group-aware degradation alerting**  -  when 2+ miners in a user-defined group show hashrate degradation simultaneously, Sentinel sends a single group degradation alert ("check power/cooling at this location") with per-miner baselines and drop percentages. Individual miners degrading alone still get individual alerts
+- **HTTPS auto-detection**  -  Sentinel auto-detects whether the dashboard is running HTTPS by reading the spiraldash service file. Dashboard API calls use the correct protocol without manual configuration. Self-signed certs on localhost are accepted automatically
 
 **Dashboard  -  Hashrate, Analytics & Export**
 - **Interactive hashrate charts**  -  Chart.js powered graphs for per-coin and aggregate hashrate with 15M/1H/6H/24H/7D/30D time range selector. Data sourced from Sentinel's existing hashrate history
@@ -57,23 +62,29 @@ Device Configuration modal in the Miner Management tab  -  per-firmware controls
 - **Fleet group summary bar**  -  chip-style summary strip above the miner grid showing each group's name, aggregated hashrate, power draw, and online miner count. Groups with all miners offline are highlighted in red
 - **Fleet group API aggregation**  -  `/api/pool/stats` response now includes `fleet_groups` array with per-group totals (hashrate_ths, power_watts, online_count, total_count) resolved from `miner_groups.json`
 
+**Dashboard  -  Block Analytics Tab**
+- **Dedicated Blocks tab**  -  new top-level tab with block analytics: pool hashrate share %, expected blocks, luck ratio, and a dual bar chart (actual vs expected blocks found). Auto-refreshes every 60 seconds when active
+- **Luck history API**  -  `/api/luck` now returns full history (up to 720 hourly samples) and pool/network hashrate, enabling the Blocks tab charts
+
 **Dashboard  -  Charts & Statistics**
 - **Blocks Found bar chart**  -  bar chart in the Statistics grid showing block discovery history per coin
 - **Shares Rate line chart**  -  real-time line chart showing accepted share rate over time
-- **Chart theme integration**  -  chart colors (grid lines, labels, datasets) are wired to the theme system via CSS variables. All built-in theme JSONs updated with chart color definitions. Custom theme editor includes chart color pickers
+- **Chart theme integration**  -  chart colors (grid lines, labels, datasets) are wired to the theme system via CSS variables. All built-in theme JSONs updated with chart color definitions. Custom theme editor includes chart color pickers. Block analytics colors (actual, expected, pool share) added to theme editor
 
 **Dashboard  -  Log Viewer Live Mode**
 - **Live auto-refresh**  -  log viewer in the Management tab now has a Live button that enables 2-second auto-refresh polling of `journalctl` output. Green indicator when active. Toggleable on/off without losing scroll position
 
 **Dashboard  -  HTTPS / TLS**
-- **Self-signed TLS certificate**  -  dashboard serves over HTTPS by default using gunicorn's native `--certfile` / `--keyfile` flags. Self-signed RSA 2048 certificate generated during installation with 10-year validity and SANs for hostname, all detected LAN IPs, localhost, and 127.0.0.1
-- **HTTP insecure connection warning banner**  -  if a user navigates to the dashboard over plain HTTP, a fixed-position red banner warns that the connection is not secure and provides a clickable link to the HTTPS URL. Dismissable per session
+- **Self-signed TLS certificate**  -  dashboard serves over HTTPS by default using gunicorn's native `--certfile` / `--keyfile` flags. Self-signed ECDSA P-256 certificate generated during installation with 10-year validity and SANs for hostname, all detected LAN IPs, localhost, and 127.0.0.1
+- **HTTP insecure connection warning banner**  -  context-aware: if HTTPS is enabled, warns and links to the HTTPS URL. If cert exists but HTTPS not yet enabled, nudges user to the Management tab. If neither, banner is hidden (nothing actionable). Dismissable per session
+- **Secure cookie auto-detection**  -  `SESSION_COOKIE_SECURE` now auto-detects from the spiraldash service file instead of defaulting to false. Ensures cookies are marked secure when HTTPS is active without requiring a manual env var
 
 **Dashboard  -  Management Section** *(new tab)*
 - **Service control panel**  -  start/stop/restart spiralstratum, spiralsentinel, spiraldash, and coin daemons from the dashboard. Shows service status and uptime
 - **System resources panel**  -  real-time CPU load average (1/5/15 min), RAM usage (total/used/available/%), disk usage per mount (/, /spiralpool, /var), and system uptime. Sourced from `/proc`  -  no psutil dependency
 - **Log viewer**  -  streams `journalctl` output for any pool service with color-coded severity levels, auto-scroll, pause button, and live auto-refresh mode
-- **System updates**  -  lists available apt packages with last-checked timestamp. One-click refresh (`apt-get update`) and apply (`apt-get upgrade`) with confirmation
+- **System updates**  -  lists available apt packages with last-checked timestamp. One-click refresh (`apt-get update`) and apply (`apt-get dist-upgrade`) with confirmation. Runs via `apt-noninteractive.sh` wrapper that uses `systemd-run --pipe` to escape the dashboard's `ProtectSystem=strict` mount namespace
+- **System reboot button**  -  one-click graceful reboot from the Management tab. Uses `systemctl --no-block reboot` so the dashboard can send its response before systemd begins the shutdown sequence. Confirmation dialog required
 - **System info API endpoint**  -  `GET /api/system/info` provides programmatic access to all host metrics (CPU, memory, disk, service statuses)
 
 **Installer & Upgrade**
@@ -81,28 +92,107 @@ Device Configuration modal in the Miner Management tab  -  per-firmware controls
 - **`spiralctl coin prune <TICKER>`**  -  enable blockchain pruning on an existing coin node without reinstalling
 - **Pruned node badge**  -  dashboard indicator next to node status when the backing coin daemon is running in pruned mode
 - **Notification channel menu**  -  unified selection menu in install.sh for Discord, Telegram, XMPP, ntfy, Email, and Webhooks
-- **Dashboard TLS certificate generation**  -  install.sh generates a self-signed RSA 2048 certificate with SANs (hostname, LAN IPs, localhost) during installation. Certificate stored in `$INSTALL_DIR/certs/`
+- **Dashboard TLS certificate generation**  -  install.sh generates a self-signed ECDSA P-256 certificate with SANs (hostname, LAN IPs, localhost) during installation. Certificate stored in `$INSTALL_DIR/certs/`
 
 **Upgrade  -  v2.0 Migration**
 - **Automatic config migration**  -  upgrade.sh now always runs `migrate_v2_config()` which handles: metrics section creation, api section creation, `admin_api_key` v1→v2 field migration, and sentinel `config.json` sync. Each migration is idempotent (grep before modify)
-- **Sudoers migration for existing installs**  -  upgrade.sh detects missing sudoers entries (journalctl, apt-get, upgrade.sh, psql) in existing `/etc/sudoers.d/spiralpool-dashboard` and appends them individually with `visudo -c` validation
-- **HTTPS migration**  -  upgrade.sh checks if the spiraldash service already has `--certfile` in its ExecStart. If not, generates a self-signed certificate and patches the service file to enable HTTPS. Existing HTTP-only installs are seamlessly upgraded to HTTPS
+- **Service files and config fixes always enabled**  -  upgrade.sh now regenerates systemd service files and runs config fixes on every upgrade by default (previously required `--full` flag). All migrations are idempotent and preserve HTTPS, dependencies, and custom settings
+- **Major version auto-detection**  -  upgrade.sh detects major version jumps (e.g. 1.x → 2.x) and logs the change. Ensures critical service file updates are never skipped on major upgrades
+- **Docker deployment guard**  -  upgrade.sh detects if it's running inside a Docker container or if Docker containers are the active deployment, and blocks/warns with correct Docker upgrade instructions instead of corrupting the install
+- **WSL2 pre-flight checks**  -  upgrade.sh warns about clock drift, memory pressure, and missing systemd on WSL2 before proceeding
+- **Sudoers migration for existing installs**  -  upgrade.sh detects missing sudoers entries (journalctl, apt wrapper, upgrade.sh, psql, enable-https, system reboot) in existing `/etc/sudoers.d/spiralpool-dashboard` and appends them individually with `visudo -c` validation
+- **HTTPS migration (opt-in)**  -  upgrade.sh pre-generates a self-signed ECDSA P-256 TLS certificate and deploys the `enable-https.sh` script. Existing HTTP-only installs stay on HTTP — operators enable HTTPS when ready from the Dashboard Management tab. This avoids broken bookmarks and unexpected cert warnings on existing installs
 
 **Windows / WSL2**
 - **WSL2 graceful shutdown hook** (`scripts/windows/wsl2-shutdown-hook.ps1`)  -  Windows Task Scheduler task that gracefully stops all Spiral Pool services and coin daemons before Windows shuts down, restarts, or enters sleep. Without this, Windows kills WSL2 mid-write and corrupts LevelDB blocks/chainstate, requiring a full blockchain resync. Stop order: sentinel/dash/health → stratum → coin daemons → wait for sync. Triggers on Event 1074 (shutdown/restart) and Event 42 (sleep). Logs to `%APPDATA%\SpiralPool\shutdown-hook.log`. Install/uninstall via `-Uninstall` flag. Wired into `wsl2-stratum-proxy.ps1` as a recommended setup prompt
 
+**Docker**
+- **Webhook environment variables**  -  `WEBHOOK_URL` and `WEBHOOK_HEADERS` env vars passed through to Docker containers for generic webhook notification support
+- **TLS certificate generation in entrypoint**  -  Docker entrypoint generates a self-signed ECDSA P-256 TLS certificate for the dashboard, matching the native install behavior
+- **Health check tuning**  -  PostgreSQL health check `start_period` increased to 120s to accommodate WAL recovery after crashes
+- **Entrypoint error handling**  -  multi-coin config generation now validates the write succeeded and cleans up temp files on failure instead of silently continuing with a partial config
+
 **Documentation**
 - **Miner API limitations reference**  -  `docs/reference/MINER_SUPPORT.md` expanded with confirmed API limitations for four device families: iPollo (CGMiner API disabled by default  -  requires `--api-listen` flag), Innosilicon (CGMiner disabled by default on most models), Elphapex DG series (LuCI CGI primary, CGMiner on port 4028 unconfirmed), and ESP32 miners (no device API  -  online/offline and hashrate tracked via stratum connections only; temperature and fan alerts unavailable)
+
+**Stratum V2 API  -  Full Endpoint Parity**
+- **Worker/miner stats endpoints**  -  V2 multi-coin API now serves all worker and miner endpoints that V1 provides: `GET /api/pools/{id}/miners`, `/miners/{addr}`, `/miners/{addr}/workers`, `/miners/{addr}/workers/{w}`, `/miners/{addr}/workers/{w}/history`, `/hashrate/history`, and `/workers` (admin). All queries are pool-scoped via `WithPoolID()` for multi-coin isolation
+- **Runtime provider endpoints**  -  V2 now serves `/workers-by-class`, `/router/profiles`, `/pipeline/stats`, and `/payments/stats` per pool, sourced from live CoinPool state (Spiral Router, share pipeline, block stats). Dashboard features that depended on these endpoints no longer 404 on V2
+- **Admin endpoints**  -  V2 now serves `/api/admin/stats` (aggregated across all pools with per-pool breakdown and totals), `/api/admin/kick` (disconnects miner by IP across all pools), and `/api/coins` (registered coin registry for Sentinel/Dashboard validation)
+- **Security headers middleware**  -  V2 API responses now include `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and `Cache-Control: no-store` (matching V1 parity)
+- **Dynamic payout scheme**  -  V2 `/api/pools` response now reads `PayoutScheme` and `MinimumPayment` from the per-coin config instead of hardcoding `"SOLO"` / `1.0`
 
 **Codename Theme**
 - **V2.0  -  Phi Hash Reactor** theme added to the dashboard theme selector  -  reactor-core black with critical red accents, scan lines, and a reactor pulse animation on block found
 
 ### Fixed
 
+**HTTPS / TLS  -  Critical Detection & Deployment**
+- **HTTPS detection matches template comment instead of ExecStart**  -  all 13 `grep -q "\-\-certfile"` checks across 6 files (install.sh, upgrade.sh, enable-https.sh, spiraldash.service, dashboard.py, SpiralSentinel.py, spiralctl.sh) matched the template comment `(runs enable-https.sh to add --certfile/--keyfile)` instead of the actual ExecStart line. HTTPS was silently detected as enabled even on HTTP-only installs, or silently lost during upgrades when the template was rewritten. Fixed all 13 locations to use `^ExecStart` line anchoring (`grep -q "^ExecStart.*\-\-certfile"` in bash, `line.strip().startswith("ExecStart")` in Python)
+- **`set -e` kills installer/upgrader on openssl failure**  -  `openssl req -x509` ran as a bare command under `set -e`. If certificate generation failed (missing openssl, permission denied, disk full), the entire install/upgrade script aborted immediately. The `if [[ $? -eq 0 ]]` fallback was dead code  -  it never ran because `set -e` exited first. Wrapped openssl as the `if` condition directly
+- **Certificate directory permission denied on fresh install**  -  install.sh runs as a non-root user with sudo. `sudo mkdir` created `$INSTALL_DIR/certs/` as root-owned, but `openssl` ran without sudo and couldn't write the certificate. Added `sudo chown` on the directory and `sudo` on the openssl command
+- **`sed -i` fails with "Read-only file system" when enabling HTTPS**  -  `enable-https.sh` runs via sudo from the dashboard, which inherits the gunicorn process's mount namespace where `ProtectSystem=strict` makes `/etc` read-only. Even as root, `sed -i` can't create its temp file. Added `/etc/systemd/system` to `ReadWritePaths` in the spiraldash service  -  file permissions (root:root 644) still prevent the unprivileged dashboard process from writing directly
+- **`apt-get update` fails with "Read-only file system" from dashboard**  -  same `ProtectSystem=strict` issue. `apt-get` needs write access to `/var/lib/apt`, `/var/cache/apt`, and `/var/log/apt`. Added these paths to `ReadWritePaths`
+- **`sudo` fails with "unable to change to root gid" from dashboard**  -  `CapabilityBoundingSet=` (empty) in the spiraldash service template blocked all capability acquisition. Even with `NoNewPrivileges=no`, sudo couldn't get `CAP_SETGID`/`CAP_SETUID`/`CAP_AUDIT_WRITE`. Set to `CAP_SETUID CAP_SETGID CAP_DAC_OVERRIDE CAP_AUDIT_WRITE CAP_FOWNER`  -  only the capabilities sudo needs
+- **Dashboard XSS via innerHTML injection**  -  3 locations in dashboard.html injected unsanitized server responses into innerHTML: cert expiry date, HTTPS enable error message, and JS exception message. Added `escapeHtml()` to all 3 locations
+- **MOTD shows hardcoded port 1618**  -  the MOTD banner displayed `Dashboard: https://IP:1618` regardless of the actual configured port. Replaced with dynamic detection from the spiraldash service file (`grep -oP '0\.0\.0\.0:\K[0-9]+'`)
+- **Post-upgrade summary shows wrong protocol**  -  upgrade completion banner always showed `http://` regardless of HTTPS status. Added runtime detection from the service file's ExecStart line
+- **HA-backup completion banner shows wrong protocol**  -  same issue in install.sh's HA-backup completion message. Added the same runtime protocol detection
+- **`spiralctl` hardcoded protocol and port**  -  `spiralctl.sh` dashboard URLs used hardcoded `http://` and port 1618 in 2 locations. Added dynamic port and protocol detection
+- **`enable-https.sh` missing from sudoers on upgrade**  -  the sudoers fresh-create heredoc in upgrade.sh was missing the `enable-https.sh` NOPASSWD entry, so the dashboard's "Enable HTTPS" button would fail with a password prompt on upgraded (non-fresh) installs
+- **Dashboard upgrade.sh path wrong**  -  dashboard.py called `sudo /spiralpool/scripts/upgrade.sh` but the script is deployed to `/spiralpool/upgrade.sh` (install root, not scripts/). Sudoers allows `/spiralpool/upgrade.sh *` so the mismatched path triggered password prompts. Fixed to use `$SPIRALPOOL_INSTALL_DIR/upgrade.sh`
+
+**Sentinel  -  Group Alert Ordering**
+- **Group offline alert fires after individual alerts (duplicate notifications)**  -  when all miners in a group went offline, the individual miner offline loop ran first and sent per-miner alerts. The group check ran after and sent the group alert  -  resulting in N+1 alerts instead of 1. Restructured: pre-compute which miners will be covered by group alerts before the individual loop, suppress individual alerts for those miners
+- **Staggered outage produces both individual and group alerts**  -  in a real power outage, miners go offline seconds apart across polling cycles. The first miner to cross the 10-minute threshold would get an individual alert before its siblings caught up. Added a 2-minute grace window: miners in multi-member groups defer their individual alerts to allow siblings to coalesce into a single group alert
+- **Individual miner_online alerts fire for group-covered miners**  -  when a group offline alert was active and miners recovered one by one, each got an individual `miner_online` alert even though the group recovery path should handle it. Added group membership check to the recovery loop  -  miners in active group alerts are suppressed from individual online alerts
+
+**Stratum V2 API  -  Bugs & Missing Features**
+- **V2 API returns 404 on 13 endpoints the dashboard depends on**  -  V2 multi-coin API only implemented 9 of 26 V1 endpoints. Dashboard worker stats, miner stats, hashrate history, workers-by-class, router profiles, pipeline stats, and payment stats all silently failed with 404 when pointed at a V2 stratum server. Added all missing endpoints scoped to per-pool database tables
+- **V2 `/api/pools` hardcoded payout scheme `SOLO` / minimum payment `1.0`**  -  the `/api/pools` response returned hardcoded `"SOLO"` and `1.0` regardless of the per-coin payment configuration in the V2 config file. Dashboard displayed wrong payment info. Fixed to read from `coin.Payments.Scheme` and `coin.Payments.MinimumPayment`
+- **V2 API missing security headers**  -  V1 API applies `X-Content-Type-Options`, `X-Frame-Options`, and `Cache-Control` via `securityHeadersMiddleware`. V2 was missing this middleware entirely  -  responses had no security headers. Added to the V2 middleware chain
+- **V2 API missing `/api/admin/kick` endpoint**  -  the kick worker endpoint existed in V1 but was never ported to V2. Dashboard's "Kick" button would fail. V2 implementation kicks across all registered coin pools
+- **V2 API missing `/api/admin/stats` endpoint**  -  admin stats endpoint existed in V1 but was never ported to V2. V2 implementation aggregates stats across all pools with per-pool breakdown
+- **V2 API missing `/api/coins` endpoint**  -  coin registry endpoint existed in V1 but was never ported to V2. Sentinel and Dashboard coin validation calls would 404
+- **V2 `GetPaymentStats` nil dereference on CoinbaseMaturity**  -  `cp.coin.CoinbaseMaturity()` would panic if the coin interface was nil (possible during early startup or test harness). Added nil guard with a safe default of 100 confirmations
+- **V2 `GetPaymentStats` silent failure on DB type assertion**  -  if the database provider was not a `*PostgresDB` (e.g., mock or test DB), the type assertion silently failed and returned empty stats with no indication of why. Added debug-level log so operators can diagnose missing payment data
+
+**Connection Classifier Tests**
+- **Proxy classification tests updated for raised threshold**  -  `TestClassifier_Level2_InstantAuthorize` and `TestClassifier_Level2_FastAuthorize` expected PROXY classification from timing signals alone, but the proxy confidence threshold was raised from 0.15 to 0.40 in v1.2.0. Tests now correctly expect UNKNOWN for timing-only signals and a new test validates that timing + proxy worker name pattern (combined score >= 0.40) still classifies as PROXY
+
+**Installer  -  UFW & Sync View**
+- **UFW crashes with `UnicodeEncodeError` on fresh install**  -  UFW rule comments in install.sh contained Unicode em-dashes (U+2014) which caused `bytes(out, 'ascii')` in UFW's Python backend to crash. Replaced em-dashes with regular dashes in connlimit/metrics rule comments and added a defensive `sed` cleanup before the first `ufw` command to sanitize any existing rules
+- **Sync live view  -  progress bar two rows below controls bar**  -  cursor positioning was 2 rows too low, leaving a double blank gap between the controls bar and the progress bar. Adjusted all `\033[row;1H` positions and placeholder echo lines to place progress directly below the controls border
+
+**Dashboard  -  System Updates & Reboot**
+- **`apt-get dist-upgrade` fails from dashboard with read-only filesystem**  -  `ProtectSystem=strict` in spiraldash.service creates a kernel mount namespace that makes the entire filesystem read-only for all child processes, including those escalated via sudo. `apt-get` couldn't write to `/var/lib/dpkg/lock`. Fixed with a wrapper script (`apt-noninteractive.sh`) that uses `systemd-run --pipe` to make systemd (PID 1) start apt-get in the root namespace, completely outside the dashboard's restrictions
+- **`apt-get update` refresh also fails from dashboard**  -  the Refresh button called bare `sudo apt-get update` which hit the same `ProtectSystem=strict` and sudoers issues as dist-upgrade. Switched to use the same `apt-noninteractive.sh` wrapper
+- **`apt-get upgrade` doesn't upgrade kernel packages**  -  `apt-get upgrade` refuses to install packages that require new dependencies (like `linux-generic` meta-packages). Changed to `apt-get dist-upgrade` which handles dependency changes. Added `--force-confold` and `--force-confdef` dpkg options to suppress config file prompts
+- **`apt-get dist-upgrade` shows `debconf: unable to initialize frontend: Dialog`**  -  `DEBIAN_FRONTEND=noninteractive` set via subprocess `env=` parameter was stripped by sudo's `env_reset`. Solved by the `apt-noninteractive.sh` wrapper which sets the env var inside the root process before exec'ing apt-get
+
+**Dashboard  -  Gunicorn Worker Deadlock on Reboot**
+- **Dashboard unresponsive after reboot (gunicorn worker deadlock)**  -  after a system reboot, the gunicorn master process started and bound to port 1618, but the forked worker process deadlocked before reaching `init_process()` (post-fork inherited threading lock). Gunicorn's `--timeout 120` failed to detect the stuck worker, and systemd saw the master as "active"  -  the dashboard was unreachable indefinitely until manually killed. Added an `ExecStartPost` health check to the spiraldash systemd service: polls `curl http://127.0.0.1:<port>/` every 2 seconds for up to 60 seconds; if no response, sends `SIGKILL` to the main process so `Restart=always` recovers it automatically
+- **`spiralpool-sync` does not start dashboard after blockchain sync**  -  when `spiralpool-sync` detected a fully synced blockchain, it started `spiralstratum` but never started `spiraldash` or `spiralsentinel`. If these services were stopped (e.g., failed on earlier boot), the user had no dashboard after sync completed. Added startup for both services (if enabled) after stratum comes online, in both single-coin and multi-coin sync paths
+
+**Sentinel  -  RPC Allowlist**
+- **`getnetworkhashps` rejected by RPC allowlist**  -  Sentinel's `_RPC_ALLOWED_METHODS` frozenset was missing `getnetworkhashps`, causing a warning on every call. Added to the allowlist
+
+**Stratum V2  -  Nil Guards**
+- **V2 `KickWorkerByIP` panics if stratum server is nil**  -  all other new CoinPool methods had nil guards for `cp.stratumServer` but `KickWorkerByIP` was missed. Added nil guard returning 0
+
+**Tests**
+- **`TestBlockQueue_ConcurrentEnqueueDequeue` flaky**  -  under contention, `DequeueWithCommit()` returns nil while items are in-flight between goroutines. Dequeue goroutines exited on first nil, losing items and failing the count assertion. Added a `nilStreak` retry counter (100 consecutive nils before exit) with `runtime.Gosched()` to yield to enqueue goroutines
+
+**Sentinel  -  Temperature Monitoring**
+- **Goldshell `all_temps` list crashes temperature alerting**  -  Goldshell miners return temperature as a list instead of a scalar value. The temperature comparison (`temp_value >= threshold`) threw a TypeError on lists. Added type guard to skip non-scalar temperature values
+
+**General**
+- **`spiralctl` HTTPS auto-detection**  -  `spiralctl` dashboard commands now auto-detect HTTP vs HTTPS from the spiraldash service file and accept self-signed certificates on localhost, matching the dashboard and Sentinel behavior
 - **`spiralctl status` timer next-run shows garbage**  -  bash expands `$(( {} / 1000000 ))` before `xargs` substitutes `{}`, producing `$(( / 1000000 ))` syntax errors and a blank or wrong next-run time in `spiralctl status`. Rewrote `_timer_next_run()` to capture `usec` into a variable first, then compute the date expression directly
 - **Miner status boolean vs string mismatch**  -  dashboard miner cards checked `m.online` (boolean) but some code paths returned `m.status` (string). Unified to consistent boolean check
 - **Fan RPM misidentified as percentage**  -  fan values >100 are RPM readings, not percentages. Dashboard now detects and displays RPM values correctly with appropriate units
 - **Disk usage double-counting**  -  multiple mount points on the same filesystem (same device) caused disk usage to be counted multiple times. Added filesystem fingerprinting to deduplicate
+- **Log viewer inconsistent text color**  -  info-level and debug-level log lines used different shades, making the log viewer visually noisy. Unified to the same muted color (errors still red, warnings still orange)
 - **Custom theme editor layout**  -  section headers and grid layout cleaned up for better usability in the theme customization panel
 
 ### Removed
@@ -120,12 +210,12 @@ Device Configuration modal in the Miner Management tab  -  per-firmware controls
 - `spiralctl config validate`  -  alert config range check description updated to v2.0.0
 - All dashboard theme and template JSON files bumped to version 2.0.0
 - `apply_profile_now()` endpoint now accepts `model` in the request body (request body > saved schedule > generic), enabling the dashboard UI to pass the correct Avalon model without requiring a schedule to exist first
-- Dashboard main view renamed from "Dashboard" to **Overview**; the second tab renamed to **Management**  -  clearer separation between pool monitoring and system administration
+- Dashboard restructured into three tabs: **Overview** (pool monitoring, miner grid, stats), **Blocks** (block analytics, luck tracking, charts), and **Management** (service control, log viewer, system updates, miner management)
 - **Miner card buttons consolidated**  -  duplicate "Configure" buttons on Overview miner cards replaced with a single "Web UI" button
 - **Uptime moved to top stats row**  -  system uptime relocated from the removed Lifetime Statistics section to the main stats bar for better visibility
 
 ### Notes
-- **Zero breaking changes**  -  v1.0.0 / v1.1.x / v1.2.x installations upgrade in-place via `upgrade.sh` with no config changes, no migrations, and no coin daemon restarts required. Dashboard URL changes from `http://` to `https://` (self-signed cert; browser will show a one-time certificate warning)
+- **Zero breaking changes**  -  v1.0.0 / v1.1.x / v1.2.x installations upgrade in-place via `upgrade.sh` with no config changes, no migrations, and no coin daemon restarts required. Dashboard stays on HTTP; operators can opt in to HTTPS from the Management tab (self-signed cert; browser will show a one-time certificate warning)
 
 ---
 

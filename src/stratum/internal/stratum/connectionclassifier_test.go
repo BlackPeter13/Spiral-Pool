@@ -104,41 +104,54 @@ func TestClassifier_Level1_FinalizedImmediately(t *testing.T) {
 // LEVEL 2: HANDSHAKE TIMING
 // ═══════════════════════════════════════════════════════════════════════════════
 
-func TestClassifier_Level2_InstantAuthorize(t *testing.T) {
+func TestClassifier_Level2_InstantAuthorize_TimingAlone(t *testing.T) {
 	t.Parallel()
 	cc := NewConnectionClassifier()
 	now := time.Now()
 	// Use MinerClassUnknown — timing analysis is only applied when Level 1
 	// did not identify the miner (known ASICs on LAN also authorize in <5ms).
 	cc.RecordSubscribe(1, MinerClassUnknown, now)
-	// Authorize 2ms after subscribe — possible proxy or fast LAN ASIC.
+	// Authorize 2ms after subscribe — timing alone scores 0.25, below the 0.40
+	// proxy threshold. This prevents misclassifying fast LAN ASICs (S19, etc.)
+	// that also authorize in <5ms.
 	cc.RecordAuthorize(1, "user.worker", now.Add(2*time.Millisecond))
 
 	c := cc.GetClassification(1)
-	if c.Type != ConnectionTypeProxy {
-		t.Errorf("Type = %v, want PROXY for <5ms auth delay on unknown miner", c.Type)
-	}
-	// Score: 0.25 (timing) + 0.15 (worker name pattern) = 0.40
-	if c.Confidence < 0.25 {
-		t.Errorf("Confidence = %.2f, want ≥0.25", c.Confidence)
+	if c.Type != ConnectionTypeUnknown {
+		t.Errorf("Type = %v, want UNKNOWN — timing alone (0.25) is below proxy threshold (0.40)", c.Type)
 	}
 }
 
-func TestClassifier_Level2_FastAuthorize(t *testing.T) {
+func TestClassifier_Level2_InstantAuthorize_WithProxyWorkerName(t *testing.T) {
+	t.Parallel()
+	cc := NewConnectionClassifier()
+	now := time.Now()
+	cc.RecordSubscribe(1, MinerClassUnknown, now)
+	// <5ms auth (0.25) + proxy worker name pattern (0.15) = 0.40 → PROXY
+	cc.RecordAuthorize(1, "user.worker001", now.Add(2*time.Millisecond))
+
+	c := cc.GetClassification(1)
+	if c.Type != ConnectionTypeProxy {
+		t.Errorf("Type = %v, want PROXY for <5ms auth + proxy worker name pattern", c.Type)
+	}
+	if c.Confidence < 0.40 {
+		t.Errorf("Confidence = %.2f, want ≥0.40", c.Confidence)
+	}
+}
+
+func TestClassifier_Level2_FastAuthorize_TimingAlone(t *testing.T) {
 	t.Parallel()
 	cc := NewConnectionClassifier()
 	now := time.Now()
 	// Use MinerClassUnknown — timing analysis only applies for unidentified miners.
 	cc.RecordSubscribe(1, MinerClassUnknown, now)
-	// 12ms — likely automated but less certain than <5ms.
+	// 12ms — scores 0.15 (fast auth), below the 0.40 threshold.
+	// Prevents misclassifying fast LAN ASICs as proxies.
 	cc.RecordAuthorize(1, "user.worker", now.Add(12*time.Millisecond))
 
 	c := cc.GetClassification(1)
-	if c.Type != ConnectionTypeProxy {
-		t.Errorf("Type = %v, want PROXY for <20ms auth delay on unknown miner", c.Type)
-	}
-	if c.Confidence < 0.15 {
-		t.Errorf("Confidence = %.2f, want ≥0.15", c.Confidence)
+	if c.Type != ConnectionTypeUnknown {
+		t.Errorf("Type = %v, want UNKNOWN — fast auth alone (0.15) is below proxy threshold (0.40)", c.Type)
 	}
 }
 

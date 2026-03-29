@@ -403,9 +403,12 @@ cmd_status() {
                 if info=$($cli getblockchaininfo 2>/dev/null); then
                     blocks=$(echo "$info" | grep -o '"blocks":[^,]*' | cut -d: -f2 | tr -d ' ')
                     headers=$(echo "$info" | grep -o '"headers":[^,]*' | cut -d: -f2 | tr -d ' ')
-                    progress=$(echo "$info" | grep -o '"verificationprogress":[^,]*' | cut -d: -f2 | tr -d ' ')
-                    pct=$(echo "$progress * 100" | bc -l 2>/dev/null | cut -d. -f1)
-                    if [[ "$blocks" == "$headers" ]] && [[ "${pct:-0}" -ge 99 ]]; then
+                    if [[ "${headers:-0}" -gt 0 ]]; then
+                        pct=$(( blocks * 100 / headers ))
+                    else
+                        pct=0
+                    fi
+                    if [[ "$blocks" == "$headers" ]] && [[ "$pct" -ge 99 ]]; then
                         printf "    %-26s ${GREEN}%-12s${NC} (block %s)\n" "$label" "Synced" "$blocks"
                     else
                         printf "    %-26s ${YELLOW}%-12s${NC} (%s/%s - %s%%)\n" "$label" "Syncing" "$blocks" "$headers" "${pct:-0}"
@@ -437,9 +440,12 @@ cmd_status() {
                 if info=$($cli getblockchaininfo 2>/dev/null); then
                     blocks=$(echo "$info" | grep -o '"blocks":[^,]*' | cut -d: -f2 | tr -d ' ')
                     headers=$(echo "$info" | grep -o '"headers":[^,]*' | cut -d: -f2 | tr -d ' ')
-                    progress=$(echo "$info" | grep -o '"verificationprogress":[^,]*' | cut -d: -f2 | tr -d ' ')
-                    pct=$(echo "$progress * 100" | bc -l 2>/dev/null | cut -d. -f1)
-                    if [[ "$blocks" == "$headers" ]] && [[ "${pct:-0}" -ge 99 ]]; then
+                    if [[ "${headers:-0}" -gt 0 ]]; then
+                        pct=$(( blocks * 100 / headers ))
+                    else
+                        pct=0
+                    fi
+                    if [[ "$blocks" == "$headers" ]] && [[ "$pct" -ge 99 ]]; then
                         printf "    %-26s ${GREEN}%-12s${NC} (block %s)\n" "$label" "Synced" "$blocks"
                     else
                         printf "    %-26s ${YELLOW}%-12s${NC} (%s/%s - %s%%)\n" "$label" "Syncing" "$blocks" "$headers" "${pct:-0}"
@@ -5839,7 +5845,11 @@ cmd_add_coin() {
     echo ""
     echo -e "  ${YELLOW}After stratum restarts, set the ${symbol} wallet address in the Dashboard:${NC}"
     local dash_ip; dash_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
-    echo -e "  ${GREEN}http://${dash_ip:-<your-server-ip>}:1618/setup${NC}"
+    local dash_proto="http"
+    if grep -q "^ExecStart.*\-\-certfile" /etc/systemd/system/spiraldash.service 2>/dev/null; then dash_proto="https"; fi
+    local dash_port; dash_port=$(grep -oP '0\.0\.0\.0:\K[0-9]+' /etc/systemd/system/spiraldash.service 2>/dev/null | head -1)
+    dash_port="${dash_port:-1618}"
+    echo -e "  ${GREEN}${dash_proto}://${dash_ip:-<your-server-ip>}:${dash_port}/setup${NC}"
     echo ""
     echo -e "  ${DIM}The setup wizard auto-detects active coins and shows wallet inputs for each.${NC}"
     echo ""
@@ -6033,7 +6043,11 @@ PYEOF
     echo ""
     echo -e "  ${YELLOW}After restarting stratum, update wallet config in the Dashboard:${NC}"
     local dash_ip; dash_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
-    echo -e "  ${GREEN}http://${dash_ip:-<your-server-ip>}:1618/setup${NC}"
+    local dash_proto="http"
+    if grep -q "^ExecStart.*\-\-certfile" /etc/systemd/system/spiraldash.service 2>/dev/null; then dash_proto="https"; fi
+    local dash_port; dash_port=$(grep -oP '0\.0\.0\.0:\K[0-9]+' /etc/systemd/system/spiraldash.service 2>/dev/null | head -1)
+    dash_port="${dash_port:-1618}"
+    echo -e "  ${GREEN}${dash_proto}://${dash_ip:-<your-server-ip>}:${dash_port}/setup${NC}"
     echo -e "  ${DIM}The setup wizard will reflect the updated coin list automatically.${NC}"
 
     local src_dir="${INSTALL_DIR}/stratum-src"

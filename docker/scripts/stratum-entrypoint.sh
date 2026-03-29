@@ -968,6 +968,11 @@ database:
     interval: 3s
 CONFIGEOF
 
+    if [ $? -ne 0 ]; then
+        echo "ERROR: Failed to write multi-coin config to ${CONFIG_OUTPUT}.tmp"
+        rm -f "${CONFIG_OUTPUT}.tmp"
+        exit 1
+    fi
     mv "${CONFIG_OUTPUT}.tmp" "${CONFIG_OUTPUT}"
     chmod 600 "${CONFIG_OUTPUT}"
 
@@ -998,10 +1003,28 @@ if [ ! -f "$TLS_CERT_FILE" ]; then
     else
         rm -f "$tls_dir/.write-test"
     fi
-    openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 \
-        -nodes -keyout "$TLS_KEY_FILE" -out "$TLS_CERT_FILE" \
-        -subj "/CN=spiralpool/O=SpiralPool/C=US" 2>/dev/null
-    echo "TLS certificate generated: $TLS_CERT_FILE"
+    # Build SANs: localhost + container hostname + 127.0.0.1
+    san="DNS:localhost,DNS:$(hostname),IP:127.0.0.1"
+    lan_ips=$(ip -4 addr show 2>/dev/null | grep -oP 'inet \K[0-9.]+' | grep -v '^127\.' || true)
+    for ip in $lan_ips; do
+        san="${san},IP:${ip}"
+    done
+
+    if ! openssl req -x509 \
+        -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+        -keyout "$TLS_KEY_FILE" -out "$TLS_CERT_FILE" \
+        -sha256 -days 3650 -nodes \
+        -subj "/O=Spiral Pool/CN=$(hostname)" \
+        -addext "subjectAltName=${san}" \
+        -addext "basicConstraints=critical,CA:FALSE" \
+        -addext "keyUsage=critical,digitalSignature" \
+        -addext "extendedKeyUsage=serverAuth" \
+        2>/dev/null; then
+        echo "WARNING: TLS certificate generation failed — stratum TLS may not work"
+    else
+        chmod 600 "$TLS_KEY_FILE"
+        echo "TLS certificate generated: $TLS_CERT_FILE"
+    fi
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════

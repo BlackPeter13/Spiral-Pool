@@ -65,15 +65,16 @@ if ($Run) {
 
     # Stop Spiral Pool services first, then coin daemons
     # Order matters: sentinel/dash first, then stratum (flushes shares), then daemons
+    # Each stop gets a timeout wrapper so one hung service can't eat the entire budget
     $stopCmd = @(
-        "systemctl stop spiralsentinel 2>/dev/null"
-        "systemctl stop spiraldash 2>/dev/null"
-        "systemctl stop spiralpool-health 2>/dev/null"
-        "systemctl stop spiralpool-ha-watcher 2>/dev/null"
-        "systemctl stop spiralstratum 2>/dev/null"
-        "for svc in `$(systemctl list-units --type=service --state=running --no-legend | grep -oP 'bitcoind-\S+|litecoind\S+|dogecoind\S+|digibyted\S+|namecoind\S+|syscoind\S+|pepcoind\S+|catcoind\S+|fractal-bitcoind\S+|qbitxd\S+|myriadcoind\S+' | head -20); do systemctl stop `$svc 2>/dev/null; done"
+        "timeout 30 systemctl stop spiralsentinel 2>/dev/null"
+        "timeout 30 systemctl stop spiraldash 2>/dev/null"
+        "timeout 10 systemctl stop spiralpool-health 2>/dev/null"
+        "timeout 10 systemctl stop spiralpool-ha-watcher 2>/dev/null"
+        "timeout 60 systemctl stop spiralstratum 2>/dev/null"
+        "for svc in `$(systemctl list-units --type=service --state=running --no-legend | grep -oP 'bitcoind\S*|bitcoiniid\S*|litecoind\S*|dogecoind\S*|digibyted\S*|namecoind\S*|syscoind\S*|pepecoind\S*|catcoind\S*|fractald\S*|qbitxd\S*|myriadcoind\S*' | head -20); do timeout 45 systemctl stop `$svc 2>/dev/null; done"
         "sync"
-    ) -join ' && '
+    ) -join ' ; '
 
     try {
         $wslArgs = @('-d', $distro, '--user', 'root', '--exec', 'bash', '-c', $stopCmd)
@@ -189,7 +190,7 @@ $principal = New-ScheduledTaskPrincipal `
 
 $settings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
-    -ExecutionTimeLimit (New-TimeSpan -Minutes 2) `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 5) `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
     -Priority 1

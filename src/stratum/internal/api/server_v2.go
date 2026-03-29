@@ -12,8 +12,10 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -78,6 +80,13 @@ type CoinPoolProvider interface {
 	GetBlockReward() float64
 	GetPoolEffort() float64
 	GetStratumPort() int
+	GetActiveConnections() []WorkerConnection
+	// Extended V2 methods for full API parity with V1
+	GetRouterProfiles() []RouterProfile
+	GetWorkersByClass() map[string]int
+	GetPipelineStats() PipelineStats
+	GetPaymentStats() (*PaymentStats, error)
+	KickWorkerByIP(ip string) int
 }
 
 // NewServerV2 creates a new V2 multi-coin API server.
@@ -135,12 +144,18 @@ func (s *ServerV2) Start(ctx context.Context) error {
 	mux.HandleFunc("/health", s.handleHealth)
 
 	// Admin endpoints (protected by API key)
+	mux.HandleFunc("/api/admin/stats", s.adminAuthMiddlewareV2(s.handleAdminStatsV2))
 	mux.HandleFunc("/api/admin/device-hints", s.adminAuthMiddlewareV2(s.handleDeviceHintsV2))
+	mux.HandleFunc("/api/admin/kick", s.adminAuthMiddlewareV2(s.handleKickWorkerV2))
+
+	// Coin registry endpoint (public - for Sentinel/Dashboard validation)
+	mux.HandleFunc("/api/coins", s.handleCoinsV2)
 
 	// Apply middleware
 	handler := s.rateLimitMiddleware(mux)
 	handler = s.loggingMiddleware(handler)
 	handler = s.corsMiddleware(handler)
+	handler = s.securityHeadersMiddleware(handler)
 
 	listenAddr := fmt.Sprintf("%s:%d", s.cfg.Global.APIBindAddress, s.cfg.Global.APIPort)
 	s.server = &http.Server{
@@ -222,16 +237,16 @@ func (s *ServerV2) handlePools(w http.ResponseWriter, r *http.Request) {
 				PoolEffort:            provider.GetPoolEffort(),
 			},
 			PaymentProcessing: PaymentInfo{
-				Enabled:        true,
-				PayoutScheme:   "SOLO",
-				MinimumPayment: 1.0,
+				Enabled: true,
 			},
 		}
 
-		// Get address from config
-		for _, coin := range s.cfg.Coins {
-			if coin.PoolID == provider.PoolID() {
-				poolInfo.Address = coin.Address
+		// Get address and payment config from config
+		for _, coinCfg := range s.cfg.Coins {
+			if coinCfg.PoolID == provider.PoolID() {
+				poolInfo.Address = coinCfg.Address
+				poolInfo.PaymentProcessing.PayoutScheme = coinCfg.Payments.Scheme
+				poolInfo.PaymentProcessing.MinimumPayment = coinCfg.Payments.MinimumPayment
 				break
 			}
 		}
@@ -303,6 +318,67 @@ func (s *ServerV2) handlePoolRoutes(w http.ResponseWriter, r *http.Request) {
 		s.handlePoolBlocks(w, r, poolID, provider.Symbol())
 	case "network":
 		s.handlePoolNetwork(w, r, provider)
+	case "hashrate":
+		if len(parts) >= 3 && parts[2] == "history" {
+			s.handlePoolHashrateHistoryV2(w, r, poolID)
+		} else {
+			http.Error(w, "Not found", http.StatusNotFound)
+		}
+	case "miners":
+		if len(parts) < 3 {
+			s.handlePoolMinersV2(w, r, poolID)
+			return
+		}
+		minerAddr := parts[2]
+		if len(parts) >= 4 && parts[3] == "workers" {
+			if len(parts) == 4 {
+				// GET /api/pools/{id}/miners/{address}/workers
+				s.handleMinerWorkersV2(w, r, poolID, minerAddr)
+			} else if len(parts) == 5 {
+				// GET /api/pools/{id}/miners/{address}/workers/{worker}
+				s.handleWorkerStatsV2(w, r, poolID, minerAddr, parts[4])
+			} else if len(parts) == 6 && parts[5] == "history" {
+				// GET /api/pools/{id}/miners/{address}/workers/{worker}/history
+				s.handleWorkerHistoryV2(w, r, poolID, minerAddr, parts[4])
+			} else {
+				http.Error(w, "Not found", http.StatusNotFound)
+			}
+		} else {
+			// GET /api/pools/{id}/miners/{address}
+			s.handleMinerStatsV2(w, r, poolID, minerAddr)
+		}
+	case "workers":
+		// GET /api/pools/{id}/workers - all workers (admin view)
+		// SECURITY: Protected by API key - exposes worker details
+		s.adminAuthMiddlewareV2(func(w http.ResponseWriter, r *http.Request) {
+			s.handlePoolWorkersV2(w, r, poolID)
+		}).ServeHTTP(w, r)
+	case "workers-by-class":
+		s.handleWorkersByClassV2(w, r, poolID, provider)
+	case "router":
+		if len(parts) >= 3 && parts[2] == "profiles" {
+			s.handleRouterProfilesV2(w, r, poolID, provider)
+		} else {
+			http.Error(w, "Not found", http.StatusNotFound)
+		}
+	case "pipeline":
+		if len(parts) >= 3 && parts[2] == "stats" {
+			s.handlePipelineStatsV2(w, r, poolID, provider)
+		} else {
+			http.Error(w, "Not found", http.StatusNotFound)
+		}
+	case "payments":
+		if len(parts) >= 3 && parts[2] == "stats" {
+			s.handlePaymentStatsV2(w, r, poolID, provider)
+		} else {
+			http.Error(w, "Not found", http.StatusNotFound)
+		}
+	case "connections":
+		// GET /api/pools/{id}/connections - real-time worker connection status
+		// SECURITY: Protected by API key - exposes session IDs and network info
+		s.adminAuthMiddlewareV2(func(w http.ResponseWriter, r *http.Request) {
+			s.handleConnectionsV2(w, r, provider)
+		}).ServeHTTP(w, r)
 	default:
 		http.Error(w, "Not found", http.StatusNotFound)
 	}
@@ -370,6 +446,76 @@ func (s *ServerV2) handlePoolNetwork(w http.ResponseWriter, r *http.Request, pro
 		"height":     provider.GetBlockHeight(),
 		"hashrate":   provider.GetNetworkHashrate(),
 	}
+	s.writeJSON(w, response)
+}
+
+// handleConnectionsV2 returns real-time worker connection status for a V2 coin pool.
+// Supports pagination via query params: ?page=1&limit=100 (max 1000, default 100)
+// SECURITY: Protected by adminAuthMiddlewareV2 - exposes sensitive connection data.
+func (s *ServerV2) handleConnectionsV2(w http.ResponseWriter, r *http.Request, provider CoinPoolProvider) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse pagination parameters with safe defaults
+	// SECURITY: Limit max page size to prevent DoS via large responses
+	const (
+		defaultLimit = 100
+		maxLimit     = 1000
+	)
+
+	page := 1
+	limit := defaultLimit
+
+	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			if l > maxLimit {
+				l = maxLimit
+			}
+			limit = l
+		}
+	}
+
+	connections := provider.GetActiveConnections()
+	total := len(connections)
+
+	// Apply pagination
+	start := (page - 1) * limit
+	end := start + limit
+
+	if start >= total {
+		// Page out of range - return empty
+		connections = []WorkerConnection{}
+	} else {
+		if end > total {
+			end = total
+		}
+		connections = connections[start:end]
+	}
+
+	// Calculate pagination metadata
+	totalPages := (total + limit - 1) / limit
+	if totalPages == 0 {
+		totalPages = 1
+	}
+
+	response := map[string]interface{}{
+		"poolId":      provider.PoolID(),
+		"coin":        provider.Symbol(),
+		"total":       total,
+		"page":        page,
+		"limit":       limit,
+		"totalPages":  totalPages,
+		"connections": connections,
+	}
+
 	s.writeJSON(w, response)
 }
 
@@ -648,4 +794,233 @@ func (s *ServerV2) handleDeviceHintsV2(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// ============================================================================
+// Runtime provider endpoints (workers-by-class, router, pipeline, payments)
+// ============================================================================
+
+// handleRouterProfilesV2 returns the Spiral Router difficulty profiles.
+func (s *ServerV2) handleRouterProfilesV2(w http.ResponseWriter, r *http.Request, poolID string, provider CoinPoolProvider) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	profiles := provider.GetRouterProfiles()
+	if profiles == nil {
+		profiles = []RouterProfile{}
+	}
+
+	response := map[string]interface{}{
+		"poolId":   poolID,
+		"profiles": profiles,
+	}
+
+	s.writeJSON(w, response)
+}
+
+// handleWorkersByClassV2 returns worker count breakdown by miner class.
+func (s *ServerV2) handleWorkersByClassV2(w http.ResponseWriter, r *http.Request, poolID string, provider CoinPoolProvider) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	workersByClass := provider.GetWorkersByClass()
+	if workersByClass == nil {
+		workersByClass = map[string]int{}
+	}
+
+	total := 0
+	for _, count := range workersByClass {
+		total += count
+	}
+
+	response := map[string]interface{}{
+		"poolId":         poolID,
+		"workersByClass": workersByClass,
+		"total":          total,
+	}
+
+	s.writeJSON(w, response)
+}
+
+// handlePipelineStatsV2 returns share pipeline statistics.
+func (s *ServerV2) handlePipelineStatsV2(w http.ResponseWriter, r *http.Request, poolID string, provider CoinPoolProvider) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	stats := provider.GetPipelineStats()
+	response := map[string]interface{}{
+		"poolId":   poolID,
+		"pipeline": stats,
+	}
+
+	s.writeJSON(w, response)
+}
+
+// handlePaymentStatsV2 returns payment processor statistics.
+func (s *ServerV2) handlePaymentStatsV2(w http.ResponseWriter, r *http.Request, poolID string, provider CoinPoolProvider) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	stats, err := provider.GetPaymentStats()
+	if err != nil {
+		s.logger.Errorw("Failed to get payment stats", "poolId", poolID, "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	response := map[string]interface{}{
+		"poolId":   poolID,
+		"payments": stats,
+	}
+
+	s.writeJSON(w, response)
+}
+
+// ============================================================================
+// Admin endpoints
+// ============================================================================
+
+// handleAdminStatsV2 returns admin statistics aggregated across all pools.
+func (s *ServerV2) handleAdminStatsV2(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	s.poolProvidersMu.RLock()
+	pools := make([]map[string]interface{}, 0, len(s.poolProviders))
+	var totalConnections int64
+	var totalHashrate float64
+
+	for _, provider := range s.poolProviders {
+		conns := provider.GetConnections()
+		hr := provider.GetHashrate()
+		totalConnections += conns
+		totalHashrate += hr
+
+		pools = append(pools, map[string]interface{}{
+			"poolId":          provider.PoolID(),
+			"coin":            provider.Symbol(),
+			"connectedMiners": conns,
+			"poolHashrate":    hr,
+		})
+	}
+	s.poolProvidersMu.RUnlock()
+
+	response := map[string]interface{}{
+		"pools": pools,
+		"totals": map[string]interface{}{
+			"connectedMiners": totalConnections,
+			"poolHashrate":    totalHashrate,
+		},
+	}
+
+	s.writeJSON(w, response)
+}
+
+// handleKickWorkerV2 disconnects all stratum sessions from a given IP address.
+// POST /api/admin/kick?ip=X.X.X.X
+func (s *ServerV2) handleKickWorkerV2(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ip := r.URL.Query().Get("ip")
+	if ip == "" {
+		http.Error(w, "Missing required query parameter: ip", http.StatusBadRequest)
+		return
+	}
+
+	if net.ParseIP(ip) == nil {
+		http.Error(w, "Invalid IP address", http.StatusBadRequest)
+		return
+	}
+
+	// Kick from all pools
+	totalKicked := 0
+	s.poolProvidersMu.RLock()
+	for _, provider := range s.poolProviders {
+		totalKicked += provider.KickWorkerByIP(ip)
+	}
+	s.poolProvidersMu.RUnlock()
+
+	s.writeJSON(w, map[string]interface{}{
+		"ip":     ip,
+		"kicked": totalKicked,
+	})
+}
+
+// handleCoinsV2 returns all registered coins from the Go registry.
+func (s *ServerV2) handleCoinsV2(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	symbols := coin.ListRegistered()
+
+	coins := make([]RegisteredCoinInfo, 0, len(symbols))
+	for _, symbol := range symbols {
+		c, err := coin.Create(symbol)
+		if err != nil {
+			continue
+		}
+
+		info := RegisteredCoinInfo{
+			Symbol:    c.Symbol(),
+			Name:      c.Name(),
+			Algorithm: c.Algorithm(),
+			Network: CoinNetworkInfo{
+				RPCPort:        c.DefaultRPCPort(),
+				P2PPort:        c.DefaultP2PPort(),
+				P2PKHVersion:   c.P2PKHVersionByte(),
+				P2SHVersion:    c.P2SHVersionByte(),
+				Bech32HRP:      c.Bech32HRP(),
+				SupportsSegWit: c.SupportsSegWit(),
+			},
+			Chain: CoinChainInfo{
+				GenesisHash:      c.GenesisBlockHash(),
+				BlockTime:        c.BlockTime(),
+				CoinbaseMaturity: c.CoinbaseMaturity(),
+			},
+		}
+
+		// Check if coin supports AuxPoW
+		if auxCoin, ok := c.(coin.AuxPowCoin); ok && auxCoin.SupportsAuxPow() {
+			info.MergeMining = &CoinMergeMiningInfo{
+				SupportsAuxPow:    true,
+				AuxPowStartHeight: auxCoin.AuxPowStartHeight(),
+				ChainID:           auxCoin.ChainID(),
+				VersionBit:        auxCoin.AuxPowVersionBit(),
+			}
+		}
+
+		coins = append(coins, info)
+	}
+
+	response := CoinsResponse{
+		Count: len(coins),
+		Coins: coins,
+	}
+
+	s.writeJSON(w, response)
+}
+
+// securityHeadersMiddleware adds security headers to all responses.
+func (s *ServerV2) securityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Cache-Control", "no-store")
+		next.ServeHTTP(w, r)
+	})
 }
