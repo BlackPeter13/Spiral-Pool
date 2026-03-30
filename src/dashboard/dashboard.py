@@ -19,7 +19,7 @@ ASIC Miner API Protocol References (protocol documentation, not derived code):
 See LICENSE file for full BSD-3-Clause license terms.
 """
 
-__version__ = "2.0.1-PHI_HASH_REACTOR"
+__version__ = "2.1.0-PHI_HASH_REACTOR"
 
 import os
 import json
@@ -458,6 +458,7 @@ _miner_cache_lock = threading.Lock()
 _pool_stats_lock = threading.Lock()
 _lifetime_stats_lock = threading.Lock()
 _share_heatmap_lock = threading.Lock()
+_node_operation_lock = threading.Lock()  # Serialize install/remove to prevent concurrent pool-mode.sh
 
 # HTTP Session with connection pooling for better performance
 # Reuses TCP connections instead of creating new ones for each request
@@ -1714,7 +1715,7 @@ def fetch_pool_stats():
                     pool_stats_cache["last_block_time"] = latest_block.get("created")
                     pool_stats_cache["last_block_height"] = latest_block.get("blockHeight")
                     # Get the miner who found the block (worker name or address)
-                    pool_stats_cache["last_block_finder"] = latest_block.get("source") or latest_block.get("worker") or latest_block.get("miner") or latest_block.get("minerAddress")
+                    pool_stats_cache["last_block_finder"] = latest_block.get("worker") or latest_block.get("miner") or latest_block.get("minerAddress") or latest_block.get("source")
                 # Detect newly found blocks (count increased since last poll).
                 # old_count == -1 on the very first poll — just establishes the baseline,
                 # no celebration (avoids false-triggering existing blocks on startup).
@@ -4187,8 +4188,8 @@ def _compute_network_hashrate(difficulty):
 
     Prefers the node's getnetworkhashps RPC value (cached in pool_stats_cache)
     which uses a moving average over recent blocks and reflects actual network
-    performance.  Falls back to the formula  difficulty * 2^32 / block_time
-    when the RPC value is unavailable.
+    performance.  Falls back to the formula  difficulty * 2^N / block_time
+    where N=16 for Scrypt coins and N=32 for SHA-256d coins.
     """
     # Prefer node RPC networkhashps — it uses actual recent block timing
     rpc_nhps = pool_stats_cache.get("node_networkhashps", 0)
@@ -4198,7 +4199,9 @@ def _compute_network_hashrate(difficulty):
     if not difficulty or difficulty <= 0:
         return 0
     bt = block_reward_cache.get("block_time", 0) or 600
-    return difficulty * (2**32) / bt
+    algo = get_algorithm_for_coin(get_primary_coin()).lower()
+    diff_multiplier = (2 ** 16) if algo == "scrypt" else (2 ** 32)
+    return difficulty * diff_multiplier / bt
 
 
 def record_historical_data():
@@ -4270,6 +4273,11 @@ def record_historical_data():
             "time": timestamp,
             "value": hashrate_ths
         })
+
+    # Prune stale miners no longer in the active set (prevents unbounded dict growth)
+    stale_miners = [k for k in historical_data["per_miner_hashrate"] if k not in miners]
+    for k in stale_miners:
+        del historical_data["per_miner_hashrate"][k]
 
 
 # Track miners.json mtime for auto-import from spiralpool-scan
@@ -5068,7 +5076,15 @@ def fetch_block_reward():
         if response.status_code == 200:
             data = response.json()
             if data.get("pools") and len(data["pools"]) > 0:
-                pool = data["pools"][0]
+                # Match the primary coin's pool by ID instead of blindly taking [0]
+                target_pool_id = get_pool_id()
+                pool = None
+                for p in data["pools"]:
+                    if p.get("id") == target_pool_id:
+                        pool = p
+                        break
+                if pool is None:
+                    pool = data["pools"][0]
                 # Pool API returns blockReward in coin units (already converted from satoshis)
                 block_stats = pool.get("poolStats", {})
                 if block_stats.get("blockReward"):
@@ -5137,6 +5153,37 @@ def fetch_block_reward():
             block_reward_cache["price_cad"] = coin_prices["cad"]
         block_reward_cache["last_update"] = time.time()
         return block_reward_cache.copy()
+
+
+def _fetch_per_coin_prices(currency_code):
+    """Fetch prices for all supported coins in the given fiat currency.
+
+    Returns a dict mapping coin symbol (e.g. "BTC") to its price in the
+    requested currency.  Falls back gracefully: coins without a CoinGecko ID
+    or whose API call fails simply won't appear in the result.
+    """
+    prices = {}
+    # Collect CoinGecko IDs for all coins that have one
+    id_to_coins = {}
+    for symbol, cg_id in COINGECKO_IDS.items():
+        if cg_id:
+            id_to_coins.setdefault(cg_id, []).append(symbol)
+    if not id_to_coins:
+        return prices
+    try:
+        ids_param = ",".join(id_to_coins.keys())
+        resp = _http_session.get(
+            f"https://api.coingecko.com/api/v3/simple/price?ids={ids_param}&vs_currencies={currency_code}",
+            timeout=5,
+        )
+        data = resp.json()
+        for cg_id, symbols in id_to_coins.items():
+            price_val = data.get(cg_id, {}).get(currency_code, 0)
+            for sym in symbols:
+                prices[sym] = price_val
+    except (requests.exceptions.RequestException, ValueError, KeyError, TypeError):
+        pass
+    return prices
 
 
 # ============================================
@@ -7105,6 +7152,8 @@ def cgminer_command(ip, port, command, parameter=None, timeout=5):
     # SECURITY: Validate IP to prevent SSRF attacks
     if not validate_miner_ip(ip):
         return {"error": "Invalid or blocked IP address (SSRF protection)"}
+    if not isinstance(port, int) or port < 1 or port > 65535:
+        return {"error": "Invalid port number"}
     sock = None
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -9008,8 +9057,7 @@ def change_password():
 
     # Verify current password
     if ADMIN_PASSWORD:
-        if not hmac.compare_digest(current_password, ADMIN_PASSWORD):
-            return jsonify({"error": "Current password is incorrect"}), 401
+        return jsonify({"error": "Password is managed by DASHBOARD_ADMIN_PASSWORD environment variable and cannot be changed here"}), 400
     else:
         auth_config = load_auth_config()
         stored_hash = auth_config.get("password_hash", "")
@@ -11303,8 +11351,9 @@ def get_system_info():
     # Add coin daemon services from config
     try:
         coins_info = get_enabled_coins()
-        for coin_cfg in coins_info.get("coins_config", []):
-            svc = coin_cfg.get("daemon_service")
+        for sym in coins_info.get("enabled", []):
+            node = MULTI_COIN_NODES.get(sym, {})
+            svc = node.get("service_name")
             if svc and svc not in service_names:
                 service_names.append(svc)
     except Exception:
@@ -11594,6 +11643,408 @@ def restart_stratum():
     except Exception as e:
         app.logger.error(f"Stratum restart exception: {e}")
         return jsonify({"success": False, "error": "Failed to restart Spiral Stratum"})
+
+
+# ── Multi-Coin Smart Port Management ─────────────────────────────────────────
+
+@app.route('/api/multiport', methods=['GET'])
+@api_key_or_login_required
+def get_multiport():
+    """Get multi-coin smart port configuration and live stats.
+
+    Returns config from config.yaml plus live stats from stratum API.
+    """
+    import yaml as pyyaml
+
+    result = {
+        "enabled": False,
+        "port": 16180,
+        "coins": {},
+        "prefer_coin": "",
+        "check_interval": "30s",
+        "min_time_on_coin": "60s",
+        "timezone": "UTC",
+        "live": None,
+    }
+
+    # Read config from config.yaml
+    try:
+        if os.path.exists(POOL_CONFIG_PATH):
+            with open(POOL_CONFIG_PATH, 'r') as f:
+                config = pyyaml.safe_load(f)
+            mp = config.get("multi_port", {})
+            if mp:
+                result["enabled"] = mp.get("enabled", False)
+                result["port"] = mp.get("port", 16180)
+                result["coins"] = mp.get("coins", {})
+                result["prefer_coin"] = mp.get("prefer_coin", "")
+                result["check_interval"] = str(mp.get("check_interval", "30s"))
+                result["min_time_on_coin"] = str(mp.get("min_time_on_coin", "60s"))
+                result["timezone"] = mp.get("timezone", "")
+    except Exception as e:
+        app.logger.error(f"Failed to read multiport config: {e}")
+
+    # If no timezone set in multiport config, fall back to sentinel's display_timezone
+    if not result["timezone"]:
+        try:
+            sentinel_paths = [
+                os.path.join(os.environ.get("SPIRALPOOL_INSTALL_DIR", "/spiralpool"), "config", "sentinel", "config.json"),
+                os.path.expanduser("~/.spiralsentinel/config.json"),
+            ]
+            for sp in sentinel_paths:
+                if sp and os.path.exists(sp):
+                    import json as _json
+                    with open(sp, 'r') as f:
+                        sentinel_cfg = _json.load(f)
+                    result["timezone"] = sentinel_cfg.get("display_timezone", "UTC")
+                    break
+        except Exception:
+            pass
+        if not result["timezone"]:
+            result["timezone"] = "UTC"
+
+    # Proxy live stats from stratum API
+    if result["enabled"]:
+        try:
+            import requests as req_lib
+            resp = req_lib.get(f"{POOL_API_URL}/api/multiport", timeout=3)
+            if resp.status_code == 200:
+                result["live"] = resp.json()
+        except Exception:
+            pass  # stratum may not be running
+
+    # Build schedule from weights
+    coins = result.get("coins", {})
+    total_weight = sum(c.get("weight", 0) if isinstance(c, dict) else 0 for c in coins.values())
+    schedule = []
+    cumulative = 0.0
+    if total_weight > 0:
+        for symbol, cfg in sorted(coins.items()):
+            w = cfg.get("weight", 0) if isinstance(cfg, dict) else 0
+            if w <= 0:
+                continue
+            frac = w / total_weight
+            start_h = cumulative * 24
+            cumulative += frac
+            end_h = cumulative * 24
+            schedule.append({
+                "symbol": symbol,
+                "weight": w,
+                "start_h": round(start_h, 1),
+                "end_h": round(end_h, 1),
+            })
+    result["schedule"] = schedule
+
+    # Available SHA-256d coins (for the UI to show toggle options)
+    sha256d_available = []
+    for sym, node in MULTI_COIN_NODES.items():
+        if node.get("algorithm") == "sha256d" and sym not in ("NMC", "SYS", "XMY", "FBTC"):
+            sha256d_available.append({
+                "symbol": sym,
+                "name": node.get("name", sym),
+                "enabled": node.get("enabled", False),
+            })
+    result["available_coins"] = sha256d_available
+
+    return jsonify(result)
+
+
+@app.route('/api/multiport', methods=['POST'])
+@admin_required
+def update_multiport():
+    """Update multi-coin smart port configuration.
+
+    Expects JSON: { "enabled": true, "coins": {"DGB": {"weight": 80}, "BTC": {"weight": 20}}, "prefer_coin": "DGB" }
+    Weights must sum to exactly 100.
+    """
+    import yaml as pyyaml
+
+    data = request.get_json()
+    if not data:
+        return jsonify({"success": False, "error": "JSON body required"}), 400
+
+    enabled = data.get("enabled", True)
+    coins = data.get("coins", {})
+    prefer_coin = data.get("prefer_coin", "")
+
+    # Validate coins
+    if enabled:
+        if len(coins) < 2:
+            return jsonify({"success": False, "error": "At least 2 coins required"}), 400
+
+        # Validate weights sum to 100 (coerce to int — JSON may send floats)
+        total = 0
+        for sym, cfg in coins.items():
+            w = cfg.get("weight", 0) if isinstance(cfg, dict) else 0
+            if not isinstance(w, (int, float)) or w < 0:
+                return jsonify({"success": False, "error": f"Invalid weight for {sym}"}), 400
+            w = int(round(w))
+            if isinstance(cfg, dict):
+                cfg["weight"] = w  # normalize to int
+            total += w
+
+            # Validate SHA-256d only
+            sym_upper = sym.upper()
+            if sym_upper in MULTI_COIN_NODES:
+                if MULTI_COIN_NODES[sym_upper].get("algorithm") != "sha256d":
+                    return jsonify({"success": False, "error": f"{sym_upper} is not SHA-256d"}), 400
+            else:
+                return jsonify({"success": False, "error": f"Unknown coin: {sym_upper}"}), 400
+
+        if total != 100:
+            return jsonify({"success": False, "error": f"Weights must sum to 100, got {total}"}), 400
+
+    # Read existing config
+    try:
+        with open(POOL_CONFIG_PATH, 'r') as f:
+            config = pyyaml.safe_load(f)
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Failed to read config: {e}"}), 500
+
+    # Validate prefer_coin is in the configured coins
+    if enabled and prefer_coin:
+        if prefer_coin.upper() not in {sym.upper() for sym in coins}:
+            return jsonify({"success": False, "error": f"Preferred coin {prefer_coin.upper()} not in configured coins"}), 400
+
+    # Update multi_port section
+    # Normalize coin symbols to uppercase
+    normalized_coins = {}
+    for sym, cfg in coins.items():
+        normalized_coins[sym.upper()] = cfg
+
+    # Resolve timezone: from request, existing config, sentinel config, or UTC
+    tz = data.get("timezone", "")
+    if not tz:
+        tz = (config.get("multi_port") or {}).get("timezone", "")
+    if not tz:
+        try:
+            sentinel_paths = [
+                os.path.join(os.environ.get("SPIRALPOOL_INSTALL_DIR", "/spiralpool"), "config", "sentinel", "config.json"),
+                os.path.expanduser("~/.spiralsentinel/config.json"),
+            ]
+            for sp in sentinel_paths:
+                if sp and os.path.exists(sp):
+                    import json as _json
+                    with open(sp, 'r') as f:
+                        tz = _json.load(f).get("display_timezone", "UTC")
+                    break
+        except Exception:
+            pass
+    if not tz:
+        tz = "UTC"
+
+    config["multi_port"] = {
+        "enabled": enabled,
+        "port": 16180,
+        "coins": normalized_coins,
+        "check_interval": data.get("check_interval", "30s"),
+        "prefer_coin": prefer_coin.upper() if prefer_coin else "",
+        "min_time_on_coin": data.get("min_time_on_coin", "60s"),
+        "timezone": tz,
+    }
+
+    # Write back — SECURITY: config contains credentials, mode 0600 (atomic write)
+    try:
+        import tempfile
+        dir_name = os.path.dirname(POOL_CONFIG_PATH)
+        fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.yaml.tmp')
+        try:
+            with os.fdopen(fd, 'w') as f:
+                pyyaml.dump(config, f, default_flow_style=False, sort_keys=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.chmod(tmp_path, 0o600)
+            os.replace(tmp_path, POOL_CONFIG_PATH)
+        except Exception:
+            os.unlink(tmp_path)
+            raise
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Failed to write config: {e}"}), 500
+
+    # Update coins.env
+    try:
+        _update_coins_env_multiport(enabled, normalized_coins, prefer_coin)
+    except Exception as e:
+        app.logger.warning(f"Failed to update coins.env: {e}")
+
+    # Restart stratum to apply
+    restart_msg = ""
+    try:
+        import subprocess
+        result = subprocess.run(
+            ['sudo', 'systemctl', 'restart', 'spiralstratum'],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0:
+            restart_msg = "Stratum restarted successfully"
+        else:
+            restart_msg = "Config saved but stratum restart failed — restart manually"
+    except Exception:
+        restart_msg = "Config saved but stratum restart failed — restart manually"
+
+    action = "enabled" if enabled else "disabled"
+    app.logger.info(f"Multi-port {action} by {request.remote_addr}: coins={list(normalized_coins.keys())}")
+
+    return jsonify({
+        "success": True,
+        "message": f"Multi-coin smart port {action}. {restart_msg}",
+    })
+
+
+def _update_coins_env_multiport(enabled, coins, prefer_coin):
+    """Update coins.env with multiport settings"""
+    coins_env_path = "/spiralpool/config/coins.env"
+    if not os.path.exists(coins_env_path):
+        return
+
+    lines = []
+    with open(coins_env_path, 'r') as f:
+        lines = f.read().splitlines()
+
+    def set_line(key, value):
+        for i, line in enumerate(lines):
+            if line.startswith(f"{key}="):
+                lines[i] = f"{key}={value}"
+                return
+        lines.append(f"{key}={value}")
+
+    # Sort coins alphabetically for deterministic output matching Go backend
+    sorted_symbols = sorted(coins.keys())
+    coin_list = ",".join(sorted_symbols)
+    weight_list = ",".join(str(coins[sym].get("weight", 0) if isinstance(coins[sym], dict) else 0) for sym in sorted_symbols)
+
+    set_line("MULTIPORT_ENABLED", "true" if enabled else "false")
+    set_line("MULTIPORT_COINS", coin_list)
+    set_line("MULTIPORT_WEIGHTS", weight_list)
+    set_line("MULTIPORT_PREFER_COIN", (prefer_coin or "").upper())
+
+    with open(coins_env_path, 'w') as f:
+        f.write("\n".join(lines) + "\n")
+
+
+@app.route('/api/nodes/<symbol>/install', methods=['POST'])
+@admin_required
+def install_node(symbol):
+    """Install a coin node via pool-mode.sh --add --yes --wallet <addr>.
+
+    Blocks until installation completes (up to 5 min timeout).
+    Use GET /api/nodes/<symbol>/sync to monitor blockchain sync progress after.
+    """
+    symbol = symbol.upper()
+    if symbol not in MULTI_COIN_NODES:
+        return jsonify({"success": False, "error": f"Unknown coin: {symbol}"}), 400
+
+    node = MULTI_COIN_NODES[symbol]
+    if node.get('enabled', False):
+        return jsonify({"success": False, "error": f"{symbol} is already installed"}), 400
+
+    # Wallet address is required for coin installation
+    data = request.get_json(silent=True) or {}
+    wallet = (data.get("wallet") or "").strip()
+    if not wallet:
+        return jsonify({"success": False, "error": "Wallet address is required"}), 400
+    if not validate_wallet_address(symbol, wallet):
+        return jsonify({"success": False, "error": f"Invalid wallet address format for {symbol}"}), 400
+
+    # SECURITY: Rate limiting
+    client_ip = request.remote_addr or "unknown"
+    if not check_rate_limit(client_ip, "node_install"):
+        return jsonify({"success": False, "error": "Rate limited — try again later"}), 429
+
+    # Serialize coin operations to prevent concurrent pool-mode.sh invocations
+    if not _node_operation_lock.acquire(blocking=False):
+        return jsonify({"success": False, "error": "Another coin operation is in progress — try again shortly"}), 409
+
+    script = "/spiralpool/scripts/pool-mode.sh"
+    try:
+        import subprocess
+        # Use systemd-run to escape ProtectSystem=strict namespace.
+        # pool-mode.sh writes to /spiralpool/<coin>/, /etc/systemd/system/, etc.
+        # --yes skips interactive prompts, --wallet supplies the address.
+        cmd = [
+            'sudo', 'systemd-run', '--pipe', '--quiet',
+            '--property=WorkingDirectory=/tmp',
+            '/bin/bash', script, '--add', symbol,
+            '--yes', '--wallet', wallet
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode == 0:
+            # Reload config so dashboard picks up the new coin
+            load_multi_coin_config()
+            app.logger.info(f"Coin {symbol} installed by {client_ip}")
+            return jsonify({
+                "success": True,
+                "message": f"{symbol} node installation started. Use sync status to monitor progress.",
+            })
+        else:
+            error_msg = result.stderr.strip() or result.stdout.strip() or "Unknown error"
+            app.logger.error(f"Failed to install {symbol}: {error_msg}")
+            return jsonify({"success": False, "error": f"Installation failed: {error_msg}"}), 500
+    except subprocess.TimeoutExpired:
+        return jsonify({"success": False, "error": "Installation timed out (5 min)"}), 504
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Failed to run installer: {e}"}), 500
+    finally:
+        _node_operation_lock.release()
+
+
+@app.route('/api/nodes/<symbol>/remove', methods=['POST'])
+@admin_required
+def remove_node(symbol):
+    """Remove a coin node via pool-mode.sh --remove --yes.
+
+    Refuses to remove the last installed coin.
+    Preserves blockchain data by default (no --delete-data).
+    """
+    symbol = symbol.upper()
+    if symbol not in MULTI_COIN_NODES:
+        return jsonify({"success": False, "error": f"Unknown coin: {symbol}"}), 400
+
+    node = MULTI_COIN_NODES[symbol]
+    if not node.get('enabled', False):
+        return jsonify({"success": False, "error": f"{symbol} is not installed"}), 400
+
+    # Count currently installed coins — refuse to remove the last one
+    installed_count = sum(1 for n in MULTI_COIN_NODES.values() if n.get('enabled', False))
+    if installed_count <= 1:
+        return jsonify({"success": False, "error": "Cannot remove the last installed coin"}), 400
+
+    # SECURITY: Rate limiting
+    client_ip = request.remote_addr or "unknown"
+    if not check_rate_limit(client_ip, "node_remove"):
+        return jsonify({"success": False, "error": "Rate limited — try again later"}), 429
+
+    # Serialize coin operations to prevent concurrent pool-mode.sh invocations
+    if not _node_operation_lock.acquire(blocking=False):
+        return jsonify({"success": False, "error": "Another coin operation is in progress — try again shortly"}), 409
+
+    script = "/spiralpool/scripts/pool-mode.sh"
+    try:
+        import subprocess
+        # --yes skips interactive confirmations; data is preserved (no --delete-data)
+        cmd = [
+            'sudo', 'systemd-run', '--pipe', '--quiet',
+            '--property=WorkingDirectory=/tmp',
+            '/bin/bash', script, '--remove', symbol, '--yes'
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if result.returncode == 0:
+            load_multi_coin_config()
+            app.logger.info(f"Coin {symbol} removed by {client_ip}")
+            return jsonify({
+                "success": True,
+                "message": f"{symbol} node removed successfully.",
+            })
+        else:
+            error_msg = result.stderr.strip() or result.stdout.strip() or "Unknown error"
+            app.logger.error(f"Failed to remove {symbol}: {error_msg}")
+            return jsonify({"success": False, "error": f"Removal failed: {error_msg}"}), 500
+    except subprocess.TimeoutExpired:
+        return jsonify({"success": False, "error": "Removal timed out"}), 504
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Failed to run removal: {e}"}), 500
+    finally:
+        _node_operation_lock.release()
 
 
 @app.route('/api/nodes/<symbol>/restart', methods=['POST'])
@@ -12074,7 +12525,8 @@ def check_pool_upgrade():
     except FileNotFoundError:
         return jsonify({"success": False, "error": "upgrade.sh not found"})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+        app.logger.error(f"Pool upgrade check failed: {e}")
+        return jsonify({"success": False, "error": "Failed to check for updates"})
 
 
 @app.route('/api/system/pool-upgrade/apply', methods=['POST'])
@@ -12714,9 +13166,19 @@ def add_discovered_devices():
     except Exception as e:
         print(f"[SYNC] Error syncing to Sentinel: {e}")
 
+    # SECURITY: Strip secrets before returning to client
+    safe_config = dict(config)
+    for secret_key in ("pool_admin_api_key", "metrics_auth_token"):
+        if secret_key in safe_config:
+            safe_config[secret_key] = "***REDACTED***" if safe_config[secret_key] else ""
+    for dtype, devices in safe_config.get("devices", {}).items():
+        if isinstance(devices, list):
+            for device in devices:
+                if isinstance(device, dict) and "password" in device:
+                    device["password"] = "***REDACTED***"
     return jsonify({
         "success": True,
-        "config": config
+        "config": safe_config
     })
 
 
@@ -13313,7 +13775,7 @@ def test_discord_webhook(url: str, test_message: str = None) -> dict:
         "title": "🧪 Spiral Pool Test Notification",
         "description": test_message or "This is a test message from Spiral Dashboard. If you see this, your webhook is configured correctly!",
         "color": 0x00d4ff,  # Cyan color
-        "footer": {"text": f"Spiral Pool v2.0.1 PHI HASH REACTOR"},
+        "footer": {"text": f"Spiral Pool v2.1.0 PHI HASH REACTOR"},
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
@@ -13452,6 +13914,7 @@ def cgminer_command_v2(ip, port, command, parameter=""):
     # SECURITY: Validate IP to prevent SSRF attacks
     if not validate_miner_ip(ip):
         return {"error": "Invalid or blocked IP address (SSRF protection)"}
+    sock = None
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(10)
@@ -13472,13 +13935,17 @@ def cgminer_command_v2(ip, port, command, parameter=""):
             if b'\x00' in chunk:
                 break
 
-        sock.close()
-
         # Parse response (remove null bytes)
         response_str = response.replace(b'\x00', b'').decode('utf-8', errors='ignore')
         return json.loads(response_str)
     except Exception as e:
         return {"error": str(e)}
+    finally:
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
 
 
 @app.route('/api/miner/cgminer/stats', methods=['POST'])
@@ -13680,6 +14147,8 @@ def whatsminer_info():
 
 def axeos_api_call(ip, endpoint, method="GET", data=None, timeout=10):
     """Make HTTP API call to AxeOS/NerdQAxe++ device"""
+    if not validate_miner_ip(ip):
+        return {"error": "Invalid or blocked IP address (SSRF protection)"}
     try:
         url = f"http://{ip}{endpoint}"
         if method == "GET":
@@ -16648,9 +17117,12 @@ def update_known_versions():
     """V1.0: Update known latest firmware versions"""
     data = request.get_json() or {}
 
+    MAX_KNOWN_VERSIONS = 50
     for device_type, version in data.items():
-        if isinstance(version, str) and device_type:
-            firmware_tracker["known_versions"][device_type] = version
+        if isinstance(version, str) and device_type and len(device_type) <= 64:
+            if len(firmware_tracker["known_versions"]) >= MAX_KNOWN_VERSIONS and device_type not in firmware_tracker["known_versions"]:
+                continue
+            firmware_tracker["known_versions"][device_type] = version[:32]
 
     return jsonify({"success": True, "versions": firmware_tracker["known_versions"]})
 
@@ -17424,7 +17896,13 @@ def handle_connect():
     # SECURITY (F-01): Reject unauthenticated WebSocket connections.
     # Flask-SocketIO does NOT automatically enforce Flask-Login sessions —
     # auth must be checked explicitly here. Returning False disconnects the client.
-    if AUTH_ENABLED and not current_user.is_authenticated:
+    # Mirror loopback-only bypass from api_key_or_login_required (F-03).
+    if not AUTH_ENABLED:
+        client_ip = request.remote_addr or ''
+        if client_ip not in ('127.0.0.1', '::1'):
+            if not current_user.is_authenticated:
+                return False
+    elif not current_user.is_authenticated:
         return False
     with _ws_lock:
         websocket_clients["count"] += 1
@@ -17518,7 +17996,7 @@ def broadcast_block_found(block_data):
     # Record to activity feed
     coin = block_data.get("coin", "")
     height = block_data.get("height", "?")
-    finder = block_data.get("source") or block_data.get("worker") or block_data.get("miner") or "unknown"
+    finder = block_data.get("worker") or block_data.get("miner") or block_data.get("source") or "unknown"
     record_activity("block", f"Block found by {finder} ({coin} #{height})", block_data)
 
     # Persist block finder attribution
@@ -17983,26 +18461,30 @@ def export_blocks():
     currency_code = config.get("display_currency",
                       config.get("display_currency_primary", "CAD")).lower()
     currency_label = currency_code.upper()
-    price = block_reward_cache.get(f"price_{currency_code}", 0)
     currency_meta = DASHBOARD_CURRENCIES.get(currency_label, {})
     currency_symbol = currency_meta.get("symbol", "$")
+
+    # Fetch per-coin prices so each block uses the correct coin's price
+    coin_prices = _fetch_per_coin_prices(currency_code)
+    fallback_price = block_reward_cache.get(f"price_{currency_code}", 0)
 
     rows = []
     for block in pool_blocks[:500]:
         block_coin = block.get("coin", primary_coin).upper()
         reward = float(block.get("reward", 0))
+        coin_price = coin_prices.get(block_coin, fallback_price)
         row = {
             "height": block.get("height", 0),
             "hash": block.get("hash", ""),
             "reward": reward,
-            f"reward_{currency_code}": round(reward * price, 2),
+            f"reward_{currency_code}": round(reward * coin_price, 2),
             "miner": block.get("miner", ""),
             "worker": block.get("worker", ""),
             "time": block.get("created", ""),
             "confirmations": block.get("confirmations", 0),
             "status": block.get("status", "unknown"),
             "coin": block_coin,
-            f"price_{currency_code}": price,
+            f"price_{currency_code}": coin_price,
             "currency": currency_label,
         }
         rows.append(row)
@@ -18024,7 +18506,7 @@ def export_blocks():
             f"{row['confirmations']},"
             f"{csv_safe(row['status'])},"
             f"{csv_safe(row['coin'])},"
-            f"{price},"
+            f"{row[f'price_{currency_code}']},"
             f"{currency_label}\n"
         )
 
@@ -18053,7 +18535,10 @@ def export_earnings():
     currency_code = config.get("display_currency",
                       config.get("display_currency_primary", "CAD")).lower()
     currency_label = currency_code.upper()
-    price = block_reward_cache.get(f"price_{currency_code}", 0)
+
+    # Fetch per-coin prices so each coin uses its own price, not the primary coin's
+    coin_prices = _fetch_per_coin_prices(currency_code)
+    fallback_price = block_reward_cache.get(f"price_{currency_code}", 0)
 
     # Aggregate rewards by date and coin
     daily = defaultdict(lambda: defaultdict(float))
@@ -18066,18 +18551,22 @@ def export_earnings():
         block_counts[date_str][block_coin] += 1
 
     rows = []
+    total_fiat = 0
     total_reward = 0
     for date_str in sorted(daily.keys(), reverse=True):
         for coin in sorted(daily[date_str].keys()):
             reward = daily[date_str][coin]
             total_reward += reward
+            coin_price = coin_prices.get(coin, fallback_price)
+            fiat_value = round(reward * coin_price, 2)
+            total_fiat += fiat_value
             rows.append({
                 "date": date_str,
                 "coin": coin,
                 "blocks": block_counts[date_str][coin],
                 "total_reward": round(reward, 8),
-                f"value_{currency_code}": round(reward * price, 2),
-                f"price_{currency_code}": price,
+                f"value_{currency_code}": fiat_value,
+                f"price_{currency_code}": coin_price,
                 "currency": currency_label,
             })
 
@@ -18095,18 +18584,19 @@ def export_earnings():
     total_blocks = sum(sum(c.values()) for c in block_counts.values())
 
     if request.args.get("format", "csv").lower() == "json":
+        primary_price = coin_prices.get(primary_coin, fallback_price)
         result = {
             "success": True,
             "earnings": rows,
             "total_reward": round(total_reward, 8),
-            f"total_value_{currency_code}": round(total_reward * price, 2),
+            f"total_value_{currency_code}": round(total_fiat, 2),
             "total_blocks": total_blocks,
             "currency": currency_label,
-            f"price_{currency_code}": price,
+            f"price_{currency_code}": primary_price,
         }
         if wallet_balance is not None:
             result["wallet_balance"] = round(wallet_balance, 8)
-            result[f"wallet_value_{currency_code}"] = round(wallet_balance * price, 2)
+            result[f"wallet_value_{currency_code}"] = round(wallet_balance * primary_price, 2)
         return jsonify(result)
 
     output = io.StringIO()
@@ -18118,13 +18608,14 @@ def export_earnings():
             f"{row['blocks']},"
             f"{row['total_reward']:.8f},"
             f"{row[f'value_{currency_code}']},"
-            f"{price},"
+            f"{row[f'price_{currency_code}']},"
             f"{currency_label}\n"
         )
     output.write(f"\n")
-    output.write(f"TOTAL,,{total_blocks},{total_reward:.8f},{total_reward * price:.2f},{price},{currency_label}\n")
+    primary_price = coin_prices.get(primary_coin, fallback_price)
+    output.write(f"TOTAL,,{total_blocks},{total_reward:.8f},{total_fiat:.2f},,{currency_label}\n")
     if wallet_balance is not None:
-        output.write(f"WALLET_BALANCE,{primary_coin},,{wallet_balance:.8f},{wallet_balance * price:.2f},{price},{currency_label}\n")
+        output.write(f"WALLET_BALANCE,{primary_coin},,{wallet_balance:.8f},{wallet_balance * primary_price:.2f},{primary_price},{currency_label}\n")
 
     response = app.response_class(
         response=output.getvalue(),
@@ -18927,4 +19418,4 @@ reset commands:
     # Production mode - use socketio for WebSocket support
     # NOTE: For production deployments, use gunicorn instead of the development server.
     # See run.sh for the production startup command
-    socketio.run(app, host='0.0.0.0', port=1618, debug=False)
+    socketio.run(app, host='0.0.0.0', port=1618, debug=False, allow_unsafe_werkzeug=True)

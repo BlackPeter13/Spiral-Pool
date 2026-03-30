@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 Spiral Pool Contributors
 """
 ╔═════════════════════════════════════════════════════════════════════════════╗
-║  Spiral Sentinel v2.0.1 - PHI HASH REACTOR EDITION                                 ║
+║  Spiral Sentinel v2.1.0 - PHI HASH REACTOR EDITION                                 ║
 ║  Autonomous SHA-256 Solo Mining Monitor (DGB/BTC/BCH/BC2)                   ║
 ║  Self-Healing + Share Monitoring (No Pool Software Dependency)              ║
 ╠═════════════════════════════════════════════════════════════════════════════╣
@@ -28,7 +28,7 @@
 ║  • Whatsminer API: whatsminer.com                                           ║
 ╚═════════════════════════════════════════════════════════════════════════════╝
 """
-__version__ = "2.0.1-PHI_HASH_REACTOR"
+__version__ = "2.1.0-PHI_HASH_REACTOR"
 __codename__ = "PHI_HASH_REACTOR"
 
 import copy, json, socket, sys, time, os, urllib.request, urllib.error, ssl, random, ipaddress, re, threading, http.server
@@ -282,7 +282,8 @@ def _dashboard_url():
     # Replace the port (default 4000 → 1618) regardless of what port is configured
     from urllib.parse import urlparse, urlunparse
     parsed = urlparse(pool_url)
-    base = urlunparse(parsed._replace(netloc=parsed.hostname + ":1618"))
+    hostname = parsed.hostname or "localhost"
+    base = urlunparse(parsed._replace(netloc=hostname + ":1618"))
     # Check if dashboard is running HTTPS
     try:
         svc = Path("/etc/systemd/system/spiraldash.service")
@@ -515,6 +516,35 @@ def is_maintenance_mode():
         except (OSError, PermissionError):
             pass
         return False, 0, None
+
+def _atomic_json_save(filepath, data, indent=None):
+    """Write JSON data atomically using temp + fsync + rename.
+
+    Prevents data corruption if the process crashes mid-write.
+    The rename operation is atomic on POSIX filesystems.
+    """
+    import tempfile, shutil
+    filepath = Path(filepath) if not isinstance(filepath, Path) else filepath
+    try:
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+    except (PermissionError, OSError):
+        pass  # Directory may already exist; mkstemp below will give clear error if not
+    temp_fd, temp_path = tempfile.mkstemp(
+        suffix='.tmp', prefix=filepath.stem + '_', dir=str(filepath.parent)
+    )
+    try:
+        with os.fdopen(temp_fd, 'w') as f:
+            json.dump(data, f, indent=indent)
+            f.flush()
+            os.fsync(f.fileno())
+        shutil.move(temp_path, str(filepath))
+    except Exception as e:
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
+        logger.error(f"Atomic JSON save failed for {filepath}: {e}")
+        # Don't re-raise — file save failure should not crash the monitor
 
 def set_maintenance_mode(minutes, reason="Scheduled maintenance"):
     """Enable maintenance mode for specified minutes."""
@@ -862,7 +892,7 @@ DEFAULT_CONFIG = {
         "sats_surge": 0,             # No cooldown - surge check has internal cooldown per coin
         "wallet_drop": 3600,         # 1 hour - prevent repeated alerts on fluctuating balance
         "dry_streak": 21600,         # 6 hours - extended dry streak without blocks
-        "difficulty_change": 3600,   # 1 hour - network difficulty change alerts
+        "difficulty_change": 21600,  # 6 hours - network difficulty change alerts (DGB adjusts every block, 1h was too spammy)
         "disk_warning": 3600,        # 1 hour - disk space warning
         "disk_critical": 300,        # 5 min - disk space critical
         "mempool_congestion": 3600,  # 1 hour - BTC mempool congestion
@@ -947,7 +977,7 @@ DEFAULT_CONFIG = {
     # NETWORK DIFFICULTY CHANGE ALERTS — Alert on significant difficulty swings
     # ═══════════════════════════════════════════════════════════════════════════════
     "difficulty_alert_enabled": True,      # Alert on large difficulty changes
-    "difficulty_alert_threshold_pct": 25,  # Alert when difficulty drifts this % from the baseline at last alert (not tick-to-tick)
+    "difficulty_alert_threshold_pct": 25,  # Alert when difficulty changes this % from baseline (sub-threshold changes update baseline; above-threshold preserves it until alert fires)
     # ═══════════════════════════════════════════════════════════════════════════════
     # DISK SPACE MONITORING — Alert when disk usage exceeds thresholds
     # ═══════════════════════════════════════════════════════════════════════════════
@@ -1268,10 +1298,17 @@ def validate_config(config):
                         issues.append(f"⚠️ Config: pool_api_url points to non-private IP ({parsed.hostname}). "
                                       "This should point to localhost or a local network address.")
                 except ValueError:
-                    # Hostname, not IP — allow localhost only or warn
-                    if parsed.hostname not in ("localhost", "127.0.0.1"):
-                        issues.append(f"⚠️ Config: pool_api_url points to '{parsed.hostname}'. "
-                                      "Verify this is correct — expected localhost or private IP.")
+                    # Hostname, not IP — allow localhost, Docker service names, and .local/.internal
+                    # Docker Compose service names (e.g., "stratum") are valid internal hostnames
+                    hostname = parsed.hostname
+                    is_safe = (
+                        hostname in ("localhost", "127.0.0.1")
+                        or "." not in hostname  # simple hostname = likely Docker service name
+                        or hostname.endswith((".local", ".internal", ".lan", ".home"))
+                    )
+                    if not is_safe:
+                        issues.append(f"⚠️ Config: pool_api_url points to '{hostname}'. "
+                                      "Verify this is correct — expected localhost, Docker service name, or private IP.")
         except Exception:
             issues.append(f"⚠️ Config: pool_api_url is not a valid URL: {pool_url[:50]}")
             config["pool_api_url"] = "http://localhost:4000"
@@ -3602,12 +3639,18 @@ def check_difficulty_changes(state):
 
             pct_change = ((network_diff - old_diff) / old_diff) * 100
 
-            if abs(pct_change) < threshold_pct:
+            if abs(pct_change) <= threshold_pct:
+                # Sub-threshold (at or below): update baseline so we track recent difficulty.
+                # Without this, fast-adjusting coins (DGB: every block) accumulate
+                # stale baselines and fire alerts every cooldown cycle.
+                _last_known_difficulty[symbol] = network_diff
                 continue
 
             alert_key = f"difficulty_change:{symbol}"
-            cooldown = ALERT_COOLDOWNS.get("difficulty_change", 3600)
+            cooldown = ALERT_COOLDOWNS.get("difficulty_change", 21600)
             if now - state.last_alerts.get(alert_key, 0) < cooldown:
+                # Above threshold but in cooldown — do NOT update baseline.
+                # This preserves the significant change so it fires when cooldown expires.
                 continue
 
             coin_name = get_coin_name(symbol)
@@ -3617,7 +3660,7 @@ def check_difficulty_changes(state):
             # block alerts for subsequent coins in the same monitoring cycle.
             send_alert("difficulty_change", embed, None)
             state.last_alerts[alert_key] = now
-            # Update baseline only when alert fires — prevents tick-to-tick comparison spam
+            # Update baseline only when alert fires
             _last_known_difficulty[symbol] = network_diff
             logger.info(f"Difficulty change alert: {symbol} {pct_change:+.1f}% "
                         f"({format_difficulty(old_diff)} → {format_difficulty(network_diff)})")
@@ -5381,35 +5424,6 @@ def load_miners():
     logger.warning("No miner configuration found - using empty defaults")
     return DEFAULT_MINERS.copy()
 
-def _atomic_json_save(filepath, data, indent=None):
-    """Write JSON data atomically using temp + fsync + rename.
-
-    Prevents data corruption if the process crashes mid-write.
-    The rename operation is atomic on POSIX filesystems.
-    """
-    import tempfile, shutil
-    filepath = Path(filepath) if not isinstance(filepath, Path) else filepath
-    try:
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-    except (PermissionError, OSError):
-        pass  # Directory may already exist; mkstemp below will give clear error if not
-    temp_fd, temp_path = tempfile.mkstemp(
-        suffix='.tmp', prefix=filepath.stem + '_', dir=str(filepath.parent)
-    )
-    try:
-        with os.fdopen(temp_fd, 'w') as f:
-            json.dump(data, f, indent=indent)
-            f.flush()
-            os.fsync(f.fileno())
-        shutil.move(temp_path, str(filepath))
-    except Exception as e:
-        try:
-            os.unlink(temp_path)
-        except OSError:
-            pass
-        logger.error(f"Atomic JSON save failed for {filepath}: {e}")
-        # Don't re-raise — file save failure should not crash the monitor
-
 def load_miner_database():
     """Load the full miner database with nicknames and metadata."""
     if MINER_DB_FILE.exists():
@@ -5520,7 +5534,7 @@ def reload_miners():
                 "old_count": old_count,
                 "new_count": new_count,
                 "success": True,
-                "sentinel_version": "V2.0.1-PHI_HASH_REACTOR"
+                "sentinel_version": "V2.1.0-PHI_HASH_REACTOR"
             }
             _atomic_json_save(MINER_RELOAD_ACK, ack_data)
             logger.debug(f"Wrote reload ACK: {MINER_RELOAD_ACK}")
@@ -5539,7 +5553,7 @@ def reload_miners():
                 "timestamp_iso": datetime.now(timezone.utc).isoformat(),
                 "success": False,
                 "error": "Failed to reload miner configuration",
-                "sentinel_version": "V2.0.1-PHI_HASH_REACTOR"
+                "sentinel_version": "V2.1.0-PHI_HASH_REACTOR"
             }
             _atomic_json_save(MINER_RELOAD_ACK, ack_data)
         except (PermissionError, OSError):
@@ -10555,11 +10569,7 @@ def perform_auto_update(update_info):
         pre_fields,
     )
     send_discord(pre_embed)
-    send_telegram(
-        f"⬆️ *Auto-Update Starting*\n"
-        f"Upgrading from `v{current_ver}` → `v{latest_ver}`\n"
-        f"Services will restart briefly."
-    )
+    send_telegram(pre_embed)
 
     try:
         import subprocess
@@ -11635,8 +11645,9 @@ def send_notifications(embed):
 
     # Retry once if all channels failed (transient network blips)
     any_sent = discord_sent or telegram_sent or xmpp_sent or ntfy_sent or webhook_sent or email_sent
+    # Load config once for retry/fallback checks (avoid redundant disk reads)
+    config = load_config() if not any_sent else None
     if not any_sent:
-        config = load_config()
         any_configured = (
             bool(config.get("discord_webhook_url")) or
             bool(config.get("telegram_bot_token") and config.get("telegram_chat_id")) or
@@ -11646,8 +11657,7 @@ def send_notifications(embed):
             bool(config.get("smtp_host") and config.get("smtp_to"))
         )
         if any_configured:
-            logger.warning("All notification channels failed — retrying in 10s...")
-            time.sleep(10)
+            logger.warning("All notification channels failed — retrying once...")
             discord_sent  = send_discord(embed)
             telegram_sent = send_telegram(embed)
             xmpp_sent     = send_xmpp(embed)
@@ -11657,9 +11667,8 @@ def send_notifications(embed):
             any_sent = discord_sent or telegram_sent or xmpp_sent or ntfy_sent or webhook_sent or email_sent
 
     # If all remote notifications failed, log locally as fallback
-    if not any_sent:
+    if not any_sent and config:
         # Only log fallback if at least one channel was configured
-        config = load_config()
         discord_configured  = bool(config.get("discord_webhook_url"))
         telegram_configured = bool(config.get("telegram_bot_token") and config.get("telegram_chat_id"))
         xmpp_configured     = bool(config.get("xmpp_jid") and config.get("xmpp_recipient"))
@@ -12165,7 +12174,10 @@ def create_startup_embed(fleet_ths, md, temps, status, net_phs=None, odds=None, 
             ports = pool.get("ports", {})
             stratum_port = None
             for port_name, port_config in ports.items():
-                if port_config.get("listenAddress"):
+                if isinstance(port_config, int):
+                    stratum_port = str(port_config)
+                    break
+                elif isinstance(port_config, dict) and port_config.get("listenAddress"):
                     # Extract port from "0.0.0.0:3333" format
                     addr = port_config.get("listenAddress", "")
                     if ":" in addr:
@@ -16017,7 +16029,7 @@ class MonitorState:
             "miner_offline_alert_sent", "miner_last_uptime", "miner_health_history", "miner_temp_history",
             "miner_hashrate_history", "miner_uptimes", "miner_block_counts",
             "miner_stale_history", "miner_hashrate_baseline", "miner_stable_online_since",
-            "miner_pool_hashrate", "known_miner_pool_urls", "url_mismatch_alerted",
+            "miner_pool_hashrate", "chronic_issues", "known_miner_pool_urls", "url_mismatch_alerted",
             "hashboard_alert_sent", "miner_hw_errors", "hw_error_alert_sent",
             "fan_alert_sent", "thermal_critical_since", "thermal_shutdown_sent",
             "pool_share_history",
@@ -16221,11 +16233,17 @@ class MonitorState:
         batch_size = len(self.global_alert_batch)
         self.global_alert_batch = []
 
-        # Re-queue failed alerts for retry on next flush cycle
+        # Re-queue failed alerts for ONE retry on next flush cycle (no infinite loop)
         if failed_embeds:
-            logger.warning(f"Alert batch: {len(failed_embeds)} notifications failed to send, re-queuing for retry")
-            for embed in failed_embeds:
-                self.global_alert_batch.append({"type": "retry", "embed": embed, "miner": None, "time": time.time()})
+            # Only re-queue alerts that haven't already been retried
+            new_retries = [e for e in failed_embeds if not e.get("_retried")]
+            if new_retries:
+                logger.warning(f"Alert batch: {len(new_retries)} notifications failed to send, re-queuing for retry")
+                for embed in new_retries:
+                    embed["_retried"] = True
+                    self.global_alert_batch.append({"type": "retry", "embed": embed, "miner": None, "time": time.time()})
+            if len(failed_embeds) > len(new_retries):
+                logger.warning(f"Alert batch: {len(failed_embeds) - len(new_retries)} notifications permanently failed after retry")
 
         if batch_size > 1:
             logger.info(f"Alert batch flushed: {batch_size} alerts → {notifications_sent} sent, {len(failed_embeds)} re-queued")

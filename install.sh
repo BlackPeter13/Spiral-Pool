@@ -14,7 +14,7 @@ head -c50 "$0"|od -c|grep -q '\\r'&&{ find "$(dirname "$0")" -type f \( -name "*
 # ║                                                                            ║
 # ║   Spiral Pool Contributors                                                 ║
 # ║                                                                            ║
-# ║   Version: 2.0.1                                                         ║
+# ║   Version: 2.1.0                                                         ║
 # ║   License: BSD-3-Clause (see LICENSE file)                                 ║
 # ║                                                                            ║
 # ╚════════════════════════════════════════════════════════════════════════════╝
@@ -36,7 +36,7 @@ SCRIPT_DIR_EARLY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "$SCRIPT_DIR_EARLY/VERSION" ]]; then
     VERSION=$(tr -d '[:space:]' < "$SCRIPT_DIR_EARLY/VERSION")
 else
-    VERSION="2.0.1"
+    VERSION="2.1.0"
 fi
 INSTALL_DIR="/spiralpool"
 DIGIBYTE_VERSION="8.26.2"
@@ -184,6 +184,11 @@ PRUNE_CONF_TXINDEX="txindex=1"
 PRUNE_CONF_PRUNE="prune=0"
 
 # Merge Mining Configuration
+MULTIPORT_ENABLED="false"       # Multi-coin smart port (weighted 24h UTC schedule)
+MULTIPORT_COINS=""              # Comma-separated: "DGB,BCH,BTC"
+MULTIPORT_WEIGHTS=""            # Comma-separated weights matching MULTIPORT_COINS: "80,15,5"
+MULTIPORT_PREFER_COIN=""        # Default coin on connect / tie-breaker
+
 MERGE_MINING_ENABLED="false"
 MERGE_MINING_REQUESTED="false" # Set during install flow
 MERGE_MINING_ALGO=""           # "sha256d", "scrypt", or "both" (for dual-algo)
@@ -702,6 +707,10 @@ HA_REPLICATE_FROM_PRIMARY="$HA_REPLICATE_FROM_PRIMARY"
 POSTGRES_SUPERUSER_PASSWORD="$POSTGRES_SUPERUSER_PASSWORD"
 DB_REPLICATION_USER="$DB_REPLICATION_USER"
 DB_REPLICATION_PASSWORD="$DB_REPLICATION_PASSWORD"
+MULTIPORT_ENABLED="$MULTIPORT_ENABLED"
+MULTIPORT_COINS="$MULTIPORT_COINS"
+MULTIPORT_WEIGHTS="$MULTIPORT_WEIGHTS"
+MULTIPORT_PREFER_COIN="$MULTIPORT_PREFER_COIN"
 SCAN_FOR_MINERS="$SCAN_FOR_MINERS"
 BLOCKCHAIN_SYNC_CHOICE="$BLOCKCHAIN_SYNC_CHOICE"
 SYNC_SOURCE_NODE="$SYNC_SOURCE_NODE"
@@ -985,6 +994,7 @@ cleanup_on_failure() {
         sudo systemctl stop syscoind 2>/dev/null || true
         sudo systemctl stop myriadcoind 2>/dev/null || true
         sudo systemctl stop fractald 2>/dev/null || true
+        sudo systemctl stop qbitxd 2>/dev/null || true
         # Disable all services
         sudo systemctl disable spiralstratum 2>/dev/null || true
         sudo systemctl disable spiralsentinel 2>/dev/null || true
@@ -1001,6 +1011,7 @@ cleanup_on_failure() {
         sudo systemctl disable syscoind 2>/dev/null || true
         sudo systemctl disable myriadcoind 2>/dev/null || true
         sudo systemctl disable fractald 2>/dev/null || true
+        sudo systemctl disable qbitxd 2>/dev/null || true
         # Remove service files
         sudo rm -f /etc/systemd/system/spiralstratum.service 2>/dev/null || true
         sudo rm -f /etc/systemd/system/spiralsentinel.service 2>/dev/null || true
@@ -1017,6 +1028,7 @@ cleanup_on_failure() {
         sudo rm -f /etc/systemd/system/syscoind.service 2>/dev/null || true
         sudo rm -f /etc/systemd/system/myriadcoind.service 2>/dev/null || true
         sudo rm -f /etc/systemd/system/fractald.service 2>/dev/null || true
+        sudo rm -f /etc/systemd/system/qbitxd.service 2>/dev/null || true
         sudo systemctl daemon-reload 2>/dev/null || true
     fi
 
@@ -1232,6 +1244,7 @@ cleanup_on_failure() {
     sudo rm -f /etc/systemd/system/syscoind.service 2>/dev/null || true
     sudo rm -f /etc/systemd/system/myriadcoind.service 2>/dev/null || true
     sudo rm -f /etc/systemd/system/fractald.service 2>/dev/null || true
+    sudo rm -f /etc/systemd/system/qbitxd.service 2>/dev/null || true
     sudo systemctl daemon-reload 2>/dev/null || true
 
     echo ""
@@ -5976,7 +5989,27 @@ fi)
 
 # Per-coin pool configurations (V2 CoinPoolConfig format)
 coins:${coins_yaml}
-
+$(if [[ "$MULTIPORT_ENABLED" == "true" ]] && [[ -n "$MULTIPORT_COINS" ]]; then
+    # Build multi_port YAML from MULTIPORT_COINS and MULTIPORT_WEIGHTS
+    # Note: this runs in a $() subshell — do not use 'local'
+    _OLD_IFS="$IFS"
+    IFS=','
+    _mp_coins=($MULTIPORT_COINS)
+    _mp_weights=($MULTIPORT_WEIGHTS)
+    IFS="$_OLD_IFS"
+    echo ""
+    echo "# Multi-coin smart port (weighted 24h UTC schedule)"
+    echo "multi_port:"
+    echo "  enabled: true"
+    echo "  port: 16180"
+    echo "  coins:"
+    for i in "${!_mp_coins[@]}"; do
+        echo "    ${_mp_coins[$i]}: { weight: ${_mp_weights[$i]:-50} }"
+    done
+    echo "  check_interval: 30s"
+    echo "  prefer_coin: \"${MULTIPORT_PREFER_COIN:-${_mp_coins[0]}}\""
+    echo "  min_time_on_coin: 60s"
+fi)
 database:
   host: "postgres"
   port: 5432
@@ -6032,6 +6065,17 @@ rpcworkqueue=64
 
 # Mining
 algo=sha256d
+
+# Force DNS seed queries on every startup (verified: digibyted 8.26.2)
+forcednsseed=1
+
+# Hardcoded fallback peers (resolved from live DNS seeds 2026-03-30)
+addnode=64.182.71.16:12024
+addnode=80.120.148.66:12024
+addnode=185.242.227.238:12024
+addnode=173.212.197.63:12024
+addnode=185.150.190.101:12024
+addnode=83.85.77.100:12024
 EOF
     chmod 640 "$CONFIG_DIR/digibyte.conf"
     log_success "Generated digibyte.conf"
@@ -6084,6 +6128,23 @@ logtimestamps=1
 
 # Mining
 blockmaxweight=4000000
+
+# Force DNS seed queries on every startup (verified: bitcoin-29.3.knots)
+forcednsseed=1
+
+# Hardcoded fallback peers (resolved from live DNS seeds 2026-03-30)
+addnode=45.55.132.91:8333
+addnode=71.196.197.14:8333
+addnode=72.83.184.215:8333
+addnode=65.93.70.99:8333
+addnode=67.60.239.105:8333
+addnode=71.86.88.157:8333
+addnode=173.249.47.215:8333
+addnode=203.11.72.77:8333
+addnode=216.107.135.60:8333
+addnode=72.230.224.175:8333
+addnode=77.247.151.58:8333
+addnode=78.145.65.241:8333
 EOF
     chmod 640 "$CONFIG_DIR/bitcoin.conf"
     log_success "Generated bitcoin.conf"
@@ -6139,6 +6200,26 @@ logtimestamps=1
 blockmaxsize=32000000
 excessiveblocksize=32000000
 excessiveacceptdepth=12
+
+# Force DNS seed queries on every startup (verified: bitcoind BCHN 29.0.0)
+forcednsseed=1
+
+# Hardcoded fallback peers (resolved from live DNS seeds 2026-03-30)
+addnode=195.3.223.29:8433
+addnode=199.217.115.27:8433
+addnode=3.142.98.179:8433
+addnode=35.163.48.30:8433
+addnode=35.198.46.157:8433
+addnode=51.91.196.151:8433
+addnode=174.140.196.19:8433
+addnode=193.164.205.249:8433
+addnode=194.14.246.11:8433
+addnode=8.219.86.245:8433
+addnode=15.204.95.99:8433
+addnode=18.139.1.192:8433
+addnode=51.159.104.35:8433
+addnode=57.129.18.162:8433
+addnode=65.109.90.134:8433
 EOF
     chmod 640 "$CONFIG_DIR/bitcoincash.conf"
     log_success "Generated bitcoincash.conf"
@@ -6187,6 +6268,18 @@ changetype=bech32
 # Logging
 printtoconsole=1
 logtimestamps=1
+
+# Force DNS seed queries on every startup (verified: bitcoinIId 29.1.0)
+forcednsseed=1
+
+# Hardcoded fallback peers (resolved from live DNS seeds 2026-03-30)
+addnode=173.249.0.253:8338
+addnode=193.164.205.250:8338
+addnode=89.38.128.175:8338
+addnode=98.22.238.18:8338
+addnode=144.76.79.60:8338
+addnode=75.130.145.1:8338
+addnode=45.32.205.199:8338
 EOF
     chmod 640 "$CONFIG_DIR/bitcoinii.conf"
     log_success "Generated bitcoinii.conf"
@@ -6232,6 +6325,22 @@ disablewallet=0
 # Logging
 printtoconsole=1
 logtimestamps=1
+
+# Force DNS seed queries on every startup (verified: namecoind 28.0)
+forcednsseed=1
+
+# Hardcoded fallback peers (resolved from live DNS seeds 2026-03-30)
+addnode=13.246.63.174:8334
+addnode=15.204.102.127:8334
+addnode=18.167.52.159:8334
+addnode=8.214.158.13:8334
+addnode=8.218.231.1:8334
+addnode=185.87.45.95:8334
+addnode=212.51.144.42:8334
+addnode=212.95.39.169:8334
+addnode=23.106.36.28:8334
+addnode=23.108.191.143:8334
+addnode=23.108.191.178:8334
 EOF
     chmod 640 "$CONFIG_DIR/namecoin.conf"
     log_success "Generated namecoin.conf"
@@ -6277,6 +6386,23 @@ disablewallet=0
 # Logging
 printtoconsole=1
 logtimestamps=1
+
+# Force DNS seed queries on every startup (verified: syscoind 5.0.5)
+forcednsseed=1
+
+# Hardcoded fallback peers (resolved from live DNS seeds 2026-03-30)
+addnode=158.220.107.184:8369
+addnode=158.220.114.225:8369
+addnode=165.232.103.216:8369
+addnode=31.56.38.151:8369
+addnode=31.56.38.197:8369
+addnode=31.58.170.95:8369
+addnode=143.20.33.149:8369
+addnode=151.244.85.219:8369
+addnode=176.9.210.20:8369
+addnode=151.244.85.47:8369
+addnode=159.65.195.168:8369
+addnode=173.234.17.201:8369
 EOF
     chmod 640 "$CONFIG_DIR/syscoin.conf"
     log_success "Generated syscoin.conf"
@@ -6322,6 +6448,17 @@ disablewallet=0
 # Logging
 printtoconsole=1
 logtimestamps=1
+
+# Force DNS seed queries on every startup (verified: myriadcoind 0.18.1.0)
+forcednsseed=1
+
+# Hardcoded fallback peers (resolved from live DNS seeds 2026-03-30)
+addnode=54.37.139.32:10888
+addnode=91.206.16.214:10888
+addnode=199.241.187.130:10888
+addnode=89.189.0.226:10888
+addnode=85.15.179.171:10888
+addnode=62.210.123.48:10888
 EOF
     chmod 640 "$CONFIG_DIR/myriadcoin.conf"
     log_success "Generated myriadcoin.conf"
@@ -6367,6 +6504,19 @@ disablewallet=0
 # Logging
 printtoconsole=1
 logtimestamps=1
+
+# Force DNS seed queries on every startup (verified: fractald 0.3.0)
+# NOTE: All 3 FBTC DNS seeds are currently dead (2026-03-30)
+forcednsseed=1
+fixedseeds=1
+
+# Hardcoded fallback peers (from live FBTC daemon getpeerinfo 2026-03-30)
+# NOTE: FBTC public network uses port 8333 (same as BTC default)
+addnode=5.9.118.219:8333
+addnode=173.212.223.9:8333
+addnode=49.51.68.155:8333
+addnode=150.136.38.223:8333
+addnode=3.124.82.188:8333
 EOF
     chmod 640 "$CONFIG_DIR/fractal.conf"
     log_success "Generated fractal.conf"
@@ -6412,6 +6562,17 @@ disablewallet=0
 # Logging
 printtoconsole=1
 logtimestamps=1
+
+# Force DNS seed queries on every startup (verified: litecoind 0.21.4)
+forcednsseed=1
+
+# Hardcoded fallback peers (resolved from live DNS seeds 2026-03-30)
+addnode=95.211.152.112:9333
+addnode=95.217.32.30:9333
+addnode=108.234.193.105:9333
+addnode=77.235.26.96:9333
+addnode=91.228.147.153:9333
+addnode=108.171.202.18:9333
 EOF
     chmod 640 "$CONFIG_DIR/litecoin.conf"
     log_success "Generated litecoin.conf"
@@ -6453,6 +6614,17 @@ maxconnections=125
 # Logging
 printtoconsole=1
 logtimestamps=1
+
+# Force DNS seed queries on every startup (verified: dogecoind 1.14.9)
+forcednsseed=1
+
+# Hardcoded fallback peers (resolved from live DNS seeds 2026-03-30)
+addnode=148.251.122.88:22556
+addnode=149.202.10.56:22556
+addnode=167.235.95.225:22556
+addnode=91.184.178.3:22556
+addnode=97.103.138.106:22556
+addnode=138.201.132.34:22556
 EOF
     chmod 640 "$CONFIG_DIR/dogecoin.conf"
     log_success "Generated dogecoin.conf"
@@ -6494,6 +6666,17 @@ maxconnections=125
 # Logging
 printtoconsole=1
 logtimestamps=1
+
+# Force DNS seed queries on every startup (verified: pepecoind 1.1.0)
+forcednsseed=1
+
+# Hardcoded fallback peers (resolved from live DNS seeds 2026-03-30)
+addnode=144.76.222.140:33874
+addnode=154.39.75.82:33874
+addnode=173.212.253.15:33874
+addnode=3.212.41.153:33874
+addnode=3.216.226.159:33874
+addnode=18.158.24.136:33874
 EOF
     chmod 640 "$CONFIG_DIR/pepecoin.conf"
     log_success "Generated pepecoin.conf"
@@ -6535,6 +6718,22 @@ maxconnections=125
 # Logging
 printtoconsole=1
 logtimestamps=1
+
+# Force DNS seed queries on every startup (verified: catcoind 2.1.1)
+forcednsseed=1
+
+# Hardcoded fallback peers (resolved from live DNS seeds 2026-03-30)
+addnode=91.206.16.214:9933
+addnode=93.127.199.243:9933
+addnode=103.229.81.113:9933
+addnode=165.22.66.115:9933
+addnode=195.114.193.178:9933
+addnode=199.192.19.91:9933
+addnode=86.105.51.204:9933
+addnode=91.121.217.71:9933
+addnode=135.125.225.85:9933
+addnode=140.99.164.14:9933
+addnode=159.100.6.121:9933
 EOF
     chmod 640 "$CONFIG_DIR/catcoin.conf"
     log_success "Generated catcoin.conf"
@@ -6581,6 +6780,17 @@ disablewallet=0
 # Logging
 printtoconsole=1
 logtimestamps=1
+
+# Force DNS seed queries on every startup (verified: qbitx 0.2.0)
+forcednsseed=1
+
+# Seed node (extracted from qbitx binary via strings 2026-03-30)
+seednode=seed.qbitx.org
+
+# Hardcoded fallback peers (resolved + connectivity verified 2026-03-30)
+# NOTE: QBX public network uses default port 8334
+addnode=89.110.93.248:8334
+addnode=83.217.213.118:8334
 EOF
     chmod 640 "$CONFIG_DIR/qbitx.conf"
     log_success "Generated qbitx.conf"
@@ -8621,6 +8831,143 @@ select_multi_coins() {
     select_merge_mining_multicoin
 }
 
+# Multi-coin smart port prompt — offers weighted 24h UTC scheduling on port 16180
+# Only available when 2+ SHA-256d coins are enabled (same algorithm required)
+prompt_multi_port() {
+    # Count enabled SHA-256d coins (only these participate — same PoW algorithm)
+    local sha256d_coins=()
+    [[ "$ENABLE_DGB" == "true" ]]  && sha256d_coins+=("DGB")
+    [[ "$ENABLE_BTC" == "true" ]]  && sha256d_coins+=("BTC")
+    [[ "$ENABLE_BCH" == "true" ]]  && sha256d_coins+=("BCH")
+    [[ "$ENABLE_BC2" == "true" ]]  && sha256d_coins+=("BC2")
+    [[ "$ENABLE_QBX" == "true" ]]  && sha256d_coins+=("QBX")
+
+    if [[ ${#sha256d_coins[@]} -lt 2 ]]; then
+        return  # Need at least 2 SHA-256d coins
+    fi
+
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "  ${YELLOW}MULTI-COIN SMART PORT AVAILABLE${NC}"
+    echo ""
+    echo -e "  You have ${#sha256d_coins[@]} SHA-256d coins enabled. The smart port lets miners"
+    echo -e "  connect once on port ${WHITE}16180${NC} and the pool rotates them between coins"
+    echo -e "  on a ${WHITE}24-hour UTC schedule${NC} based on weights you assign."
+    echo ""
+    echo -e "  ${WHITE}Example:${NC} 80% DGB + 15% BCH + 5% BTC = DGB 00:00-19:12, BCH 19:12-22:48, BTC 22:48-24:00"
+    echo ""
+    echo -e "  ${DIM}Miners can still connect to individual coin ports as usual.${NC}"
+    echo ""
+
+    prompt_input "Enable multi-coin smart port? (y/n) [default: n]: "; read mp_choice
+    mp_choice=${mp_choice:-n}
+
+    if [[ "${mp_choice,,}" != "y" ]] && [[ "${mp_choice,,}" != "yes" ]]; then
+        return
+    fi
+
+    MULTIPORT_ENABLED="true"
+    local num_coins=${#sha256d_coins[@]}
+
+    # Loop until weights sum to exactly 100
+    while true; do
+        echo ""
+        echo -e "  ${WHITE}Assign weights to each SHA-256d coin (% of daily mining time):${NC}"
+        echo -e "  ${YELLOW}Weights must add up to exactly 100.${NC}"
+        echo ""
+
+        local coins_csv=""
+        local weights_csv=""
+        local total_weight=0
+        local first_coin=""
+        local remaining=100
+
+        for idx in "${!sha256d_coins[@]}"; do
+            local coin="${sha256d_coins[$idx]}"
+            local is_last=false
+            [[ $((idx + 1)) -eq $num_coins ]] && is_last=true
+
+            if [[ -z "$first_coin" ]]; then
+                first_coin="$coin"
+            fi
+
+            if [[ "$is_last" == "true" ]]; then
+                # Last coin gets whatever is remaining — no prompt needed
+                echo -e "  ${coin}: ${WHITE}${remaining}%${NC} (remaining)"
+                local w=$remaining
+            else
+                local default_w=$((remaining / (num_coins - idx)))
+                prompt_input "  Weight for ${coin} (${remaining} remaining) [default: ${default_w}]: "; read w
+                w=${w:-$default_w}
+                # Validate numeric
+                if ! [[ "$w" =~ ^[0-9]+$ ]]; then
+                    echo -e "  ${RED}Invalid number, using default ${default_w}${NC}"
+                    w=$default_w
+                fi
+                if [[ "$w" -gt "$remaining" ]]; then
+                    echo -e "  ${RED}${w} exceeds remaining ${remaining}, capping to ${remaining}${NC}"
+                    w=$remaining
+                fi
+            fi
+
+            if [[ -n "$coins_csv" ]]; then
+                coins_csv="${coins_csv},${coin}"
+                weights_csv="${weights_csv},${w}"
+            else
+                coins_csv="$coin"
+                weights_csv="$w"
+            fi
+            total_weight=$((total_weight + w))
+            remaining=$((remaining - w))
+        done
+
+        # Should always be 100 given the logic above, but verify
+        if [[ "$total_weight" -ne 100 ]]; then
+            echo -e "  ${RED}Weights sum to ${total_weight}, must be 100. Try again.${NC}"
+            continue
+        fi
+
+        # Show time allocation summary
+        echo ""
+        echo -e "  ${WHITE}24-hour UTC schedule:${NC}"
+
+        local IFS=','
+        local coin_arr=($coins_csv)
+        local weight_arr=($weights_csv)
+        unset IFS
+
+        local cumulative_frac=0
+        for i in "${!coin_arr[@]}"; do
+            local frac
+            frac=$(echo "scale=6; ${weight_arr[$i]} / 100" | bc)
+            local start_h
+            start_h=$(echo "scale=1; $cumulative_frac * 24" | bc)
+            cumulative_frac=$(echo "scale=6; $cumulative_frac + $frac" | bc)
+            local end_h
+            end_h=$(echo "scale=1; $cumulative_frac * 24" | bc)
+            printf "  %-6s  %3s%%   %5sh – %5sh UTC\n" "${coin_arr[$i]}" "${weight_arr[$i]}" "$start_h" "$end_h"
+        done
+        echo ""
+
+        prompt_input "  Accept this schedule? (y/n) [default: y]: "; read accept
+        accept=${accept:-y}
+        if [[ "${accept,,}" == "y" ]] || [[ "${accept,,}" == "yes" ]]; then
+            break
+        fi
+        echo -e "  ${YELLOW}Let's try again...${NC}"
+    done
+
+    MULTIPORT_COINS="$coins_csv"
+    MULTIPORT_WEIGHTS="$weights_csv"
+    MULTIPORT_PREFER_COIN="$first_coin"
+
+    echo -e "  ${GREEN}✓${NC} Multi-coin smart port enabled on port ${WHITE}16180${NC}"
+    echo ""
+
+    log "Multi-port enabled: coins=$MULTIPORT_COINS weights=$MULTIPORT_WEIGHTS prefer=$MULTIPORT_PREFER_COIN"
+}
+
 # Merge mining prompt for multi-coin mode (offers if compatible parent+aux selected)
 # Supports all aux chains: SHA-256d (NMC, SYS, XMY, FBTC), Scrypt (DOGE, PEP)
 select_merge_mining_multicoin() {
@@ -8693,6 +9040,9 @@ select_merge_mining_multicoin() {
             select_aux_chains_multicoin "LTC" "scrypt"
         fi
     fi
+
+    # Offer multi-coin smart port if 2+ SHA-256d coins are enabled
+    prompt_multi_port
     echo ""
 }
 
@@ -13888,9 +14238,15 @@ JAILEOF
         [[ "$ENABLE_BC2"  == "true" ]] && stratum_ports+=(6333 6334 6335)
         [[ "$ENABLE_LTC"  == "true" ]] && stratum_ports+=(7333 7334 7335)
         [[ "$ENABLE_DOGE" == "true" ]] && stratum_ports+=(8335 8337 8342)
+        [[ "$ENABLE_DGB_SCRYPT" == "true" ]] && stratum_ports+=(3336 3337 3338)
         [[ "$ENABLE_NMC"  == "true" ]] && stratum_ports+=(14335 14336 14337)
         [[ "$ENABLE_SYS"  == "true" ]] && stratum_ports+=(15335 15336 15337)
         [[ "$ENABLE_XMY"  == "true" ]] && stratum_ports+=(17335 17336 17337)
+        [[ "$ENABLE_PEP"  == "true" ]] && stratum_ports+=(10335 10336 10337)
+        [[ "$ENABLE_CAT"  == "true" ]] && stratum_ports+=(12335 12336 12337)
+        [[ "$ENABLE_FBTC" == "true" ]] && stratum_ports+=(18335 18336 18337)
+        [[ "$ENABLE_QBX"  == "true" ]] && stratum_ports+=(20335 20336 20337)
+        [[ "$MULTIPORT_ENABLED" == "true" ]] && stratum_ports+=(16180)
 
         # Deduplicate
         local unique_ports
@@ -14744,6 +15100,12 @@ MINERDBEOF
     if [[ -n "$STRATUM_V2_PORT" ]]; then
         sudo ufw allow "$STRATUM_V2_PORT/tcp" > /dev/null 2>&1 # Stratum V2 (miners)
     fi
+    # Single-coin TLS port (defaults to V2 port + 1 when TLS is enabled)
+    if [[ -n "$STRATUM_TLS_PORT" ]]; then
+        sudo ufw allow "$STRATUM_TLS_PORT/tcp" > /dev/null 2>&1 # Stratum TLS (miners)
+    elif [[ -n "$STRATUM_V2_PORT" ]] && [[ "${ENABLE_TLS:-false}" == "true" ]]; then
+        sudo ufw allow "$((STRATUM_V2_PORT + 1))/tcp" > /dev/null 2>&1 # Stratum TLS (miners)
+    fi
     sudo ufw limit $API_PORT/tcp > /dev/null 2>&1         # Pool API (rate-limited: max 6 new conn/30s per IP)
     # Dashboard — home: plain allow (LAN, minimal bot traffic); cloud: port stays CLOSED (use SSH tunnel)
     # Fresh installs use HTTPS with a self-signed cert. Cloud operators should still use SSH tunnels.
@@ -14889,6 +15251,11 @@ MINERDBEOF
         sudo ufw allow 20337/tcp > /dev/null 2>&1        # QBX Stratum TLS
         sudo ufw allow 8345/tcp > /dev/null 2>&1         # QBX P2P
         log "Q-BitX ports opened: 20335-20337/tcp (stratum V1/V2/TLS), 8345/tcp (P2P)"
+    fi
+    # Multi-coin smart port (experimental — port 16180)
+    if [[ "$MULTIPORT_ENABLED" == "true" ]]; then
+        sudo ufw allow 16180/tcp > /dev/null 2>&1        # Multi-coin smart port
+        log "Multi-coin smart port opened: 16180/tcp"
     fi
 
     # HA Cluster ports (if HA enabled) — restricted to peer IPs only
@@ -15051,25 +15418,25 @@ echo -e "${CYAN}             ░███${NC}"
 echo -e "${CYAN}             █████${NC}"
 echo -e "${CYAN}            ░░░░░${NC}"
 echo -e "                                 ${MAGENTA}Multi-Algorithm Solo Mining Pool${NC}"
-echo -e "                                     ${DIM}V2.0.1 — PHI HASH REACTOR EDITION${NC}"
+echo -e "                                     ${DIM}V2.1.0 — PHI HASH REACTOR EDITION${NC}"
 echo ""
 echo -e "  ${POOL_C}${POOL_I}${NC} Stratum    ${POOL_C}${POOL_P}${NC}   ${DASH_C}${DASH_I}${NC} Dashboard   ${DASH_C}${DASH_P}${NC}   ${SENT_C}${SENT_I}${NC} Sentinel   ${SENT_C}${SENT_P}${NC}"
 echo -e "  ${DIM}Uptime:${NC} ${GREEN}${UPTIME}${NC}   ${DIM}Load:${NC} ${GREEN}${LOAD}${NC}   ${DIM}Mem:${NC} ${GREEN}${MEM_USED}/${MEM_TOTAL}${NC}   ${DIM}Disk:${NC} ${GREEN}${DISK_USED}${NC}"
 echo ""
-echo -e "${CYAN}━━━ COMMANDS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${CYAN}━━━ STATUS & MONITORING ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "  ${YELLOW}$(C 'spiralctl status')${NC}  $(D 'Overview')  ${YELLOW}$(C 'spiralctl watch')${NC}  Live monitor"
 echo -e "  ${YELLOW}$(C 'spiralctl stats')${NC}  $(D 'Pool stats')  ${YELLOW}$(C 'spiralctl logs')${NC}  Stratum logs"
-echo -e "  ${YELLOW}$(C 'spiralctl sync')${NC}  $(D 'Sync status')  ${YELLOW}$(C 'spiralctl test')${NC}  Connectivity"
-echo -e "  ${YELLOW}$(C 'spiralctl scan')${NC}  $(D 'Find miners')  ${YELLOW}$(C 'spiralctl restart')${NC}  Restart all"
-echo -e "  ${YELLOW}$(C 'spiralctl mining')${NC}  $(D 'Mining mode')  ${YELLOW}$(C 'spiralctl config')${NC}  Configuration"
-echo -e "  ${YELLOW}$(C 'spiralctl wallet')${NC}  $(D 'Addresses')  ${YELLOW}$(C 'spiralctl security')${NC}  Security"
+echo -e "  ${YELLOW}$(C 'spiralctl sync')${NC}  $(D 'Sync status')  ${YELLOW}$(C 'spiralctl scan')${NC}  Find miners"
+echo -e "${CYAN}━━━ MINING & COINS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "  ${YELLOW}$(C 'spiralctl mining')${NC}  $(D 'Mining mode')  ${YELLOW}$(C 'spiralctl mining multiport')${NC}  Smart port ${DIM}⚠ experimental${NC}"
+echo -e "  ${YELLOW}$(C 'spiralctl coin enable <SYM>')${NC}  $(D 'Add coin')  ${YELLOW}$(C 'spiralctl coin disable <SYM>')${NC}  Remove coin"
+echo -e "  ${YELLOW}$(C 'spiralctl coin-upgrade')${NC}  $(D 'Upgrade nodes')  ${YELLOW}$(C 'spiralctl restart')${NC}  Restart services"
+echo -e "${CYAN}━━━ MANAGEMENT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "  ${YELLOW}$(C 'spiralctl config')${NC}  $(D 'Configuration')  ${YELLOW}$(C 'spiralctl security')${NC}  Security audit"
 echo -e "  ${YELLOW}$(C 'spiralctl data backup')${NC}  $(D 'Backup')  ${YELLOW}$(C 'spiralctl data restore')${NC}  Restore"
-echo -e "  ${YELLOW}$(C 'spiralctl maintenance')${NC}  $(D 'Maintenance')  ${YELLOW}$(C 'spiralctl ha')${NC}  HA cluster"
-echo -e "  ${YELLOW}$(C 'spiralctl chain export')${NC}  $(D 'Push chain')  ${YELLOW}$(C 'spiralctl chain restore')${NC}  Pull chain"
-echo -e "  ${YELLOW}$(C 'spiralctl coin enable')${NC}  $(D 'Add a coin')  ${YELLOW}$(C 'spiralctl coin disable')${NC}  Remove a coin"
-echo -e "  ${YELLOW}$(C 'spiralctl stats blocks')${NC}  $(D 'Block history')  ${YELLOW}$(C 'spiralctl coin-upgrade')${NC}  Upgrade daemons"
+echo -e "  ${YELLOW}$(C 'spiralctl test')${NC}  $(D 'Connectivity')  ${YELLOW}$(C 'spiralctl ha')${NC}  HA cluster"
 echo ""
-echo -e "  ${CYAN}▶  spiralctl help${NC}   —  Full command reference & man page"
+echo -e "  ${CYAN}▶  spiralctl help${NC}   —  Full command reference"
 echo -e "${CYAN}━━━ SUPPORTED COINS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "  ${GREEN}SHA-256d:${NC}  BTC  BCH  BC2  DGB  QBX    ${GREEN}Scrypt:${NC}  LTC  DOGE  DGB-S  PEP  CAT"
 echo -e "  ${GREEN}AuxPoW:${NC}   BTC+NMC  BTC+FBTC  BTC+SYS  BTC+XMY  DGB+NMC  LTC+DOGE  LTC+PEP"
@@ -15378,6 +15745,15 @@ seednode=seed.digibyte.link
 seednode=seed.quakeguy.com
 seednode=seed.aroundtheblock.app
 seednode=seed.digibyte.services"; fi)
+
+# Force DNS seed queries on every startup (verified: digibyted 8.26.2 -help confirms support)
+forcednsseed=1
+
+# Hardcoded fallback peers for when DNS seeds are unreachable (confirmed active 2026-03-30)
+addnode=157.97.68.86:12024
+addnode=15.204.95.99:12024
+addnode=37.59.32.10:12024
+addnode=173.212.197.63:12024
 EOF
     sudo chmod 640 "$DGB_DIR/digibyte.conf"  # 640 allows group read for CLI tools
     sudo chown -R "$POOL_USER:$POOL_USER" "$DGB_DIR"
@@ -15645,9 +16021,8 @@ install_bitcoin() {
     tar -xzf bitcoin.tar.gz || { log_error "Failed to extract Bitcoin Knots archive"; return 1; }
     rm -f bitcoin.tar.gz
 
-    # Install Bitcoin Knots (find the extracted directory dynamically)
-    local extracted_dir
-    extracted_dir=$(ls -d bitcoin-*/ 2>/dev/null | head -1 | tr -d '/')
+    # Install Bitcoin Knots — derive directory from known version (no glob in /tmp)
+    local extracted_dir="bitcoin-${BITCOIN_KNOTS_VERSION}"
 
     if [[ -z "$extracted_dir" ]]; then
         log_error "Could not find extracted Bitcoin Knots directory"
@@ -15656,7 +16031,7 @@ install_bitcoin() {
 
     sudo mkdir -p "$BTC_DIR/bin"
     sudo mkdir -p "$BTC_DATA"
-    sudo cp ${extracted_dir}/bin/* "$BTC_DIR/bin/"
+    sudo cp "${extracted_dir}/bin/"* "$BTC_DIR/bin/"
     sudo chown -R "$POOL_USER:$POOL_USER" "$BTC_DIR"
     rm -rf /tmp/bitcoin-*
 
@@ -15799,7 +16174,24 @@ seednode=seed.btc.petertodd.net
 seednode=seed.bitcoin.sprovoost.nl
 seednode=dnsseed.emzy.de
 seednode=seed.bitcoin.wiz.biz
-seednode=seed.mainnet.achownodes.xyz"; fi)
+seednode=seed.mainnet.achownodes.xyz
+
+# Force DNS seed queries on every startup (verified: bitcoin-29.3.knots -help confirms support)
+forcednsseed=1
+
+# Hardcoded fallback peers (resolved from live DNS seeds 2026-03-30)
+addnode=45.55.132.91:8333
+addnode=71.196.197.14:8333
+addnode=72.83.184.215:8333
+addnode=65.93.70.99:8333
+addnode=67.60.239.105:8333
+addnode=71.86.88.157:8333
+addnode=173.249.47.215:8333
+addnode=203.11.72.77:8333
+addnode=216.107.135.60:8333
+addnode=72.230.224.175:8333
+addnode=77.247.151.58:8333
+addnode=78.145.65.241:8333"; fi)
 EOF
 
     sudo chmod 640 "$BTC_DATA/bitcoin.conf"  # 640 allows group read for CLI tools
@@ -16123,7 +16515,27 @@ seednode=seed.bchd.cash
 seednode=seed.bch.loping.net
 seednode=dnsseed.electroncash.de
 seednode=bchseed.c3-soft.com
-seednode=bch.bitjson.com"; fi)
+seednode=bch.bitjson.com
+
+# Force DNS seed queries on every startup (verified: bitcoind BCHN 29.0.0 -help confirms support)
+forcednsseed=1
+
+# Hardcoded fallback peers (resolved from live DNS seeds 2026-03-30)
+addnode=195.3.223.29:8433
+addnode=199.217.115.27:8433
+addnode=3.142.98.179:8433
+addnode=35.163.48.30:8433
+addnode=35.198.46.157:8433
+addnode=51.91.196.151:8433
+addnode=174.140.196.19:8433
+addnode=193.164.205.249:8433
+addnode=194.14.246.11:8433
+addnode=8.219.86.245:8433
+addnode=15.204.95.99:8433
+addnode=18.139.1.192:8433
+addnode=51.159.104.35:8433
+addnode=57.129.18.162:8433
+addnode=65.109.90.134:8433"; fi)
 EOF
 
     sudo chmod 640 "$BCH_DATA/bitcoin.conf"  # 640 allows group read for CLI tools
@@ -16287,13 +16699,12 @@ install_bitcoinii() {
     fi
 
     log "Extracting Bitcoin II Core..."
+    # Derive directory name from tarball before extracting (no glob in /tmp)
+    # Handles both naming conventions: BitcoinII-* and bitcoinII-*
+    local extracted_dir
+    extracted_dir=$(tar -tzf bitcoinii.tar.gz | head -1 | cut -d'/' -f1)
     tar -xzf bitcoinii.tar.gz || { log_error "Failed to extract Bitcoin II Core archive"; return 1; }
     rm -f bitcoinii.tar.gz
-
-    # Install Bitcoin II (find the extracted directory dynamically)
-    # Handle both naming conventions: BitcoinII-* and bitcoinII-*
-    local extracted_dir
-    extracted_dir=$(ls -d BitcoinII-*/ bitcoinII-*/ 2>/dev/null | head -1 | tr -d '/')
 
     if [[ -z "$extracted_dir" ]]; then
         log_error "Could not find extracted Bitcoin II directory"
@@ -16307,15 +16718,15 @@ install_bitcoinii() {
     # IMPORTANT: Bitcoin II binaries use capital "II": bitcoinIId, bitcoinII-cli
     # Check both locations for compatibility with future versions
     if [[ -d "${extracted_dir}/bin" ]]; then
-        sudo cp ${extracted_dir}/bin/* "$BC2_DIR/bin/"
+        sudo cp "${extracted_dir}/bin/"* "$BC2_DIR/bin/"
     else
         # v29.1.0 structure: binaries are in root of extracted directory
         # Bitcoin II uses capital "II" in binary names: bitcoinIId, bitcoinII-cli
-        sudo cp ${extracted_dir}/bitcoinIId "$BC2_DIR/bin/" 2>/dev/null || true
-        sudo cp ${extracted_dir}/bitcoinII-cli "$BC2_DIR/bin/" 2>/dev/null || true
-        sudo cp ${extracted_dir}/bitcoinII-qt "$BC2_DIR/bin/" 2>/dev/null || true
-        sudo cp ${extracted_dir}/bitcoinII-tx "$BC2_DIR/bin/" 2>/dev/null || true
-        sudo cp ${extracted_dir}/bitcoinII-wallet "$BC2_DIR/bin/" 2>/dev/null || true
+        sudo cp "${extracted_dir}/bitcoinIId" "$BC2_DIR/bin/" 2>/dev/null || true
+        sudo cp "${extracted_dir}/bitcoinII-cli" "$BC2_DIR/bin/" 2>/dev/null || true
+        sudo cp "${extracted_dir}/bitcoinII-qt" "$BC2_DIR/bin/" 2>/dev/null || true
+        sudo cp "${extracted_dir}/bitcoinII-tx" "$BC2_DIR/bin/" 2>/dev/null || true
+        sudo cp "${extracted_dir}/bitcoinII-wallet" "$BC2_DIR/bin/" 2>/dev/null || true
     fi
 
     # Ensure binaries are executable
@@ -16451,7 +16862,15 @@ seednode=bitcoinII.ddns.net
 addnode=144.76.79.60:8338
 addnode=75.130.145.1:8338
 addnode=45.32.205.199:8338
-addnode=98.22.238.18:8338"; fi)
+addnode=98.22.238.18:8338
+
+# Force DNS seed queries on every startup (verified: bitcoinIId 29.1.0 -help confirms support)
+forcednsseed=1
+
+# Additional peers (resolved from live DNS seeds 2026-03-30)
+addnode=173.249.0.253:8338
+addnode=193.164.205.250:8338
+addnode=89.38.128.175:8338"; fi)
 EOF
 
     sudo chmod 640 "$BC2_DATA/bitcoinii.conf"  # 640 allows group read for CLI tools
@@ -16688,6 +17107,17 @@ $(if [[ "$TOR_ENABLED" != "true" ]]; then echo "logips=1"; else echo "# logips d
 
 # PID file
 pid=$LTC_DIR/litecoind.pid
+
+# Force DNS seed queries on every startup (verified: litecoind 0.21.4 -help confirms support)
+forcednsseed=1
+
+# Hardcoded fallback peers (resolved from live DNS seeds 2026-03-30)
+$(if [[ "$TOR_ENABLED" != "true" ]]; then echo "addnode=95.211.152.112:9333
+addnode=95.217.32.30:9333
+addnode=108.234.193.105:9333
+addnode=77.235.26.96:9333
+addnode=91.228.147.153:9333
+addnode=108.171.202.18:9333"; fi)
 EOF
 
     sudo chmod 640 "$LTC_DIR/litecoin.conf"
@@ -16902,6 +17332,17 @@ $(if [[ "$TOR_ENABLED" != "true" ]]; then echo "logips=1"; else echo "# logips d
 
 # PID file
 pid=$DOGE_DIR/dogecoind.pid
+
+# Force DNS seed queries on every startup (verified: dogecoind 1.14.9 -help confirms support)
+forcednsseed=1
+
+# Hardcoded fallback peers (resolved from live DNS seeds 2026-03-30)
+$(if [[ "$TOR_ENABLED" != "true" ]]; then echo "addnode=148.251.122.88:22556
+addnode=149.202.10.56:22556
+addnode=167.235.95.225:22556
+addnode=91.184.178.3:22556
+addnode=97.103.138.106:22556
+addnode=138.201.132.34:22556"; fi)
 EOF
 
     sudo chmod 640 "$DOGE_DIR/dogecoin.conf"
@@ -17119,6 +17560,17 @@ $(if [[ "$TOR_ENABLED" != "true" ]]; then echo "logips=1"; else echo "# logips d
 
 # PID file
 pid=$PEP_DIR/pepecoind.pid
+
+# Force DNS seed queries on every startup (verified: pepecoind 1.1.0 -help confirms support)
+forcednsseed=1
+
+# Hardcoded fallback peers (resolved from live DNS seeds 2026-03-30)
+$(if [[ "$TOR_ENABLED" != "true" ]]; then echo "addnode=144.76.222.140:33874
+addnode=154.39.75.82:33874
+addnode=173.212.253.15:33874
+addnode=3.212.41.153:33874
+addnode=3.216.226.159:33874
+addnode=18.158.24.136:33874"; fi)
 EOF
 
     sudo chmod 640 "$PEP_DIR/pepecoin.conf"
@@ -17342,6 +17794,22 @@ $(if [[ "$TOR_ENABLED" != "true" ]]; then echo "logips=1"; else echo "# logips d
 
 # PID file
 pid=$CAT_DIR/catcoind.pid
+
+# Force DNS seed queries on every startup (verified: catcoind 2.1.1 -help confirms support)
+forcednsseed=1
+
+# Hardcoded fallback peers (resolved from live DNS seeds 2026-03-30)
+$(if [[ "$TOR_ENABLED" != "true" ]]; then echo "addnode=91.206.16.214:9933
+addnode=93.127.199.243:9933
+addnode=103.229.81.113:9933
+addnode=165.22.66.115:9933
+addnode=195.114.193.178:9933
+addnode=199.192.19.91:9933
+addnode=86.105.51.204:9933
+addnode=91.121.217.71:9933
+addnode=135.125.225.85:9933
+addnode=140.99.164.14:9933
+addnode=159.100.6.121:9933"; fi)
 EOF
 
     sudo chmod 640 "$CAT_DIR/catcoin.conf"
@@ -17554,6 +18022,22 @@ $(if [[ "$TOR_ENABLED" != "true" ]]; then echo "logips=1"; else echo "# logips d
 
 # PID file
 pid=$NMC_DIR/namecoind.pid
+
+# Force DNS seed queries on every startup (verified: namecoind 28.0 -help confirms support)
+forcednsseed=1
+
+# Hardcoded fallback peers (resolved from live DNS seeds 2026-03-30)
+$(if [[ "$TOR_ENABLED" != "true" ]]; then echo "addnode=13.246.63.174:8334
+addnode=15.204.102.127:8334
+addnode=18.167.52.159:8334
+addnode=8.214.158.13:8334
+addnode=8.218.231.1:8334
+addnode=185.87.45.95:8334
+addnode=212.51.144.42:8334
+addnode=212.95.39.169:8334
+addnode=23.106.36.28:8334
+addnode=23.108.191.143:8334
+addnode=23.108.191.178:8334"; fi)
 EOF
 
     sudo chmod 640 "$NMC_DIR/namecoin.conf"
@@ -17763,6 +18247,23 @@ $(if [[ "$TOR_ENABLED" != "true" ]]; then echo "logips=1"; else echo "# logips d
 
 # PID file
 pid=$SYS_DIR/syscoind.pid
+
+# Force DNS seed queries on every startup (verified: syscoind 5.0.5 -help confirms support)
+forcednsseed=1
+
+# Hardcoded fallback peers (resolved from live DNS seeds 2026-03-30)
+$(if [[ "$TOR_ENABLED" != "true" ]]; then echo "addnode=158.220.107.184:8369
+addnode=158.220.114.225:8369
+addnode=165.232.103.216:8369
+addnode=31.56.38.151:8369
+addnode=31.56.38.197:8369
+addnode=31.58.170.95:8369
+addnode=143.20.33.149:8369
+addnode=151.244.85.219:8369
+addnode=176.9.210.20:8369
+addnode=151.244.85.47:8369
+addnode=159.65.195.168:8369
+addnode=173.234.17.201:8369"; fi)
 EOF
 
     sudo chmod 640 "$SYS_DIR/syscoin.conf"
@@ -17894,8 +18395,9 @@ install_myriad() {
     fi
 
     # Myriad tarball uses inconsistent directory naming (e.g., 0.18.1.0 extracts
-    # to myriadcoin-0.18.1/). Detect the actual extracted directory via glob.
-    local XMY_EXTRACTED=$(ls -d myriadcoin-*/ 2>/dev/null | head -1 | tr -d '/')
+    # to myriadcoin-0.18.1/). Derive from tarball contents instead of globbing /tmp.
+    local XMY_EXTRACTED
+    XMY_EXTRACTED=$(tar -tzf myriadcoin.tar.gz | head -1 | cut -d'/' -f1)
     if [[ -z "$XMY_EXTRACTED" ]]; then
         log_error "Failed to find extracted Myriad directory"
         rm -f myriadcoin.tar.gz
@@ -17988,6 +18490,17 @@ $(if [[ "$TOR_ENABLED" != "true" ]]; then echo "logips=1"; else echo "# logips d
 
 # PID file
 pid=$XMY_DIR/myriadcoind.pid
+
+# Force DNS seed queries on every startup (verified: myriadcoind 0.18.1.0 -help confirms support)
+forcednsseed=1
+
+# Hardcoded fallback peers (resolved from live DNS seeds 2026-03-30)
+$(if [[ "$TOR_ENABLED" != "true" ]]; then echo "addnode=54.37.139.32:10888
+addnode=91.206.16.214:10888
+addnode=199.241.187.130:10888
+addnode=89.189.0.226:10888
+addnode=85.15.179.171:10888
+addnode=62.210.123.48:10888"; fi)
 EOF
 
     sudo chmod 640 "$XMY_DIR/myriadcoin.conf"
@@ -18146,9 +18659,10 @@ maxconnections=200
 listen=1
 dnsseed=1
 
-# === SEED NODES (official Fractal Bitcoin DNS seeds) ===
+# === SEED NODES (official Fractal Bitcoin DNS seeds — includes hidden seed found in binary) ===
 seednode=dnsseed-mainnet.fractalbitcoin.io
-seednode=dnsseed-mainnet.unisat.io"
+seednode=dnsseed-mainnet.unisat.io
+seednode=dnsseed.fractalbitcoin.io"
     fi
 
     # Create configuration
@@ -18195,6 +18709,19 @@ $(if [[ "$TOR_ENABLED" != "true" ]]; then echo "logips=1"; else echo "# logips d
 
 # PID file
 pid=$FBTC_DIR/fractald.pid
+
+# Force DNS seed queries on every startup (verified: fractald 0.3.0 -help confirms support)
+# NOTE: All 3 FBTC DNS seeds are currently dead (2026-03-30) — fixedseeds is critical
+forcednsseed=1
+fixedseeds=1
+
+# Hardcoded fallback peers (from live FBTC daemon getpeerinfo 2026-03-30)
+# NOTE: FBTC public network uses port 8333 (same as BTC default)
+$(if [[ "$TOR_ENABLED" != "true" ]]; then echo "addnode=5.9.118.219:8333
+addnode=173.212.223.9:8333
+addnode=49.51.68.155:8333
+addnode=150.136.38.223:8333
+addnode=3.124.82.188:8333"; fi)
 EOF
 
     sudo chmod 640 "$FBTC_DIR/fractal.conf"
@@ -18285,7 +18812,7 @@ install_qbx() {
         # Fall through to config/service creation below (password may have been blank on first run)
         qbx_download_needed=false
     fi
-    if copy_binaries_from_primary "Q-BitX" "$QBX_BIN_DIR" "$QBX_BIN_DIR"; then
+    if [[ "$qbx_download_needed" == "true" ]] && copy_binaries_from_primary "Q-BitX" "$QBX_BIN_DIR" "$QBX_BIN_DIR"; then
         sudo mkdir -p "$QBX_BIN_DIR" "$QBX_DIR"
         sudo chown -R "$POOL_USER:$POOL_USER" "$QBX_BIN_DIR" "$QBX_DIR"
         if [[ -f "$QBX_BIN_DIR/qbitx" ]]; then
@@ -18308,16 +18835,17 @@ install_qbx() {
     local QBX_URL="https://github.com/q-bitx/Source-/releases/download/v${QBX_VERSION}/qbitx-linux-x86_64-v${QBX_VERSION}.zip"
 
     log "Downloading Q-BitX..."
-    if ! download_with_retry "qbitx-linux-x86_64-v0.2.0.zip" "$QBX_URL"; then
+    local QBX_FILENAME="qbitx-linux-x86_64-v${QBX_VERSION}.zip"
+    if ! download_with_retry "$QBX_FILENAME" "$QBX_URL"; then
         log_error "Failed to download Q-BitX"
         log_error "Please download manually from: https://github.com/q-bitx/Source-/releases"
         return 1
     fi
 
     log "Extracting Q-BitX..."
-    if ! unzip -o qbitx-linux-x86_64-v0.2.0.zip -d qbitx-extract; then
+    if ! unzip -o "$QBX_FILENAME" -d qbitx-extract; then
         log_error "Failed to extract Q-BitX archive"
-        rm -f qbitx-linux-x86_64-v0.2.0.zip
+        rm -f "$QBX_FILENAME"
         return 1
     fi
 
@@ -18327,7 +18855,7 @@ install_qbx() {
     sudo cp qbitx-extract/qbitx-cli "$QBX_BIN_DIR/" 2>/dev/null || sudo cp qbitx-extract/*/qbitx-cli "$QBX_BIN_DIR/" 2>/dev/null || true
     sudo chmod +x "$QBX_BIN_DIR/qbitx" "$QBX_BIN_DIR/qbitx-cli"
     sudo chown -R "$POOL_USER:$POOL_USER" "$QBX_BIN_DIR"
-    rm -rf qbitx-linux-x86_64-v0.2.0.zip qbitx-extract
+    rm -rf "$QBX_FILENAME" qbitx-extract
 
     # Create symlinks for CLI access
     sudo ln -sf "$QBX_BIN_DIR/qbitx" /usr/local/bin/qbitx
@@ -18383,6 +18911,17 @@ printtoconsole=0
 
 # PID file
 pid=$QBX_DIR/qbitxd.pid
+
+# Force DNS seed queries on every startup (verified: qbitx 0.2.0 -help confirms support)
+forcednsseed=1
+
+# === SEED NODES (extracted from qbitx binary via strings 2026-03-30) ===
+seednode=seed.qbitx.org
+
+# Hardcoded fallback peers (resolved from seed.qbitx.org + binary strings 2026-03-30)
+# NOTE: QBX public network uses default port 8334, our install remaps to $QBX_P2P_PORT
+addnode=89.110.93.248:8334
+addnode=83.217.213.118:8334
 EOF
 
     sudo chmod 640 "$QBX_DIR/qbitx.conf"
@@ -20054,7 +20593,12 @@ ${POOL_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl stop postgresql@*, /usr/bin
 ${POOL_USER} ALL=(root) NOPASSWD: ${INSTALL_DIR}/scripts/ha-add-peer.sh
 SUDOERS_EOF
         sudo chmod 440 "$ha_sudoers"
-        log_success "HA sudoers created"
+        if ! sudo visudo -c -f "$ha_sudoers" > /dev/null 2>&1; then
+            log_warn "HA sudoers syntax error — removing invalid file"
+            sudo rm -f "$ha_sudoers"
+        else
+            log_success "HA sudoers created"
+        fi
     fi
 }
 
@@ -20800,7 +21344,7 @@ build_stratum() {
     }
 
     # Read version for ldflags injection (matches upgrade.sh behavior)
-    local BUILD_VERSION="2.0.1"
+    local BUILD_VERSION="2.1.0"
     if [[ -f "$SCRIPT_DIR/VERSION" ]]; then
         BUILD_VERSION=$(tr -d '[:space:]' < "$SCRIPT_DIR/VERSION")
     fi
@@ -23109,7 +23653,22 @@ EOF
 # These are the ONLY commands the pool user can run with sudo
 
 # Clear StartLimitBurst failures (reinstall / crash-loop recovery)
-$POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl reset-failed *
+$POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl reset-failed spiralstratum
+$POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl reset-failed spiralsentinel
+$POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl reset-failed spiraldash
+$POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl reset-failed digibyted
+$POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl reset-failed bitcoind
+$POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl reset-failed bitcoind-bch
+$POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl reset-failed bitcoiniid
+$POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl reset-failed litecoind
+$POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl reset-failed dogecoind
+$POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl reset-failed pepecoind
+$POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl reset-failed catcoind
+$POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl reset-failed namecoind
+$POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl reset-failed syscoind
+$POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl reset-failed myriadcoind
+$POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl reset-failed fractald
+$POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl reset-failed qbitxd
 
 # Pool service control (stratum + sentinel) - start, stop, restart, enable
 $POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl start spiralstratum
@@ -23165,6 +23724,8 @@ $POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl start myriadcoind
 $POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl stop myriadcoind
 $POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl start fractald
 $POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl stop fractald
+$POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl start qbitxd
+$POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl stop qbitxd
 $POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl start postgresql
 $POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl stop postgresql
 $POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl restart postgresql
@@ -23209,9 +23770,23 @@ $POOL_USER ALL=(ALL) NOPASSWD: ${INSTALL_DIR}/scripts/ha-add-peer.sh *
 # Trailing * allows --force --auto arguments
 $POOL_USER ALL=(ALL) NOPASSWD: ${INSTALL_DIR}/upgrade.sh *
 
-# Log viewer - allow journalctl to read any service logs from dashboard
-# Dashboard validates service names against ALLOWED_SERVICES whitelist before invoking
-$POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/journalctl *
+# Log viewer - restrict journalctl to pool-related services only
+$POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u spiralstratum *
+$POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u spiralsentinel *
+$POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u spiraldash *
+$POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u digibyted *
+$POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u bitcoind *
+$POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u bitcoind-bch *
+$POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u bitcoiniid *
+$POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u litecoind *
+$POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u dogecoind *
+$POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u pepecoind *
+$POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u catcoind *
+$POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u namecoind *
+$POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u syscoind *
+$POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u myriadcoind *
+$POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u fractald *
+$POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u qbitxd *
 
 # System package updates - wrapper script sets DEBIAN_FRONTEND=noninteractive
 # inside the root process so it never needs to cross sudo's env_reset barrier
@@ -23222,6 +23797,10 @@ $POOL_USER ALL=(postgres) NOPASSWD: /usr/bin/psql -c SELECT\ 1
 
 # Enable HTTPS - dashboard UI can activate TLS via enable-https.sh
 $POOL_USER ALL=(ALL) NOPASSWD: ${INSTALL_DIR}/scripts/enable-https.sh
+
+# Coin node install/remove - dashboard UI and spiralctl coin management
+# systemd-run escapes ProtectSystem=strict for pool-mode.sh writes
+$POOL_USER ALL=(ALL) NOPASSWD: /usr/bin/systemd-run --pipe --quiet --property=WorkingDirectory=/tmp /bin/bash ${INSTALL_DIR}/scripts/pool-mode.sh *
 
 # System reboot - dashboard UI can gracefully restart the machine
 $POOL_USER ALL=(ALL) NOPASSWD: /bin/systemctl --no-block reboot
@@ -24304,7 +24883,7 @@ for ha_svc in etcd keepalived redis-server; do
 done
 
 # Blockchain daemon services (added if enabled)
-for daemon in digibyted bitcoind bitcoind-bch bitcoiniid litecoind dogecoind pepecoind catcoind namecoind syscoind myriadcoind fractald; do
+for daemon in digibyted bitcoind bitcoind-bch bitcoiniid litecoind dogecoind pepecoind catcoind namecoind syscoind myriadcoind fractald qbitxd; do
     if systemctl is-enabled --quiet "$daemon" 2>/dev/null; then
         CORE_SERVICES+=("$daemon")
     fi
@@ -24341,15 +24920,33 @@ restart_service() {
         sleep 1
     fi
 
-    # Now start fresh
-    sudo /bin/systemctl start "$service"
+    # Check for systemd rate limiting before attempting start
+    local sub_state
+    sub_state=$(systemctl show -p SubState --value "$service" 2>/dev/null)
+    if [[ "$sub_state" == "start-limit-hit" ]]; then
+        log "ERROR: $service hit systemd StartLimitBurst rate limit - resetting and retrying"
+        sudo /bin/systemctl reset-failed "$service" 2>/dev/null
+        sleep 1
+    fi
+
+    # Now start fresh — check exit code to surface failures immediately
+    if ! sudo /bin/systemctl start "$service" 2>&1; then
+        restart_counts[$service]=$((count+1))
+        log "FAILED: systemctl start $service returned non-zero exit code"
+        # Re-check for rate limiting after failed start
+        sub_state=$(systemctl show -p SubState --value "$service" 2>/dev/null)
+        if [[ "$sub_state" == "start-limit-hit" ]]; then
+            log "ERROR: $service start-limit-hit — systemd is refusing to start the service (too many recent failures)"
+        fi
+        return 1
+    fi
     sleep 10
     if check_service "$service"; then
         log "SUCCESS: $service restarted successfully"
-        restart_counts[$service]=0
+        restart_counts[$service]=$((count+1))
     else
         restart_counts[$service]=$((count+1))
-        log "FAILED: $service restart attempt failed"
+        log "FAILED: $service restart attempt failed (service not active after 10s)"
     fi
 }
 
@@ -24457,6 +25054,7 @@ check_stratum_health() {
         ENABLE_XMY=$(grep -oP '^ENABLE_XMY=\K(true|false)$' "$INSTALL_DIR/config/coins.env" 2>/dev/null || echo "false")
         ENABLE_FBTC=$(grep -oP '^ENABLE_FBTC=\K(true|false)$' "$INSTALL_DIR/config/coins.env" 2>/dev/null || echo "false")
         ENABLE_QBX=$(grep -oP '^ENABLE_QBX=\K(true|false)$' "$INSTALL_DIR/config/coins.env" 2>/dev/null || echo "false")
+        MULTIPORT_ENABLED=$(grep -oP '^MULTIPORT_ENABLED=\K(true|false)$' "$INSTALL_DIR/config/coins.env" 2>/dev/null || echo "false")
 
         if [[ "$COIN_MODE" == "multi" ]]; then
             # Multi-coin mode: check each enabled coin's port
@@ -24474,6 +25072,8 @@ check_stratum_health() {
             [[ "$ENABLE_XMY" == "true" ]] && ports_to_check+=(17335)
             [[ "$ENABLE_FBTC" == "true" ]] && ports_to_check+=(18335)
             [[ "$ENABLE_QBX" == "true" ]] && ports_to_check+=(20335)
+            # Multi-coin smart port
+            [[ "$MULTIPORT_ENABLED" == "true" ]] && ports_to_check+=(16180)
         else
             # Single-coin mode: use configured port (no default)
             if [[ -n "$STRATUM_PORT" ]]; then
@@ -24599,12 +25199,13 @@ check_blockchain_daemon_health() {
         return 0
     fi
 
-    # Check for specific error codes that indicate the daemon is still starting up
-    # Error -28: "Loading block index..." / "Loading blocks..." / "Verifying blocks..."
-    # Error -1: "Loading wallet..."
-    # "Could not connect" / "couldn't connect" = RPC server hasn't started yet
-    # These are NOT failures - daemon is actively working
-    if echo "$cli_output" | grep -qE "error code: -28|Loading block|Verifying block|Rewinding block|Loading wallet|[Cc]ould not connect|[Cc]ouldn't connect"; then
+    # Check for specific error codes that indicate the daemon is still starting up.
+    # Any negative JSON-RPC error code (-28 loading, -1 wallet, -10 no peers, etc.)
+    # means the daemon process is alive and working — just not ready yet.
+    # "Could not connect" / "couldn't connect" = RPC server hasn't bound yet.
+    # BCHN (Bitcoin Cash) uses different startup messages than Bitcoin Core, so we
+    # match the error code prefix rather than specific message strings.
+    if echo "$cli_output" | grep -qE "error code: -[0-9]+|Loading block|Verifying block|Rewinding block|Loading wallet|Activating best chain|[Cc]ould not connect|[Cc]ouldn't connect"; then
         # Daemon is starting up / loading - this is normal, don't restart
         return 0
     fi
@@ -24627,7 +25228,7 @@ check_blockchain_daemon_health() {
     fi
 
     # Still check for loading states after the wait
-    if echo "$cli_output" | grep -qE "error code: -28|Loading block|Verifying block|Rewinding block|Loading wallet|[Cc]ould not connect|[Cc]ouldn't connect"; then
+    if echo "$cli_output" | grep -qE "error code: -[0-9]+|Loading block|Verifying block|Rewinding block|Loading wallet|Activating best chain|[Cc]ould not connect|[Cc]ouldn't connect"; then
         # Still loading - this is fine for large blockchains
         return 0
     fi
@@ -25147,7 +25748,7 @@ for ha_svc in etcd keepalived redis-server; do
 done
 
 # Blockchain daemon services (only show if installed)
-for daemon in digibyted bitcoind bitcoind-bch bitcoiniid litecoind dogecoind pepecoind catcoind namecoind syscoind myriadcoind fractald; do
+for daemon in digibyted bitcoind bitcoind-bch bitcoiniid litecoind dogecoind pepecoind catcoind namecoind syscoind myriadcoind fractald qbitxd; do
     if systemctl is-enabled --quiet "$daemon" 2>/dev/null; then
         status=$(systemctl is-active "$daemon" 2>/dev/null || echo "inactive")
         case $status in
@@ -25831,7 +26432,7 @@ cli_call() {
         fi
 
         # Check for error -28 (daemon is loading blocks - this is NORMAL after restart)
-        if echo "$stderr_output" | grep -qE "error code: -28|Loading block|Verifying block|Rewinding block|Loading wallet"; then
+        if echo "$stderr_output" | grep -qE "error code: -[0-9]+|Loading block|Verifying block|Rewinding block|Loading wallet|Activating best chain"; then
             DAEMON_LOADING=true
             # Extract the loading message for display
             if echo "$stderr_output" | grep -q "Loading block index"; then
@@ -26014,7 +26615,7 @@ get_coin_sync_status() {
         local INFO=$($CLI getblockchaininfo 2>/dev/null)
         if [[ -z "$INFO" ]]; then
             # Check for error -28 (daemon is loading blocks - this is NORMAL)
-            if echo "$CLI_STDERR" | grep -qE "error code: -28|Loading block|Verifying block|Rewinding block|Loading wallet"; then
+            if echo "$CLI_STDERR" | grep -qE "error code: -[0-9]+|Loading block|Verifying block|Rewinding block|Loading wallet|Activating best chain"; then
                 # Extract the specific loading message
                 local loading_msg="Initializing"
                 if echo "$CLI_STDERR" | grep -q "Loading block index"; then
@@ -29057,11 +29658,11 @@ echo -e "    Worker:  ${WHITE}$NEW_ADDRESS.worker_name${NC}"
 echo ""
 WALLETEOF
 
-    # V2.0.1-PHI_HASH_REACTOR: Create backup command
+    # V2.1.0-PHI_HASH_REACTOR: Create backup command
     sudo tee /usr/local/bin/spiralpool-backup > /dev/null << 'BACKUPEOF'
 #!/bin/bash
 #
-# Spiral Pool Backup Utility - V2.0.1-PHI_HASH_REACTOR
+# Spiral Pool Backup Utility - V2.1.0-PHI_HASH_REACTOR
 # Creates encrypted, compressed backups of wallet, database, and config
 #
 
@@ -29106,7 +29707,7 @@ log_success() { echo -e "${GREEN}[$(date '+%H:%M:%S')] ✓${NC} $1"; }
 show_help() {
     echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${NC}${WHITE}       SPIRAL POOL BACKUP UTILITY - V2.0.1-PHI_HASH_REACTOR${NC}${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}${WHITE}       SPIRAL POOL BACKUP UTILITY - V2.1.0-PHI_HASH_REACTOR${NC}${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo "Usage: spiralpool-backup [OPTIONS]"
@@ -29426,7 +30027,7 @@ backup_logs() {
     journalctl -u spiralstratum --since "7 days ago" --no-pager > "${TEMP_DIR}/logs/spiralstratum.log" 2>/dev/null || true
 
     # Copy logs for each enabled blockchain daemon
-    for daemon in digibyted bitcoind bitcoind-bch bitcoiniid litecoind dogecoind pepecoind catcoind namecoind syscoind myriadcoind fractald; do
+    for daemon in digibyted bitcoind bitcoind-bch bitcoiniid litecoind dogecoind pepecoind catcoind namecoind syscoind myriadcoind fractald qbitxd; do
         if systemctl is-enabled --quiet "$daemon" 2>/dev/null; then
             journalctl -u "$daemon" --since "7 days ago" --no-pager > "${TEMP_DIR}/logs/${daemon}.log" 2>/dev/null || true
         fi
@@ -29455,7 +30056,7 @@ create_manifest() {
 
     cat > "${TEMP_DIR}/manifest.json" << MANIFEST
 {
-    "version": "2.0.1",
+    "version": "2.1.0",
     "created": "$(date -Iseconds)",
     "hostname": "$(hostname)",
     "components": {
@@ -29722,7 +30323,7 @@ mkdir -p "$TEMP_DIR"
 
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║${NC}${WHITE}              SPIRAL POOL BACKUP - V2.0.1-PHI_HASH_REACTOR${NC}${CYAN}║${NC}"
+echo -e "${CYAN}║${NC}${WHITE}              SPIRAL POOL BACKUP - V2.1.0-PHI_HASH_REACTOR${NC}${CYAN}║${NC}"
 echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -29775,11 +30376,11 @@ echo "  To restore: spiralpool-restore ${OUTPUT_FILE}"
 echo ""
 BACKUPEOF
 
-    # V2.0.1-PHI_HASH_REACTOR: Create restore command
+    # V2.1.0-PHI_HASH_REACTOR: Create restore command
     sudo tee /usr/local/bin/spiralpool-restore > /dev/null << 'RESTOREEOF'
 #!/bin/bash
 #
-# Spiral Pool Restore Utility - V2.0.1-PHI_HASH_REACTOR
+# Spiral Pool Restore Utility - V2.1.0-PHI_HASH_REACTOR
 # Restores backups created by spiralpool-backup
 #
 
@@ -29826,7 +30427,7 @@ log_success() { echo -e "${GREEN}[$(date '+%H:%M:%S')] ✓${NC} $1"; }
 show_help() {
     echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${NC}${WHITE}         SPIRAL POOL RESTORE UTILITY - V2.0.1-PHI_HASH_REACTOR${NC}${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}${WHITE}         SPIRAL POOL RESTORE UTILITY - V2.1.0-PHI_HASH_REACTOR${NC}${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo "Usage: spiralpool-restore BACKUP_FILE [OPTIONS]"
@@ -30148,7 +30749,7 @@ fi
 
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║${NC}${WHITE}           SPIRAL POOL RESTORE - V2.0.1-PHI_HASH_REACTOR${NC}${CYAN}║${NC}"
+echo -e "${CYAN}║${NC}${WHITE}           SPIRAL POOL RESTORE - V2.1.0-PHI_HASH_REACTOR${NC}${CYAN}║${NC}"
 echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -30783,7 +31384,7 @@ else
 fi
 
 # Blockchain daemon services (check which ones are installed)
-for daemon in digibyted bitcoind bitcoind-bch bitcoiniid litecoind dogecoind pepecoind catcoind namecoind syscoind myriadcoind fractald; do
+for daemon in digibyted bitcoind bitcoind-bch bitcoiniid litecoind dogecoind pepecoind catcoind namecoind syscoind myriadcoind fractald qbitxd; do
     if systemctl is-enabled --quiet "$daemon" 2>/dev/null; then
         if systemctl is-active --quiet "$daemon" 2>/dev/null; then
             test_pass "$daemon is running"
@@ -33055,7 +33656,7 @@ except:
     # Services status — detect all installed daemons
     echo -e "${CYAN}║${NC}  ${WHITE}SERVICES:${NC}                                                                   ${CYAN}║${NC}"
 
-    for svc in spiralstratum digibyted bitcoind bitcoind-bch bitcoiniid litecoind dogecoind pepecoind catcoind namecoind syscoind myriadcoind fractald spiralsentinel spiraldash; do
+    for svc in spiralstratum digibyted bitcoind bitcoind-bch bitcoiniid litecoind dogecoind pepecoind catcoind namecoind syscoind myriadcoind fractald qbitxd spiralsentinel spiraldash; do
         if systemctl is-active --quiet "$svc" 2>/dev/null; then
             STATUS_TEXT="running"
             STATUS_ICON="${GREEN}●${NC}"
@@ -33538,11 +34139,11 @@ EXPORTEOF
     fi
 
 
-    # Copy pool-mode script (non-privileged — called by spiralctl as root already)
+    # Copy pool-mode script (PRIVILEGED — in sudoers NOPASSWD, must be root-owned)
     if [[ -f "${SCRIPTS_SRC}/pool-mode.sh" ]]; then
         sudo cp "${SCRIPTS_SRC}/pool-mode.sh" "${INSTALL_DIR}/scripts/"
-        sudo chmod +x "${INSTALL_DIR}/scripts/pool-mode.sh"
-        sudo chown "$POOL_USER:$POOL_USER" "${INSTALL_DIR}/scripts/pool-mode.sh"
+        sudo chmod 755 "${INSTALL_DIR}/scripts/pool-mode.sh"
+        sudo chown root:root "${INSTALL_DIR}/scripts/pool-mode.sh"
     fi
 
     # Copy block celebration script (non-privileged — Avalon LED flash on block found)
@@ -35018,7 +35619,7 @@ if [[ -f "$CONFIG_YAML" ]] && grep -q "PENDING_GENERATION" "$CONFIG_YAML" 2>/dev
 
     # Detect the pool user for running wallet generation
     POOL_USER="${POOL_USER:-}"
-    for svc in spiralstratum digibyted bitcoind bitcoind-bch bitcoiniid litecoind dogecoind pepecoind catcoind namecoind syscoind myriadcoind fractald; do
+    for svc in spiralstratum digibyted bitcoind bitcoind-bch bitcoiniid litecoind dogecoind pepecoind catcoind namecoind syscoind myriadcoind fractald qbitxd; do
         if [[ -f "/etc/systemd/system/${svc}.service" ]]; then
             POOL_USER=$(grep -oP '^User=\K[a-z_][a-z0-9_-]*' "/etc/systemd/system/${svc}.service" 2>/dev/null | head -1)
             [[ -n "$POOL_USER" ]] && [[ "$POOL_USER" != "root" ]] && break
@@ -35202,8 +35803,14 @@ STRATUM_PORT=$STRATUM_PORT
 STRATUM_V2_PORT=$STRATUM_V2_PORT
 # Enhanced Stratum (V2) — enables encrypted binary protocol + TLS for V1
 ENABLE_V2_STRATUM=true
+# Multi-coin smart port (weighted 24h UTC schedule on port 16180)
+MULTIPORT_ENABLED=$MULTIPORT_ENABLED
+MULTIPORT_COINS=$MULTIPORT_COINS
+MULTIPORT_WEIGHTS=$MULTIPORT_WEIGHTS
+MULTIPORT_PREFER_COIN=$MULTIPORT_PREFER_COIN
 EOF
     sudo chown "$POOL_USER:$POOL_USER" "$INSTALL_DIR/config/coins.env"
+    sudo chmod 600 "$INSTALL_DIR/config/coins.env"
 
     # Create systemd service for sync monitor with dependencies on enabled nodes
     local after_deps="network.target"
@@ -35849,7 +36456,7 @@ print_completion() {
     echo -e "${CYAN}            ░░░░░${NC}"
     echo ""
     echo -e "                                     ${GREEN}✓ Installation Completed${NC}"
-    echo -e "                                     ${DIM}V2.0.1 - PHI HASH REACTOR${NC}"
+    echo -e "                                     ${DIM}V2.1.0 - PHI HASH REACTOR${NC}"
     echo ""
 }
 
