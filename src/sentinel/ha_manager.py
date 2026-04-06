@@ -99,8 +99,12 @@ class HAManager:
     # How often to check HA status (seconds)
     CHECK_INTERVAL = 30
 
-    # Valid HA role values from the API
+    # Valid HA role values from the API (string form)
     VALID_ROLES = {"MASTER", "BACKUP", "OBSERVER", "UNKNOWN"}
+
+    # Go stratum sends node roles as integers (Role is type int in vip.go)
+    # RoleUnknown=0, RoleMaster=1, RoleBackup=2, RoleObserver=3
+    INT_ROLE_MAP = {0: "UNKNOWN", 1: "MASTER", 2: "BACKUP", 3: "OBSERVER"}
 
     # Maximum HTTP response size (1 MB — more than enough for HA status)
     MAX_RESPONSE_SIZE = 1024 * 1024
@@ -351,7 +355,10 @@ class HAManager:
         nodes = []
         for n in (data.get("nodes") or []):
             # SECURITY: Validate role values from external API
+            # Go stratum sends node roles as integers (Role type = int in vip.go)
             node_role = n.get("role", "UNKNOWN")
+            if isinstance(node_role, int):
+                node_role = self.INT_ROLE_MAP.get(node_role, "UNKNOWN")
             if node_role not in self.VALID_ROLES:
                 logger.warning("Unknown HA node role from API: %r, treating as UNKNOWN", node_role)
                 node_role = "UNKNOWN"
