@@ -706,6 +706,34 @@ func (c *Coordinator) Run(ctx context.Context) error {
 		}
 		c.vipManager.SetSupportedCoins(coins)
 
+		// Pre-populate coin sync status BEFORE VIP election runs.
+		// Without this, the initial election sees syncPct=0 for all coins
+		// (pools haven't started their periodic sync reporting yet) and the
+		// node stays as BACKUP — blocking block submissions on a single-node
+		// cluster until the masterless-cluster detector fires (~60s later).
+		c.poolsMu.RLock()
+		for _, p := range c.pools {
+			syncCtx, syncCancel := context.WithTimeout(ctx, 5*time.Second)
+			info, err := p.nodeManager.GetBlockchainInfo(syncCtx)
+			syncCancel()
+			if err != nil {
+				c.logger.Warnw("Could not pre-populate sync status for coin (daemon may not be ready yet)",
+					"coin", p.coinSymbol, "error", err)
+				continue
+			}
+			c.vipManager.UpdateCoinSyncStatus(
+				strings.ToUpper(p.coinSymbol),
+				info.VerificationProgress*100,
+				int64(info.Blocks),
+			)
+			c.logger.Infow("Pre-populated coin sync status for VIP election",
+				"coin", p.coinSymbol,
+				"syncPct", info.VerificationProgress*100,
+				"height", info.Blocks,
+			)
+		}
+		c.poolsMu.RUnlock()
+
 		// Wire role change handler
 		c.vipManager.SetRoleChangeHandler(func(oldRole, newRole ha.Role) {
 			c.handleRoleChange(oldRole, newRole)
