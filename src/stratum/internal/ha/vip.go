@@ -4720,40 +4720,52 @@ func (vm *VIPManager) isLocalNodeFullySynced() bool {
 }
 
 // isLocalNodeFullySyncedLocked is the lock-free version (caller must hold vm.mu).
+// Smart Port fix: only the PRIMARY coin (first in SupportedCoins) must be synced
+// for master election. Secondary coins (added via Smart Port) may still be syncing
+// their blockchain — blocking election on them would keep the node as BACKUP
+// indefinitely, preventing block submission for all coins including the primary.
 func (vm *VIPManager) isLocalNodeFullySyncedLocked() bool {
 	// If no coins are configured, consider it not synced (can't mine without coins)
 	if vm.localNode == nil || len(vm.localNode.SupportedCoins) == 0 {
 		return false
 	}
 
-	// Check that ALL supported coins are synced
-	for _, coin := range vm.localNode.SupportedCoins {
-		if vm.localNode.CoinSyncStatus == nil {
-			return false
-		}
+	if vm.localNode.CoinSyncStatus == nil {
+		return false
+	}
+
+	// Primary coin (first in list) MUST be synced for election
+	primaryCoin := vm.localNode.SupportedCoins[0]
+	primaryStatus := vm.localNode.CoinSyncStatus[primaryCoin]
+	if primaryStatus == nil || !primaryStatus.IsSynced {
+		return false
+	}
+
+	// Log warnings for unsynced secondary coins but don't block election
+	for _, coin := range vm.localNode.SupportedCoins[1:] {
 		status := vm.localNode.CoinSyncStatus[coin]
 		if status == nil || !status.IsSynced {
-			return false
+			vm.logger.Debugw("Secondary coin not yet synced (non-blocking for election)",
+				"coin", coin,
+				"syncPct", func() float64 { if status != nil { return status.SyncPct }; return 0 }(),
+			)
 		}
 	}
 	return true
 }
 
-// isNodeFullySynced checks if a remote node is fully synced on all its supported coins.
+// isNodeFullySynced checks if a remote node's primary coin is fully synced.
+// Smart Port fix: only the primary coin (first in SupportedCoins) is required.
 func (vm *VIPManager) isNodeFullySynced(node *ClusterNode) bool {
 	if node == nil || len(node.SupportedCoins) == 0 {
 		return false
 	}
-	for _, coin := range node.SupportedCoins {
-		if node.CoinSyncStatus == nil {
-			return false
-		}
-		status := node.CoinSyncStatus[coin]
-		if status == nil || !status.IsSynced {
-			return false
-		}
+	if node.CoinSyncStatus == nil {
+		return false
 	}
-	return true
+	primaryCoin := node.SupportedCoins[0]
+	primaryStatus := node.CoinSyncStatus[primaryCoin]
+	return primaryStatus != nil && primaryStatus.IsSynced
 }
 
 // NodeSupportsCoin checks if a specific node supports a given coin and has it synced.
