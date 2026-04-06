@@ -612,7 +612,7 @@ extract_v2_nodes() {
     # Parse with awk to get symbol and daemon port for each enabled coin
     local coins_raw
     coins_raw=$(awk '
-    BEGIN { in_coins=0; in_coin=0; in_daemon=0; in_stratum=0; symbol=""; enabled=0; port="" }
+    BEGIN { in_coins=0; in_coin=0; in_daemon=0; in_stratum=0; in_nodes=0; in_node_entry=0; symbol=""; enabled=0; port="" }
 
     /^coins:/ { in_coins=1; next }
     /^[a-z]+:/ && !/^coins:/ && !/^-/ { in_coins=0; in_coin=0 }
@@ -621,14 +621,21 @@ extract_v2_nodes() {
     /^-[[:space:]]+symbol:/ {
         if (enabled && port != "") print symbol, port
         symbol=$NF; gsub(/["'\'']/, "", symbol)
-        enabled=0; port=""; in_daemon=0; in_stratum=0; in_coin=1
+        enabled=0; port=""; in_daemon=0; in_stratum=0; in_nodes=0; in_node_entry=0; in_coin=1
         next
     }
 
     in_coin && /^[[:space:]]+enabled:[[:space:]]*true/ { enabled=1 }
-    in_coin && /^[[:space:]]+daemon:/ { in_daemon=1; in_stratum=0 }
-    in_coin && /^[[:space:]]+stratum:/ { in_stratum=1; in_daemon=0 }
+    in_coin && /^[[:space:]]+daemon:/ { in_daemon=1; in_stratum=0; in_nodes=0 }
+    in_coin && /^[[:space:]]+nodes:/ { in_nodes=1; in_daemon=0; in_stratum=0 }
+    in_coin && /^[[:space:]]+stratum:/ { in_stratum=1; in_daemon=0; in_nodes=0 }
+    # V1-compat: daemon: section has port directly
     in_daemon && /^[[:space:]]+port:/ { port=$NF; gsub(/["'\'']/, "", port) }
+    # V2: nodes: array — extract port from first node entry (primary)
+    in_nodes && /^[[:space:]]+-[[:space:]]/ { in_node_entry=1 }
+    in_nodes && in_node_entry && /^[[:space:]]+port:/ { if (port == "") { port=$NF; gsub(/["'\'']/, "", port) } }
+    # Reset node entry tracking on next section
+    in_nodes && /^[[:space:]]+[a-z_]+:/ && !/^[[:space:]]+port:/ && !/^[[:space:]]+host:/ && !/^[[:space:]]+id:/ && !/^[[:space:]]+user:/ && !/^[[:space:]]+password:/ && !/^[[:space:]]+weight:/ && !/^[[:space:]]+zmq:/ && !/^[[:space:]]+-/ { in_nodes=0; in_node_entry=0 }
 
     END { if (enabled && port != "") print symbol, port }
     ' "$config")

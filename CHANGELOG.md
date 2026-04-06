@@ -51,6 +51,15 @@ Versioning follows `MAJOR.MINOR.PATCH`  -  patch releases are applied in-place o
 - **QBX runtime dependencies missing from pool-mode.sh** -- `pool-mode.sh --add QBX` (used by dashboard coin install and `spiralctl coin enable`) downloaded the binary but never installed `libevent`/`libleveldb` runtime libraries. QBX daemon failed to start with shared library errors. Added `apt-get install` for runtime deps
 - **HA sync skips coin install on peer** -- `sync_ha_cluster()` detected missing coins on HA peers but only printed a warning with manual instructions. On failover, the backup node couldn't serve coins it never installed. Now auto-installs missing coins on peers via `pool-mode.sh --add <coin> --yes` over SSH, with wallet address forwarded from the master's config. Added sudoers entry for the HA SSH user to run `pool-mode.sh --add`
 
+**Config — V1/V2 Hybrid**
+
+- **Stratum falls back to V1 mode on hybrid config** -- when `pool-mode.sh --add` appended a coin to a config that already had a `coins:` array alongside stale V1 top-level sections (`pool:`, `stratum:`, `daemon:`), it treated the config as V2 and only appended. The V1 sections were never stripped, creating a hybrid that `LoadV2()` silently failed to parse. Stratum fell back to V1, ignoring all coins except the first, with the failure logged at DEBUG level (invisible in production). Fixed `--add` to detect and strip stale V1 sections when a `coins:` array already exists, including per-coin `daemon:` → `nodes:` conversion and `pool_id` generation
+- **V2 config fallback error invisible in production logs** -- `main.go` logged the V2→V1 fallback reason at DEBUG level, making it impossible to diagnose why multi-coin configs were silently ignored. Changed to WARN level so operators see exactly why V2 loading failed
+- **New `pool-mode.sh --repair-config`** -- repairs existing hybrid V1/V2 config.yaml files in-place: strips stale V1 sections, converts per-coin `daemon:` → `nodes:[]`, adds missing `pool_id` fields, migrates API keys, sets `version: 2`. Creates `.pre-repair.bak` backup before modifying
+- **`wait-for-node.sh` now parses V2 `nodes:` arrays** -- the AWK parser in `extract_v2_nodes()` only matched `daemon:` sections inside coin entries, causing startup hangs or silent failures on pure V2 configs using `nodes:[]`. Now parses both `daemon:` (V1 compat) and `nodes:` (V2) formats
+- **`daemon:` backward-compat entries added on config write** -- `pool-mode.sh --add`, `--remove`, and `--repair-config` now inject a lightweight `daemon:` section (mirroring the first node's host/port) alongside `nodes:` in each coin entry. This ensures `wait-for-node.sh` AWK compatibility regardless of `yaml.dump()` output formatting
+- **HA-safe stratum restart on coin add/remove** -- `pool-mode.sh --add` and `--remove` now automatically restart stratum with HA watcher protection. The HA watcher is paused before restart and resumed after stratum is confirmed running, preventing cascading failures where the watcher detects a brief API outage, demotes the node to BACKUP, and kills dashboard + sentinel
+
 ### Changed
 
 - **Version bump** -- all version strings updated to 2.2.1

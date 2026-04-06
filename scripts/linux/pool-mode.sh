@@ -5731,6 +5731,58 @@ switch_to_multi() {
     warn_ha_cluster_sync "${coins[@]}"
 }
 
+# HA-safe stratum restart: pauses the HA watcher so it doesn't trigger a role
+# change (MASTER→BACKUP) while stratum is briefly down during restart.  Without
+# this, the watcher sees the API go offline, demotes the node, and kills
+# dashboard + sentinel — cascading into a full outage.
+ha_safe_stratum_restart() {
+    local ha_watcher_was_active=false
+
+    # Check if HA watcher is running
+    if systemctl is-active --quiet spiralpool-ha-watcher 2>/dev/null; then
+        ha_watcher_was_active=true
+        echo -e "${CYAN}Pausing HA watcher for safe stratum restart...${NC}"
+        systemctl stop spiralpool-ha-watcher 2>/dev/null || true
+    fi
+
+    # Restart stratum
+    echo -e "${CYAN}Restarting spiralstratum...${NC}"
+    systemctl restart spiralstratum
+
+    # Wait for stratum to come up (max 30s)
+    local attempts=0
+    local max_attempts=15
+    while [ $attempts -lt $max_attempts ]; do
+        sleep 2
+        if systemctl is-active --quiet spiralstratum 2>/dev/null; then
+            echo -e "${GREEN}✓ spiralstratum is running${NC}"
+            break
+        fi
+        attempts=$((attempts + 1))
+    done
+
+    if ! systemctl is-active --quiet spiralstratum 2>/dev/null; then
+        echo -e "${RED}✗ spiralstratum failed to start — check: sudo journalctl -u spiralstratum${NC}"
+        # Re-enable watcher even on failure so HA isn't permanently broken
+        if [ "$ha_watcher_was_active" = true ]; then
+            systemctl start spiralpool-ha-watcher 2>/dev/null || true
+        fi
+        return 1
+    fi
+
+    # Give the API a moment to initialize before re-enabling the watcher
+    sleep 5
+
+    # Re-enable HA watcher
+    if [ "$ha_watcher_was_active" = true ]; then
+        echo -e "${CYAN}Resuming HA watcher...${NC}"
+        systemctl start spiralpool-ha-watcher 2>/dev/null || true
+        echo -e "${GREEN}✓ HA watcher resumed${NC}"
+    fi
+
+    return 0
+}
+
 # Add a coin to current configuration
 add_coin() {
     local coin=$1
@@ -5838,6 +5890,58 @@ if 'coins' in config and isinstance(config['coins'], list):
             print(f"{coin_symbol} already in config — skipping")
             sys.exit(0)
     config['coins'].append(new_coin)
+
+    # ── Hybrid V1/V2 cleanup ──
+    # If a V1→V2 upgrade or manual edit left stale V1 top-level sections
+    # (pool, stratum, daemon, payments, api, metrics, logging) alongside
+    # the V2 coins: array, strip them now so LoadV2() doesn't choke.
+    _v1_stale = [k for k in ('pool', 'stratum', 'daemon') if k in config]
+    if _v1_stale:
+        # Before discarding V1 sections, ensure each coin entry has nodes:
+        # (V1 coins may have 'daemon:' instead of 'nodes:')
+        for ci, coin_entry in enumerate(config['coins']):
+            if not isinstance(coin_entry, dict):
+                continue
+            # Convert V1-style daemon: to V2-style nodes:
+            if 'daemon' in coin_entry and 'nodes' not in coin_entry:
+                d = coin_entry.pop('daemon')
+                if isinstance(d, dict):
+                    node = {
+                        'id': 'primary',
+                        'host': d.get('host', '127.0.0.1'),
+                        'port': d.get('port', 14022),
+                        'user': d.get('user', ''),
+                        'password': d.get('password', ''),
+                        'priority': 0,
+                        'weight': 1,
+                    }
+                    zmq = d.get('zmq', {})
+                    if zmq:
+                        node['zmq'] = zmq
+                    coin_entry['nodes'] = [node]
+            # Convert V1-style flat stratum port to V2-style nested stratum:
+            if 'stratumPort' in coin_entry and 'stratum' not in coin_entry:
+                coin_entry['stratum'] = {'port': coin_entry.pop('stratumPort')}
+            # Ensure pool_id exists (V1 coins don't have it)
+            if not coin_entry.get('pool_id'):
+                sym = coin_entry.get('symbol', 'unknown').lower()
+                coin_entry['pool_id'] = f"{sym}_mainnet"
+
+        # Save admin API key before stripping api: section
+        g = config.setdefault('global', {})
+        if 'admin_api_key' not in g:
+            v1_api = config.get('api', {})
+            if isinstance(v1_api, dict):
+                v1_key = v1_api.get('adminApiKey', '') or v1_api.get('admin_api_key', '')
+                if v1_key:
+                    g['admin_api_key'] = v1_key
+
+        for k in ('pool', 'stratum', 'daemon', 'payments', 'api',
+                   'metrics', 'logging'):
+            config.pop(k, None)
+        config['version'] = 2
+        print(f"Cleaned hybrid V1/V2 config: stripped {_v1_stale}")
+
     print(f"Appended {coin_symbol} to existing V2 config")
 elif 'pool' in config:
     # V1 format — convert to V2 by wrapping existing config in coins array
@@ -5993,6 +6097,17 @@ else:
     print("ERROR: Unrecognized config format", file=sys.stderr)
     sys.exit(1)
 
+# Ensure version is 2
+config['version'] = 2
+
+# Add daemon: compat for wait-for-node.sh AWK parser (it only reads daemon:, not nodes:).
+# Go YAML silently ignores unknown struct fields, so this is safe.
+for _ce in config.get('coins', []):
+    if isinstance(_ce, dict) and 'nodes' in _ce and 'daemon' not in _ce:
+        _fn = _ce['nodes'][0] if _ce['nodes'] else {}
+        if _fn:
+            _ce['daemon'] = {'host': _fn.get('host', '127.0.0.1'), 'port': _fn.get('port', 0)}
+
 # Atomic write
 dir_name = os.path.dirname(config_path)
 fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.yaml.tmp')
@@ -6110,9 +6225,9 @@ PYEOF
     echo ""
     echo -e "${GREEN}✓ Added $coin to configuration${NC}"
     echo ""
-    echo -e "${YELLOW}Restart Spiral Pool to apply changes:${NC}"
-    echo "  sudo systemctl restart spiralstratum"
-    echo ""
+
+    # Restart stratum with HA safety
+    ha_safe_stratum_restart
 
     # Check for HA cluster and warn about synchronization
     warn_ha_cluster_sync "${CURRENT_COINS[@]}"
@@ -6422,6 +6537,13 @@ if mp and isinstance(mp, dict) and mp.get('enabled'):
             except Exception as e:
                 print(f"Warning: failed to update coins.env: {e}")
 
+# Add daemon: compat for wait-for-node.sh AWK parser (it only reads daemon:, not nodes:).
+for _ce in config.get('coins', []):
+    if isinstance(_ce, dict) and 'nodes' in _ce and 'daemon' not in _ce:
+        _fn = _ce['nodes'][0] if _ce['nodes'] else {}
+        if _fn:
+            _ce['daemon'] = {'host': _fn.get('host', '127.0.0.1'), 'port': _fn.get('port', 0)}
+
 # Atomic write
 dir_name = os.path.dirname(config_path)
 fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.yaml.tmp')
@@ -6466,9 +6588,9 @@ PYEOF
     echo -e "  ${CYAN}Service: Stopped, disabled, and removed${NC}"
     echo -e "  ${CYAN}Firewall: Ports closed${NC}"
     echo ""
-    echo -e "${YELLOW}Restart Spiral Pool to apply changes:${NC}"
-    echo "  sudo systemctl restart spiralstratum"
-    echo ""
+
+    # Restart stratum with HA safety
+    ha_safe_stratum_restart
 
     # Check for HA cluster and warn about synchronization
     warn_ha_cluster_sync "${new_coins[@]}"
@@ -6902,6 +7024,181 @@ case "${1:-}" in
         verify_services
         verify_firewall
         ;;
+    --repair-config)
+        # Fix hybrid V1/V2 config.yaml left behind by upgrades or manual edits.
+        # Strips stale V1 top-level sections (pool, stratum, daemon, payments,
+        # api, metrics, logging) while preserving coins:, database:, global:,
+        # vip:, ha:, multi_port:.  Also converts per-coin daemon:{} → nodes:[].
+        print_banner
+        echo ""
+        echo -e "${CYAN}Repairing config.yaml → clean V2 format...${NC}"
+        if [ ! -f "$CONFIG_FILE" ]; then
+            echo -e "${RED}Error: $CONFIG_FILE not found${NC}"
+            exit 1
+        fi
+        cp "$CONFIG_FILE" "${CONFIG_FILE}.pre-repair.bak"
+        if python3 - "$CONFIG_FILE" "$POOL_USER" << 'PYEOF'
+import sys, yaml, os, tempfile, pwd
+
+config_path = sys.argv[1]
+pool_user = sys.argv[2] if len(sys.argv) > 2 else None
+
+with open(config_path, 'r') as f:
+    config = yaml.safe_load(f)
+
+if not config:
+    print("ERROR: Could not parse config", file=sys.stderr)
+    sys.exit(1)
+
+v1_keys = [k for k in ('pool', 'stratum', 'daemon') if k in config]
+coins = config.get('coins', [])
+
+if not v1_keys and coins:
+    print("Config is already clean V2 — nothing to repair.")
+    sys.exit(0)
+
+if not coins:
+    # Pure V1 config with no coins: array — cannot auto-repair without
+    # knowing which coin/wallet to use.  User must run --add instead.
+    print("ERROR: No coins: array found. Use --add to set up the first coin.", file=sys.stderr)
+    sys.exit(1)
+
+changed = False
+
+# Map V1 coin names → symbols
+_v1_coin_to_symbol = {
+    'digibyte': 'DGB', 'bitcoin': 'BTC', 'bitcoincash': 'BCH',
+    'bitcoinii': 'BC2', 'litecoin': 'LTC', 'dogecoin': 'DOGE',
+    'pepecoin': 'PEP', 'catcoin': 'CAT', 'namecoin': 'NMC',
+    'syscoin': 'SYS', 'myriadcoin': 'XMY', 'fractalbitcoin': 'FBTC',
+    'qbitx': 'QBX',
+}
+
+# Fix per-coin entries (daemon → nodes, missing pool_id, flat stratum port)
+for ci, coin_entry in enumerate(coins):
+    if not isinstance(coin_entry, dict):
+        continue
+    # Convert daemon: → nodes:
+    if 'daemon' in coin_entry and 'nodes' not in coin_entry:
+        d = coin_entry.pop('daemon')
+        if isinstance(d, dict):
+            node = {
+                'id': 'primary',
+                'host': d.get('host', '127.0.0.1'),
+                'port': d.get('port', 14022),
+                'user': d.get('user', ''),
+                'password': d.get('password', ''),
+                'priority': 0,
+                'weight': 1,
+            }
+            zmq = d.get('zmq', {})
+            if zmq:
+                node['zmq'] = zmq
+            coin_entry['nodes'] = [node]
+            changed = True
+    # If coin has no nodes: and no daemon:, try to inherit from top-level daemon:
+    if 'nodes' not in coin_entry and 'daemon' in config:
+        d = config['daemon']
+        if isinstance(d, dict) and d.get('host'):
+            node = {
+                'id': 'primary',
+                'host': d.get('host', '127.0.0.1'),
+                'port': d.get('port', 14022),
+                'user': d.get('user', ''),
+                'password': d.get('password', ''),
+                'priority': 0,
+                'weight': 1,
+            }
+            zmq = d.get('zmq', {})
+            if zmq:
+                node['zmq'] = zmq
+            coin_entry['nodes'] = [node]
+            changed = True
+    # Convert flat stratum port
+    if 'stratumPort' in coin_entry and 'stratum' not in coin_entry:
+        coin_entry['stratum'] = {'port': coin_entry.pop('stratumPort')}
+        changed = True
+    # Convert V1-style stratum: { listen: "0.0.0.0:3333" } → { port: 3333 }
+    s = coin_entry.get('stratum', {})
+    if isinstance(s, dict) and 'listen' in s and 'port' not in s:
+        listen = str(s.pop('listen', ''))
+        if ':' in listen:
+            try:
+                s['port'] = int(listen.rsplit(':', 1)[1])
+                changed = True
+            except (ValueError, IndexError):
+                pass
+    # Ensure pool_id exists
+    if not coin_entry.get('pool_id'):
+        sym = coin_entry.get('symbol', 'unknown').lower()
+        coin_entry['pool_id'] = f"{sym}_mainnet"
+        changed = True
+
+# Migrate admin API key before stripping
+g = config.setdefault('global', {})
+if 'admin_api_key' not in g:
+    v1_api = config.get('api', {})
+    if isinstance(v1_api, dict):
+        v1_key = v1_api.get('adminApiKey', '') or v1_api.get('admin_api_key', '')
+        if v1_key:
+            g['admin_api_key'] = v1_key
+
+# Strip V1 sections
+for k in ('pool', 'stratum', 'daemon', 'payments', 'api', 'metrics', 'logging'):
+    if k in config:
+        config.pop(k)
+        changed = True
+
+# Set version to 2
+if config.get('version') != 2:
+    config['version'] = 2
+    changed = True
+
+if not changed:
+    print("Config is already clean V2 — nothing to repair.")
+    sys.exit(0)
+
+# Add daemon: compat for wait-for-node.sh AWK parser (it only reads daemon:, not nodes:).
+for _ce in config.get('coins', []):
+    if isinstance(_ce, dict) and 'nodes' in _ce and 'daemon' not in _ce:
+        _fn = _ce['nodes'][0] if _ce['nodes'] else {}
+        if _fn:
+            _ce['daemon'] = {'host': _fn.get('host', '127.0.0.1'), 'port': _fn.get('port', 0)}
+
+# Atomic write
+dir_name = os.path.dirname(config_path)
+fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.yaml.tmp')
+try:
+    with os.fdopen(fd, 'w') as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+        f.flush()
+        os.fsync(f.fileno())
+    os.chmod(tmp_path, 0o600)
+    if pool_user:
+        try:
+            pw = pwd.getpwnam(pool_user)
+            os.chown(tmp_path, pw.pw_uid, pw.pw_gid)
+        except KeyError:
+            pass
+    os.replace(tmp_path, config_path)
+    print("Config repaired successfully")
+except Exception:
+    os.unlink(tmp_path)
+    raise
+PYEOF
+        then
+            echo -e "${GREEN}✓ Config repaired. Backup saved to ${CONFIG_FILE}.pre-repair.bak${NC}"
+            echo ""
+            echo -e "${CYAN}Review the config:${NC}"
+            echo "  cat $CONFIG_FILE"
+            echo ""
+            echo -e "${CYAN}Then restart stratum:${NC}"
+            echo "  sudo systemctl restart spiralstratum"
+        else
+            echo -e "${RED}✗ Repair failed. Original config unchanged.${NC}"
+            exit 1
+        fi
+        ;;
     --ha-status)
         print_banner
         echo ""
@@ -7034,6 +7331,7 @@ case "${1:-}" in
         echo "  --remove COIN       Remove a coin from current configuration"
         echo "  --status            Show current configuration"
         echo "  --verify            Verify services and firewall match config (self-heal)"
+        echo "  --repair-config     Fix hybrid V1/V2 config.yaml → clean V2 format"
         echo ""
         echo "Non-interactive flags (for --add / --remove):"
         echo "  --yes, -y           Skip all confirmation prompts"

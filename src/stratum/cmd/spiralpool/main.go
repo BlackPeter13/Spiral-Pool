@@ -77,7 +77,7 @@ func main() {
 			runV2(cfgV2, logger, log)
 			return
 		}
-		log.Debugw("V2 config loading failed, falling back to V1",
+		log.Warnw("V2 config loading failed, falling back to V1",
 			"error", v2Err,
 			"config", *configPath,
 		)
