@@ -200,6 +200,10 @@ $HA_SSH_USER ALL=(ALL) NOPASSWD: /bin/systemctl start namecoind, /bin/systemctl 
 $HA_SSH_USER ALL=(ALL) NOPASSWD: /bin/systemctl start syscoind, /bin/systemctl stop syscoind, /bin/systemctl restart syscoind, /bin/systemctl enable syscoind, /bin/systemctl disable syscoind
 $HA_SSH_USER ALL=(ALL) NOPASSWD: /bin/systemctl start myriadcoind, /bin/systemctl stop myriadcoind, /bin/systemctl restart myriadcoind, /bin/systemctl enable myriadcoind, /bin/systemctl disable myriadcoind
 
+# Coin install on peer (HA sync auto-installs missing coins)
+$HA_SSH_USER ALL=(ALL) NOPASSWD: /spiralpool/scripts/pool-mode.sh --add * --yes --wallet *
+$HA_SSH_USER ALL=(ALL) NOPASSWD: /spiralpool/scripts/pool-mode.sh --add * --yes
+
 # Config deployment (temp file from HA user home to config directory only)
 $HA_SSH_USER ALL=(ALL) NOPASSWD: /bin/mv $HA_SSH_HOME/.sp-sync-config.tmp /spiralpool/config/config.yaml
 $HA_SSH_USER ALL=(ALL) NOPASSWD: /bin/mv $HA_SSH_HOME/.sp-sync-ha.tmp /spiralpool/config/ha.yaml
@@ -2062,8 +2066,25 @@ sync_ha_cluster() {
                     echo -e "  ${GREEN}✓ $coin node started${NC}"
                     ;;
                 "not_installed")
-                    echo -e "  ${YELLOW}⚠ $coin node not installed on $server${NC}"
-                    echo -e "    ${YELLOW}SSH to $server and run: sudo pool-mode.sh --add $coin${NC}"
+                    echo -e "  ${CYAN}Installing $coin node on $server...${NC}"
+                    # Extract wallet address from local config for the peer install
+                    local peer_wallet=""
+                    local _coin_section_start
+                    _coin_section_start=$(grep -En "symbol:\s*[\"']?${coin}[\"']?" "$CONFIG_FILE" 2>/dev/null | head -1 | cut -d: -f1)
+                    if [[ -n "$_coin_section_start" ]]; then
+                        peer_wallet=$(sed -n "${_coin_section_start},$((${_coin_section_start}+25))p" "$CONFIG_FILE" | grep -Po "(?<=address:\s)[\"']?[^\"'\n]+" | head -1 | tr -d "\"'")
+                    fi
+                    local peer_add_cmd="sudo /spiralpool/scripts/pool-mode.sh --add $coin --yes"
+                    [[ -n "$peer_wallet" ]] && peer_add_cmd="$peer_add_cmd --wallet $peer_wallet"
+                    local install_result
+                    install_result=$(sudo -u "$HA_SSH_USER" ssh -o ConnectTimeout=10 "${HA_SSH_USER}@${server}" "$peer_add_cmd" 2>&1)
+                    local install_rc=$?
+                    if [[ $install_rc -eq 0 ]]; then
+                        echo -e "  ${GREEN}✓ $coin node installed on $server${NC}"
+                    else
+                        echo -e "  ${RED}✗ Failed to install $coin on $server (exit $install_rc)${NC}"
+                        echo -e "    ${YELLOW}SSH to $server and run: sudo pool-mode.sh --add $coin${NC}"
+                    fi
                     ;;
                 *)
                     echo -e "  ${YELLOW}? $coin status unknown${NC}"

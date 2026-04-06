@@ -49,6 +49,7 @@ Versioning follows `MAJOR.MINOR.PATCH`  -  patch releases are applied in-place o
 
 - **QBX runtime dependencies skipped on HA replication** -- `libevent` and `libleveldb` were installed inside the download block in `install.sh`, which is skipped when binaries are copied from the primary node via `copy_binaries_from_primary`. QBX daemon crash-looped with `libevent-2.1.so.7: cannot open shared object file` on HA backup nodes. Moved dependency install before the download check
 - **QBX runtime dependencies missing from pool-mode.sh** -- `pool-mode.sh --add QBX` (used by dashboard coin install and `spiralctl coin enable`) downloaded the binary but never installed `libevent`/`libleveldb` runtime libraries. QBX daemon failed to start with shared library errors. Added `apt-get install` for runtime deps
+- **HA sync skips coin install on peer** -- `sync_ha_cluster()` detected missing coins on HA peers but only printed a warning with manual instructions. On failover, the backup node couldn't serve coins it never installed. Now auto-installs missing coins on peers via `pool-mode.sh --add <coin> --yes` over SSH, with wallet address forwarded from the master's config. Added sudoers entry for the HA SSH user to run `pool-mode.sh --add`
 
 ### Changed
 
