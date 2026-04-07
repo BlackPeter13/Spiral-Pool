@@ -7,13 +7,25 @@ Versioning follows `MAJOR.MINOR.PATCH`  -  patch releases are applied in-place o
 
 ---
 
-## [2.2.5]  -  2026-04-07  -  Phi Hash Reactor
+## [2.3.0]  -  2026-04-07  -  Phi Hash Reactor
 
-> *Payment processor default fix, multiport coin-switch fix, upgrade.sh always applies.*
+> *Critical payment processor fix, Smart Port false positive suppression, production observability.*
 
 ### Fixed
 
-**Payments**
+**Payments — Critical**
+
+- **Payment processor HA gate blocked ALL confirmation tracking** — `processCycle()` gated the entire cycle (including `updateBlockConfirmations`, `verifyConfirmedBlocks`, `processMatureBlocks`) behind the HA master check. Any node running as backup — or any node that briefly lost master role during startup — never tracked block confirmations. Blocks stayed at 0% `confirmationprogress` indefinitely, stalling all payouts. Root cause of 8+ hours of stuck QBX blocks with zero progress. Fixed by restructuring `processCycle()`: steps 1-3 (confirmation tracking, deep reorg detection, mature block processing) ALWAYS run regardless of HA role. Only step 4 (payment execution) is gated behind master + advisory lock
+- **Payment processor completely invisible in production logs** — every log message in `processCycle()` and `updateBlockConfirmations()` was at Debug level. With production log level set to Info, the processor emitted zero log lines — no cycle start, no block count, no errors, nothing. Impossible to diagnose why blocks were stuck. Added Info-level logs: cycle start (with HA state), pending block count per coin, and "no pending blocks" message. Existing Warn/Error logs for failures were already at correct level
+
+**Sentinel — Smart Port False Positives**
+
+- **`miner_disconnect_spike` false positive during Smart Port coin switch** — when the scheduler rotated miners from DGB to QBX, DGB connections dropped to near-zero, triggering a disconnect spike alert. The sentinel had no awareness of Smart Port — it only looked at per-coin connections. Fixed by checking total connections across ALL pools when `multiServer` is active. If total connections are stable (>50% of previous), the alert is suppressed as a coin switch, not a real disconnect event
+- **`hashrate_drop` false positive during Smart Port coin switch** — same root cause as disconnect spike. DGB hashrate dropped when miners switched to QBX, triggering hashrate drop alert. Fixed with same Smart Port awareness: checks total hashrate across all pools before alerting. Only fires when aggregate fleet hashrate actually drops
+
+**Sentinel — Intel Report**
+
+- **`scantxoutset` timeout too aggressive for large UTXO sets** — `fetch_wallet_balance_for_coin()` used a 30-second timeout for `scantxoutset` RPC. Wallets accumulating many coinbase UTXOs over time could approach this limit. Increased to 120s as a safety margin. Note: the primary reason QBX wallet balance was missing from intel reports was the silent RPC auth failure (already fixed above in this release)
 
 - **Coins added via dashboard or pool-mode.sh have payments silently disabled** -- Go's `bool` zero-value is `false`. Any coin added without an explicit `payments: enabled: true` in config.yaml had its payment processor skipped — blocks were found and recorded but never confirmed or paid out. Three fixes applied: (1) Go `SetDefaults()` now unconditionally forces `Payments.Enabled = true` for every coin, (2) dashboard `save_pool_config()` now injects `payments: {enabled: true}` for coins missing the section, (3) `pool-mode.sh` coin templates changed from `enabled: false` to `enabled: true`
 
@@ -32,7 +44,7 @@ Versioning follows `MAJOR.MINOR.PATCH`  -  patch releases are applied in-place o
 - **Silent RPC auth failure for all authenticated coin daemons** -- `_rpc_call()` never sent HTTP Basic Auth credentials. Any daemon requiring auth (QBX, and all coins with `user:`/`password:` in config.yaml) silently returned `None` on every RPC call. QBX `getmininginfo`, `getnetworkhashps`, `getblockchaininfo`, `getblockcount`, and `validateaddress` all failed every cycle, falling through to pool API fallbacks or returning zeros. Fixed by auto-resolving credentials from stratum `config.yaml` inside `_rpc_call()` — all 20+ call sites get auth for free with zero code changes
 - **Fragile RPC credential parser** -- `_get_rpc_auth_for_port()` used substring matching (`str(port) in line`) which could match wrong port lines (e.g., port 333 matching 3333). Rewrote with exact port value parsing, indentation-aware block detection, and mtime-based caching. Verified against all 13 supported coins with zero false positives
 - **`check_coin_node_synced()` bypassed `_rpc_call` entirely** -- used raw `urllib.request` with no auth. QBX always reported "unsynced". Rewrote to use `_rpc_call` which auto-resolves auth
-- **Hashrate divergence false positive in Smart Port mode (root cause)** -- `get_pool_share_stats()` only queried the primary `pool_id`. When Smart Port rotated miners to QBX, the DGB pool showed 0 hashrate, triggering false divergence alerts. Previous fix (v2.2.5 initial) only patched the aggregate branch, but code was going through the per-worker branch. Root fix: `get_pool_share_stats()` now merges miners from ALL enabled coin pools at the source, fixing both code paths
+- **Hashrate divergence false positive in Smart Port mode (root cause)** -- `get_pool_share_stats()` only queried the primary `pool_id`. When Smart Port rotated miners to QBX, the DGB pool showed 0 hashrate, triggering false divergence alerts. Previous fix (v2.3.0 initial) only patched the aggregate branch, but code was going through the per-worker branch. Root fix: `get_pool_share_stats()` now merges miners from ALL enabled coin pools at the source, fixing both code paths
 - **QBX wallet balance missing from intel report** -- `fetch_wallet_balance_for_coin()` used pool API block summing which only showed pool-mined balance. Now uses `scantxoutset` RPC to scan the UTXO set directly, returning the full wallet balance without requiring a loaded daemon wallet
 - **Smart Port block alerts show wrong coin's stats (cross-contamination)** -- when a secondary coin (e.g., QBX) found a block during Smart Port rotation, the alert used the primary coin's (DGB) block reward, network hashrate, and difficulty. QBX block showed "268.19 QBX" (DGB's reward) and 44.75 PH/s (DGB's hashrate). Fixed by fetching per-coin prices, block reward, and network stats for each secondary coin block alert
 - **Alert digest shows no useful information** -- "Alert Digest: 2 Alerts" with no indication of what type of alert fired. 33 of 63 alert types (including `hashrate_divergence`, `block_found`, `block_orphaned`, `coin_node_down`) were missing from the digest type map, falling through to a generic "Multiple alerts triggered" default. Added all missing types with proper emoji, titles, descriptions, and severity colors. Unknown future types now auto-format their name instead of showing "Alerts"
@@ -54,7 +66,7 @@ Versioning follows `MAJOR.MINOR.PATCH`  -  patch releases are applied in-place o
 
 ### Changed
 
-- **Version bump** -- all version strings updated to 2.2.5
+- **Version bump** -- all version strings updated to 2.3.0
 
 ---
 

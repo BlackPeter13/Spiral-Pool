@@ -75,9 +75,9 @@ func (m *mockAdvisoryLocker) isLocked() bool {
 // HA Tests
 // =============================================================================
 
-// TestProcessor_HA_SkipCycleOnBackup verifies that when haEnabled=true and
-// isMaster=false, processCycle is a no-op: no DB calls, no RPC calls, and
-// cycleCount does not increment.
+// TestProcessor_HA_SkipPaymentOnBackup verifies that when haEnabled=true and
+// isMaster=false, processCycle still runs confirmation tracking (cycleCount
+// increments, RPC calls happen) but skips payment execution.
 func TestProcessor_HA_SkipCycleOnBackup(t *testing.T) {
 	t.Parallel()
 
@@ -92,29 +92,11 @@ func TestProcessor_HA_SkipCycleOnBackup(t *testing.T) {
 
 	proc.processCycle(context.Background())
 
-	// cycleCount must NOT increment — the cycle was skipped entirely.
-	if proc.cycleCount != initialCycle {
-		t.Errorf("expected cycleCount to stay at %d on backup node, got %d",
-			initialCycle, proc.cycleCount)
-	}
-
-	// No RPC calls should have been made.
-	rpc.mu.Lock()
-	bcInfoCalls := rpc.getBlockchainInfoCalls
-	bhCalls := rpc.getBlockHashCalls
-	rpc.mu.Unlock()
-
-	if bcInfoCalls != 0 {
-		t.Errorf("expected 0 GetBlockchainInfo calls on backup, got %d", bcInfoCalls)
-	}
-	if bhCalls != 0 {
-		t.Errorf("expected 0 GetBlockHash calls on backup, got %d", bhCalls)
-	}
-
-	// No DB calls should have been made.
-	statusUpdates := store.getStatusUpdates()
-	if len(statusUpdates) != 0 {
-		t.Errorf("expected 0 status updates on backup, got %d", len(statusUpdates))
+	// cycleCount MUST increment — confirmation tracking runs on backup nodes.
+	// Only payment execution is skipped.
+	if proc.cycleCount != initialCycle+1 {
+		t.Errorf("expected cycleCount %d on backup node (confirmation tracking runs), got %d",
+			initialCycle+1, proc.cycleCount)
 	}
 }
 
@@ -175,8 +157,8 @@ func TestProcessor_HA_NonHAMode_AlwaysRuns(t *testing.T) {
 }
 
 // TestProcessor_HA_RoleTransition_MasterToBackup verifies that flipping
-// isMaster from true to false causes the processor to stop running cycles.
-// The first cycle should run, then after role change the second should skip.
+// isMaster from true to false causes the processor to skip payment execution
+// but still run confirmation tracking.
 func TestProcessor_HA_RoleTransition_MasterToBackup(t *testing.T) {
 	t.Parallel()
 
@@ -187,7 +169,7 @@ func TestProcessor_HA_RoleTransition_MasterToBackup(t *testing.T) {
 	proc.SetHAEnabled(true)
 	proc.SetMasterRole(true)
 
-	// First cycle: master, should run.
+	// First cycle: master, should run fully.
 	proc.processCycle(context.Background())
 	if proc.cycleCount != 1 {
 		t.Fatalf("expected cycleCount 1 after first master cycle, got %d", proc.cycleCount)
@@ -196,16 +178,18 @@ func TestProcessor_HA_RoleTransition_MasterToBackup(t *testing.T) {
 	// Transition to backup.
 	proc.SetMasterRole(false)
 
-	// Second cycle: backup, should skip.
+	// Second cycle: backup — confirmation tracking still runs (cycleCount increments)
+	// but payment execution is skipped.
 	proc.processCycle(context.Background())
-	if proc.cycleCount != 1 {
-		t.Errorf("expected cycleCount to stay at 1 after transition to backup, got %d",
+	if proc.cycleCount != 2 {
+		t.Errorf("expected cycleCount 2 after backup cycle (confirmation tracking runs), got %d",
 			proc.cycleCount)
 	}
 }
 
 // TestProcessor_HA_RoleTransition_BackupToMaster verifies that flipping
-// isMaster from false to true causes the processor to resume running cycles.
+// isMaster from false to true causes the processor to also execute payments.
+// Confirmation tracking runs in both roles.
 func TestProcessor_HA_RoleTransition_BackupToMaster(t *testing.T) {
 	t.Parallel()
 
@@ -216,19 +200,19 @@ func TestProcessor_HA_RoleTransition_BackupToMaster(t *testing.T) {
 	proc.SetHAEnabled(true)
 	proc.SetMasterRole(false)
 
-	// First cycle: backup, should skip.
+	// First cycle: backup — confirmation tracking runs.
 	proc.processCycle(context.Background())
-	if proc.cycleCount != 0 {
-		t.Fatalf("expected cycleCount 0 on backup, got %d", proc.cycleCount)
+	if proc.cycleCount != 1 {
+		t.Fatalf("expected cycleCount 1 on backup (confirmation tracking runs), got %d", proc.cycleCount)
 	}
 
 	// Transition to master.
 	proc.SetMasterRole(true)
 
-	// Second cycle: master, should run.
+	// Second cycle: master, full cycle including payments.
 	proc.processCycle(context.Background())
-	if proc.cycleCount != 1 {
-		t.Errorf("expected cycleCount 1 after transition to master, got %d",
+	if proc.cycleCount != 2 {
+		t.Errorf("expected cycleCount 2 after transition to master, got %d",
 			proc.cycleCount)
 	}
 }
@@ -273,13 +257,13 @@ func TestProcessor_HA_AdvisoryLock_AcquiredOnCycle(t *testing.T) {
 }
 
 // TestProcessor_HA_AdvisoryLock_Rejected verifies that when the advisory lock
-// is held by another process (TryAdvisoryLock returns false, nil), the cycle
-// is skipped entirely: cycleCount does not increment, no DB operations occur.
+// is held by another process (TryAdvisoryLock returns false, nil), confirmation
+// tracking still runs but payment execution is skipped.
 func TestProcessor_HA_AdvisoryLock_Rejected(t *testing.T) {
 	t.Parallel()
 
 	store := newMockBlockStore()
-	// Add a pending block to verify it is NOT processed.
+	// Add a pending block — it WILL be processed for confirmations but NOT paid.
 	store.addPendingBlock(&database.Block{
 		Height: 1000,
 		Hash:   "aaaa111111111111bbbb222222222222",
@@ -297,21 +281,15 @@ func TestProcessor_HA_AdvisoryLock_Rejected(t *testing.T) {
 
 	proc.processCycle(context.Background())
 
-	// Cycle must NOT have run.
-	if proc.cycleCount != initialCycle {
-		t.Errorf("expected cycleCount to stay at %d when lock rejected, got %d",
-			initialCycle, proc.cycleCount)
+	// Cycle DOES run (confirmation tracking) — only payment is skipped.
+	if proc.cycleCount != initialCycle+1 {
+		t.Errorf("expected cycleCount %d (confirmation tracking runs even when lock rejected), got %d",
+			initialCycle+1, proc.cycleCount)
 	}
 
-	// ReleaseAdvisoryLock should NOT have been called.
+	// ReleaseAdvisoryLock should NOT have been called (lock was never acquired).
 	if rc := locker.getReleaseCalls(); rc != 0 {
 		t.Errorf("expected 0 ReleaseAdvisoryLock calls when lock rejected, got %d", rc)
-	}
-
-	// No DB updates should have happened.
-	statusUpdates := store.getStatusUpdates()
-	if len(statusUpdates) != 0 {
-		t.Errorf("expected 0 status updates when lock rejected, got %d", len(statusUpdates))
 	}
 }
 
@@ -478,17 +456,18 @@ func TestProcessor_HA_SplitBrain_BothMaster(t *testing.T) {
 	// B tries to run while A holds the lock.
 	procB.processCycle(context.Background())
 
-	// B should have been rejected by the advisory lock.
-	if procB.cycleCount != 0 {
-		t.Errorf("expected procB cycleCount 0 (lock rejected), got %d", procB.cycleCount)
+	// B's confirmation tracking still runs (cycleCount increments),
+	// but payment execution is skipped because the advisory lock is held.
+	if procB.cycleCount != 1 {
+		t.Errorf("expected procB cycleCount 1 (confirmation tracking runs), got %d", procB.cycleCount)
 	}
 
-	// Verify B attempted the lock but was rejected.
+	// Both A and B attempted the lock.
 	if lc := locker.getLockCalls(); lc != 2 {
 		t.Errorf("expected 2 total TryAdvisoryLock calls (A + B), got %d", lc)
 	}
 
-	// Only A should have released (1 release from A's successful cycle).
+	// Only A should have released (1 release from A's successful payment).
 	if rc := locker.getReleaseCalls(); rc != 1 {
 		t.Errorf("expected 1 ReleaseAdvisoryLock call (from A only), got %d", rc)
 	}

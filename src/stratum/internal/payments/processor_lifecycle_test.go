@@ -605,8 +605,8 @@ func TestGetEffectiveInterval_Fallback(t *testing.T) {
 // Part 6: HA payment fencing in processCycle
 // =============================================================================
 
-// TestProcessCycle_HA_BackupSkipsCycle verifies that when HA is enabled and
-// this node is NOT master, processCycle returns immediately without processing.
+// TestProcessCycle_HA_BackupRunsConfirmations verifies that when HA is enabled and
+// this node is NOT master, processCycle runs confirmation tracking but skips payments.
 func TestProcessCycle_HA_BackupSkipsCycle(t *testing.T) {
 	t.Parallel()
 
@@ -631,14 +631,9 @@ func TestProcessCycle_HA_BackupSkipsCycle(t *testing.T) {
 
 	p.processCycle(context.Background())
 
-	// No RPC calls should have been made since the cycle was skipped
-	if rpc.callCount.Load() > 0 {
-		t.Error("Backup node should skip processCycle entirely, but RPC calls were made")
-	}
-
-	// cycleCount should NOT have been incremented
-	if p.cycleCount > 0 {
-		t.Errorf("cycleCount should be 0 for skipped backup cycle, got %d", p.cycleCount)
+	// Confirmation tracking runs on backup nodes — cycleCount increments.
+	if p.cycleCount != 1 {
+		t.Errorf("cycleCount should be 1 for backup cycle (confirmation tracking runs), got %d", p.cycleCount)
 	}
 }
 

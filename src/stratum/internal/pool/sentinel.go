@@ -630,6 +630,11 @@ func (s *Sentinel) checkWALRecoveryStuck(pool *CoinPool, coin string) {
 }
 
 // checkMinerDisconnectSpike detects sudden drops in connected miners.
+//
+// Smart Port awareness: when Multi coin smart port is active, miners switch between
+// coins dynamically. A drop on one coin is normal if the total pool connections
+// remain stable (miners moved, not disconnected). Only alert when total connections
+// across all pools also dropped significantly.
 func (s *Sentinel) checkMinerDisconnectSpike(pool *CoinPool, coin string) {
 	current := pool.GetConnections()
 
@@ -649,6 +654,30 @@ func (s *Sentinel) checkMinerDisconnectSpike(pool *CoinPool, coin string) {
 	}
 
 	if dropPercent >= float64(s.cfg.DisconnectDropPercent) {
+		// Smart Port check: if multi-port is active, verify this is a real disconnect
+		// and not just a coin switch. Sum connections across all pools — if the total
+		// is stable, miners just moved to a different coin.
+		if ms := s.coordinator.multiServer; ms != nil {
+			var totalConnections int64
+			s.coordinator.poolsMu.RLock()
+			for _, p := range s.coordinator.pools {
+				totalConnections += p.GetConnections()
+			}
+			s.coordinator.poolsMu.RUnlock()
+
+			// If total pool connections are still healthy (>50% of this coin's
+			// previous count), this is a Smart Port switch, not a real disconnect.
+			if totalConnections > 0 && totalConnections >= prev/2 {
+				s.logger.Debugw("Disconnect spike suppressed — Smart Port coin switch detected",
+					"coin", coin,
+					"coinPrev", prev,
+					"coinCurrent", current,
+					"totalConnections", totalConnections,
+				)
+				return
+			}
+		}
+
 		s.fireAlert(context.Background(), "miner_disconnect_spike", severityWarning, coin, pool.PoolID(),
 			fmt.Sprintf("Miner connections dropped %.0f%% in one interval (%d -> %d) on %s",
 				dropPercent, prev, current, coin),
@@ -663,6 +692,10 @@ func (s *Sentinel) checkMinerDisconnectSpike(pool *CoinPool, coin string) {
 }
 
 // checkHashrateDrop detects sudden hashrate drops.
+//
+// Smart Port awareness: when Multi coin smart port is active, hashrate migrates
+// between coins during switches. A drop on one coin is normal if the hashrate
+// moved to another coin. Only alert when total fleet hashrate actually dropped.
 func (s *Sentinel) checkHashrateDrop(pool *CoinPool, coin string) {
 	current := pool.GetHashrate()
 
@@ -682,6 +715,29 @@ func (s *Sentinel) checkHashrateDrop(pool *CoinPool, coin string) {
 	}
 
 	if dropPercent >= float64(s.cfg.HashrateDropPercent) {
+		// Smart Port check: if multi-port is active, verify this is a real hashrate
+		// drop and not just miners switching to a different coin.
+		if ms := s.coordinator.multiServer; ms != nil {
+			var totalHashrate float64
+			s.coordinator.poolsMu.RLock()
+			for _, p := range s.coordinator.pools {
+				totalHashrate += p.GetHashrate()
+			}
+			s.coordinator.poolsMu.RUnlock()
+
+			// If total hashrate across all coins is still healthy (>50% of this
+			// coin's previous rate), miners just moved — not a real drop.
+			if totalHashrate > 0 && totalHashrate >= prev/2 {
+				s.logger.Debugw("Hashrate drop suppressed — Smart Port coin switch detected",
+					"coin", coin,
+					"coinPrev", prev,
+					"coinCurrent", current,
+					"totalHashrate", totalHashrate,
+				)
+				return
+			}
+		}
+
 		s.fireAlert(context.Background(), "hashrate_drop", severityWarning, coin, pool.PoolID(),
 			fmt.Sprintf("Pool hashrate dropped %.0f%% in one interval (%.2f -> %.2f H/s) on %s",
 				dropPercent, prev, current, coin),

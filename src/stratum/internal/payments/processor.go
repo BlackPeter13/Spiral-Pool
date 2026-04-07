@@ -349,62 +349,22 @@ func (p *Processor) processLoop(ctx context.Context) {
 }
 
 // processCycle runs a single payment processing cycle.
+//
+// ARCHITECTURE: Confirmation tracking (steps 1-3) ALWAYS runs regardless of HA role.
+// These are read/update operations that query the daemon and update block progress
+// in the DB. Without this, blocks on backup nodes stay "pending" forever with 0%
+// confirmation progress, causing stall alerts and preventing payment once promoted.
+//
+// Only payment execution (step 4) is gated by HA master status, as that's the
+// only step that actually sends coins.
 func (p *Processor) processCycle(ctx context.Context) {
-	// HA payment fencing: skip processing on backup nodes
-	if p.haEnabled.Load() && !p.isMaster.Load() {
-		p.logger.Debug("Payment cycle skipped: this node is not master")
-		return
-	}
+	isBackup := p.haEnabled.Load() && !p.isMaster.Load()
 
-	// HA defense-in-depth: acquire PostgreSQL advisory lock before processing.
-	// This prevents double-payment even in split-brain scenarios where both nodes
-	// believe they are master (VIP fencing failure). The advisory lock is a
-	// database-level single-writer guarantee that only one process can hold.
-	if p.advisoryLocker != nil {
-		lockCtx, lockCancel := context.WithTimeout(ctx, 5*time.Second)
-		// AUDIT FIX (PF-2): Use per-pool lock ID so multi-coin processors
-		// don't serialize. Each coin gets its own advisory lock.
-		lockID := database.PaymentAdvisoryLockIDForPool(p.poolCfg.ID)
-		acquired, err := p.advisoryLocker.TryAdvisoryLock(lockCtx, lockID)
-		lockCancel()
-		if err != nil {
-			p.logger.Warnw("Failed to acquire payment advisory lock (continuing with VIP-only fencing)",
-				"error", err,
-			)
-			// Don't skip the cycle — VIP fencing is the primary guard.
-			// Advisory lock is defense-in-depth; if the DB is down, VIP fencing
-			// is still enforced by the isMaster check above.
-		} else if !acquired {
-			p.logger.Warnw("Payment advisory lock held by another process — skipping cycle to prevent double-payment",
-				"lockID", lockID,
-			)
-			return
-		} else {
-			// Lock acquired — re-check master status to close TOCTOU window.
-			// A VIP failover could have occurred during the lock acquisition timeout,
-			// making this node a backup while it still holds the advisory lock.
-			if p.haEnabled.Load() && !p.isMaster.Load() {
-				p.logger.Warnw("Lost master role during advisory lock acquisition — releasing lock and aborting cycle",
-					"lockID", lockID,
-				)
-				releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 3*time.Second)
-				_ = p.advisoryLocker.ReleaseAdvisoryLock(releaseCtx, lockID)
-				releaseCancel()
-				return
-			}
-
-			// Lock acquired and still master — ensure we release it when the cycle completes
-			defer func() {
-				releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 3*time.Second)
-				if err := p.advisoryLocker.ReleaseAdvisoryLock(releaseCtx, lockID); err != nil {
-					p.logger.Warnw("Failed to release payment advisory lock", "error", err)
-				}
-				releaseCancel()
-			}()
-		}
-	}
-
-	p.logger.Debug("Starting payment processing cycle")
+	p.logger.Infow("Payment processing cycle starting",
+		"haEnabled", p.haEnabled.Load(),
+		"isMaster", p.isMaster.Load(),
+		"isBackup", isBackup,
+	)
 	p.mu.Lock()
 	p.cycleCount++
 	shouldVerifyDeepReorg := p.cycleCount%DeepReorgCheckInterval == 0
@@ -415,13 +375,16 @@ func (p *Processor) processCycle(ctx context.Context) {
 	cycleFailed := false
 
 	// 1. Update block confirmations (checks pending blocks)
+	// ALWAYS runs — tracking confirmation progress is safe on backup nodes.
+	// Without this, blocks stay at 0% progress and trigger stall alerts.
 	if err := p.updateBlockConfirmations(ctx); err != nil {
 		p.logger.Errorw("Failed to update block confirmations", "error", err)
 		cycleFailed = true
 	}
 
 	// 2. Deep reorg detection - periodically re-verify confirmed blocks
-	// This catches rare but catastrophic deep chain reorganizations
+	// This catches rare but catastrophic deep chain reorganizations.
+	// ALWAYS runs — orphan detection must work regardless of HA role.
 	if shouldVerifyDeepReorg {
 		if err := p.verifyConfirmedBlocks(ctx); err != nil {
 			p.logger.Errorw("Failed to verify confirmed blocks", "error", err)
@@ -429,16 +392,66 @@ func (p *Processor) processCycle(ctx context.Context) {
 		}
 	}
 
-	// 3. Process mature blocks
+	// 3. Process mature blocks (pending → confirmed transitions)
+	// ALWAYS runs — state transitions are idempotent DB updates.
 	if err := p.processMatureBlocks(ctx); err != nil {
 		p.logger.Errorw("Failed to process mature blocks", "error", err)
 		cycleFailed = true // AUDIT FIX (SF-7): Track all step failures
 	}
 
 	// 4. Execute pending payments (SOLO scheme pays immediately)
-	if err := p.executePendingPayments(ctx); err != nil {
-		p.logger.Errorw("Failed to execute payments", "error", err)
-		cycleFailed = true // AUDIT FIX (SF-7): Track all step failures
+	// THIS is the only step gated by HA — it sends actual coins.
+	if isBackup {
+		p.logger.Debug("Payment execution skipped: this node is not master")
+	} else {
+		// HA defense-in-depth: acquire PostgreSQL advisory lock before paying.
+		// This prevents double-payment even in split-brain scenarios where both nodes
+		// believe they are master (VIP fencing failure). The advisory lock is a
+		// database-level single-writer guarantee that only one process can hold.
+		paymentAllowed := true
+		if p.advisoryLocker != nil {
+			lockCtx, lockCancel := context.WithTimeout(ctx, 5*time.Second)
+			lockID := database.PaymentAdvisoryLockIDForPool(p.poolCfg.ID)
+			acquired, err := p.advisoryLocker.TryAdvisoryLock(lockCtx, lockID)
+			lockCancel()
+			if err != nil {
+				p.logger.Warnw("Failed to acquire payment advisory lock (continuing with VIP-only fencing)",
+					"error", err,
+				)
+			} else if !acquired {
+				p.logger.Warnw("Payment advisory lock held by another process — skipping payment to prevent double-payment",
+					"lockID", lockID,
+				)
+				paymentAllowed = false
+			} else {
+				// Lock acquired — re-check master status to close TOCTOU window.
+				if p.haEnabled.Load() && !p.isMaster.Load() {
+					p.logger.Warnw("Lost master role during advisory lock acquisition — releasing lock and skipping payment",
+						"lockID", lockID,
+					)
+					releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 3*time.Second)
+					_ = p.advisoryLocker.ReleaseAdvisoryLock(releaseCtx, lockID)
+					releaseCancel()
+					paymentAllowed = false
+				} else {
+					// Lock acquired and still master — release after payment
+					defer func() {
+						releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 3*time.Second)
+						if err := p.advisoryLocker.ReleaseAdvisoryLock(releaseCtx, lockID); err != nil {
+							p.logger.Warnw("Failed to release payment advisory lock", "error", err)
+						}
+						releaseCancel()
+					}()
+				}
+			}
+		}
+
+		if paymentAllowed {
+			if err := p.executePendingPayments(ctx); err != nil {
+				p.logger.Errorw("Failed to execute payments", "error", err)
+				cycleFailed = true // AUDIT FIX (SF-7): Track all step failures
+			}
+		}
 	}
 
 	// V15 FIX: Track consecutive failures and warn operator.
@@ -596,8 +609,17 @@ func (p *Processor) updateBlockConfirmations(ctx context.Context) error {
 	}
 
 	if len(blocks) == 0 {
+		p.logger.Infow("No pending blocks found for confirmation tracking",
+			"coin", p.poolCfg.Coin,
+			"poolId", p.poolCfg.ID,
+		)
 		return nil
 	}
+
+	p.logger.Infow("Checking pending block confirmations",
+		"coin", p.poolCfg.Coin,
+		"pendingBlocks", len(blocks),
+	)
 
 	// CRITICAL FIX #1: Capture chain snapshot at START of cycle
 	// All decisions within this cycle must be based on this snapshot

@@ -346,8 +346,8 @@ func TestProcessCycle_CycleCountMonotonicallyIncreases(t *testing.T) {
 	}
 }
 
-// TestProcessCycle_HABackupNodeSkipsCycle verifies that when haEnabled=true
-// and isMaster=false, processCycle is a no-op.
+// TestProcessCycle_HABackupNodeRunsConfirmations verifies that when haEnabled=true
+// and isMaster=false, processCycle runs confirmation tracking but skips payments.
 func TestProcessCycle_HABackupNodeSkipsCycle(t *testing.T) {
 	t.Parallel()
 
@@ -366,16 +366,16 @@ func TestProcessCycle_HABackupNodeSkipsCycle(t *testing.T) {
 
 	proc.processCycle(context.Background())
 
-	// cycleCount should NOT have incremented (cycle was skipped).
-	if proc.cycleCount != 0 {
-		t.Errorf("HA backup node should skip cycle, but cycleCount=%d", proc.cycleCount)
+	// cycleCount MUST increment — confirmation tracking runs on backup nodes.
+	if proc.cycleCount != 1 {
+		t.Errorf("HA backup node should run confirmation tracking, but cycleCount=%d", proc.cycleCount)
 	}
 
-	// No DB calls should have been made.
+	// RPC calls SHOULD have been made for confirmation tracking.
 	rpc.mu.Lock()
 	calls := rpc.getBlockchainInfoCalls
 	rpc.mu.Unlock()
-	if calls != 0 {
-		t.Errorf("HA backup node should make no RPC calls, got %d", calls)
+	if calls == 0 {
+		t.Error("HA backup node should make RPC calls for confirmation tracking")
 	}
 }
