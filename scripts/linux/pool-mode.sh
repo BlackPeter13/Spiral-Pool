@@ -2772,7 +2772,7 @@ generate_coin_config() {
           endpoint: "tcp://127.0.0.1:28532"
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
 EOF
@@ -2822,7 +2822,7 @@ EOF
           endpoint: "tcp://127.0.0.1:28332"
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
 EOF
@@ -2872,7 +2872,7 @@ EOF
           endpoint: "tcp://127.0.0.1:28432"
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
 EOF
@@ -2924,7 +2924,7 @@ EOF
           endpoint: "tcp://127.0.0.1:28338"
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
 EOF
@@ -2974,7 +2974,7 @@ EOF
           endpoint: "tcp://127.0.0.1:28933"
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
 EOF
@@ -3024,7 +3024,7 @@ EOF
           endpoint: "tcp://127.0.0.1:28555"
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
 EOF
@@ -3075,7 +3075,7 @@ EOF
           endpoint: "tcp://127.0.0.1:28532"
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
 EOF
@@ -3125,7 +3125,7 @@ EOF
           endpoint: "tcp://127.0.0.1:28873"
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
 EOF
@@ -3175,7 +3175,7 @@ EOF
           endpoint: "tcp://127.0.0.1:28932"
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
 EOF
@@ -3225,7 +3225,7 @@ EOF
           endpoint: "tcp://127.0.0.1:28336"
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
 EOF
@@ -3275,7 +3275,7 @@ EOF
           endpoint: "tcp://127.0.0.1:28370"
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
 EOF
@@ -3325,7 +3325,7 @@ EOF
           endpoint: "tcp://127.0.0.1:28889"
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
 EOF
@@ -3377,7 +3377,7 @@ EOF
           endpoint: "tcp://127.0.0.1:28340"
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
 EOF
@@ -3427,7 +3427,7 @@ EOF
           endpoint: "tcp://127.0.0.1:28344"
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
 EOF

@@ -9,9 +9,13 @@ Versioning follows `MAJOR.MINOR.PATCH`  -  patch releases are applied in-place o
 
 ## [2.2.5]  -  2026-04-07  -  Phi Hash Reactor
 
-> *Multiport coin-switch share rejection fix + upgrade.sh always applies.*
+> *Payment processor default fix, multiport coin-switch fix, upgrade.sh always applies.*
 
 ### Fixed
+
+**Payments**
+
+- **Coins added via dashboard or pool-mode.sh have payments silently disabled** -- Go's `bool` zero-value is `false`. Any coin added without an explicit `payments: enabled: true` in config.yaml had its payment processor skipped — blocks were found and recorded but never confirmed or paid out. Three fixes applied: (1) Go `SetDefaults()` now unconditionally forces `Payments.Enabled = true` for every coin, (2) dashboard `save_pool_config()` now injects `payments: {enabled: true}` for coins missing the section, (3) `pool-mode.sh` coin templates changed from `enabled: false` to `enabled: true`
 
 **Smart Multi-Port — Coin Switching**
 

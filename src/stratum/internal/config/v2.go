@@ -1030,7 +1030,11 @@ func (c *ConfigV2) SetDefaults() {
 			}
 		}
 
-		// Payment defaults
+		// Payment defaults — payments are ALWAYS enabled.  Go's bool zero-value
+		// is false, so any coin added without an explicit "payments: enabled: true"
+		// in config.yaml silently disables payouts.  A solo mining pool with
+		// payments disabled is never intentional — force it on unconditionally.
+		coin.Payments.Enabled = true
 		if coin.Payments.Interval == 0 {
 			coin.Payments.Interval = 600 * time.Second
 		}

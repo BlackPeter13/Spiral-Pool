@@ -140,7 +140,7 @@ coins:
         weight: 1
 
     payments:
-      enabled: false  # SOLO mining - rewards go directly to coinbase address
+      enabled: true  # SOLO mining - rewards go directly to coinbase address
       interval: 600s
       minimum_payment: 10.0
       scheme: SOLO
@@ -199,7 +199,7 @@ coins:
         weight: 1
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
   # Bitcoin Cash Pool (SHA256d)
@@ -256,7 +256,7 @@ coins:
         weight: 1
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
   # Bitcoin II Pool (SHA256d)
@@ -326,7 +326,7 @@ coins:
         weight: 1
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
   # Namecoin Pool (SHA256d) - Merge-mineable with Bitcoin
@@ -385,7 +385,7 @@ coins:
         weight: 1
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
   # Syscoin Pool (SHA256d) - Merge-mining ONLY with Bitcoin
@@ -434,7 +434,7 @@ coins:
           endpoint: "tcp://127.0.0.1:28370"
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
   # Myriad Pool (SHA256d) - Merge-mineable with Bitcoin
@@ -482,7 +482,7 @@ coins:
           endpoint: "tcp://127.0.0.1:28889"
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
   # Fractal Bitcoin Pool (SHA256d) - Merge-mineable with Bitcoin
@@ -530,7 +530,7 @@ coins:
           endpoint: "tcp://127.0.0.1:28340"
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
   # Q-BitX Pool (SHA256d) - Standalone (NO merge mining)
@@ -578,7 +578,7 @@ coins:
           endpoint: "tcp://127.0.0.1:28344"
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
   # ═══════════════════════════════════════════════════════════════════════════
@@ -632,7 +632,7 @@ coins:
           endpoint: "tcp://127.0.0.1:28933"
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
   # Dogecoin Pool (Scrypt)
@@ -680,7 +680,7 @@ coins:
           endpoint: "tcp://127.0.0.1:28555"
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
   # DigiByte-Scrypt Pool (uses same DGB node, different stratum port)
@@ -729,7 +729,7 @@ coins:
           endpoint: "tcp://127.0.0.1:28532"
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
   # PepeCoin Pool (Scrypt) - Merge-mineable with Litecoin
@@ -778,7 +778,7 @@ coins:
           endpoint: "tcp://127.0.0.1:28873"
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
   # Catcoin Pool (Scrypt) - Standalone (NO AuxPoW/merge-mining)
@@ -827,7 +827,7 @@ coins:
           endpoint: "tcp://127.0.0.1:28932"
 
     payments:
-      enabled: false
+      enabled: true
       scheme: SOLO
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -440,6 +440,34 @@ func TestV2SetDefaults_GlobalDefaults(t *testing.T) {
 	}
 }
 
+func TestV2SetDefaults_PaymentsAlwaysEnabled(t *testing.T) {
+	t.Parallel()
+
+	// Simulate a coin added via the dashboard WITHOUT a payments section.
+	// Go zero-value for bool is false — SetDefaults must force it to true.
+	cfg := minimalValidV2Config()
+
+	// Explicitly zero out payments to simulate missing YAML section
+	for i := range cfg.Coins {
+		cfg.Coins[i].Payments = CoinPaymentConfig{}
+	}
+
+	cfg.SetDefaults()
+
+	for _, coin := range cfg.Coins {
+		if !coin.Payments.Enabled {
+			t.Errorf("coin %s: payments.enabled is false after SetDefaults — "+
+				"coins added without a payments section must have payments enabled by default", coin.Symbol)
+		}
+		if coin.Payments.Interval == 0 {
+			t.Errorf("coin %s: payments.interval is 0 after SetDefaults", coin.Symbol)
+		}
+		if coin.Payments.Scheme != "SOLO" {
+			t.Errorf("coin %s: payments.scheme is %q, expected SOLO", coin.Symbol, coin.Payments.Scheme)
+		}
+	}
+}
+
 // =============================================================================
 // Helper: minimal valid V2 config for testing
 // =============================================================================
