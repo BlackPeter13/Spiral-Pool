@@ -34,6 +34,8 @@ Versioning follows `MAJOR.MINOR.PATCH`  -  patch releases are applied in-place o
 - **`check_coin_node_synced()` bypassed `_rpc_call` entirely** -- used raw `urllib.request` with no auth. QBX always reported "unsynced". Rewrote to use `_rpc_call` which auto-resolves auth
 - **Hashrate divergence false positive in Smart Port mode (root cause)** -- `get_pool_share_stats()` only queried the primary `pool_id`. When Smart Port rotated miners to QBX, the DGB pool showed 0 hashrate, triggering false divergence alerts. Previous fix (v2.2.5 initial) only patched the aggregate branch, but code was going through the per-worker branch. Root fix: `get_pool_share_stats()` now merges miners from ALL enabled coin pools at the source, fixing both code paths
 - **QBX wallet balance missing from intel report** -- `fetch_wallet_balance_for_coin()` used pool API block summing which only showed pool-mined balance. Now uses `scantxoutset` RPC to scan the UTXO set directly, returning the full wallet balance without requiring a loaded daemon wallet
+- **Smart Port block alerts show wrong coin's stats (cross-contamination)** -- when a secondary coin (e.g., QBX) found a block during Smart Port rotation, the alert used the primary coin's (DGB) block reward, network hashrate, and difficulty. QBX block showed "268.19 QBX" (DGB's reward) and 44.75 PH/s (DGB's hashrate). Fixed by fetching per-coin prices, block reward, and network stats for each secondary coin block alert
+- **Alert digest shows no useful information** -- "Alert Digest: 2 Alerts" with no indication of what type of alert fired. 33 of 63 alert types (including `hashrate_divergence`, `block_found`, `block_orphaned`, `coin_node_down`) were missing from the digest type map, falling through to a generic "Multiple alerts triggered" default. Added all missing types with proper emoji, titles, descriptions, and severity colors. Unknown future types now auto-format their name instead of showing "Alerts"
 - **Difficulty alert threshold too sensitive** -- DGB adjusts difficulty every block. Threshold raised from 25% to 50% to reduce noise
 
 **Payment Processor**
@@ -42,7 +44,7 @@ Versioning follows `MAJOR.MINOR.PATCH`  -  patch releases are applied in-place o
 
 **Daemon Resource Limits**
 
-- **`dbcache=8192` causes swap thrashing and RPC timeouts on multi-coin setups** -- two daemons each with 8GB dbcache exceeded the 12GB memory limit, pushing into swap. RPC calls returned EOF, stalling block confirmations for 4+ hours. Reduced defaults: BTC=4096, DGB/BCH/LTC/NMC=2048, small coins=512-1024. `maxconnections` reduced from 256 to 64 across all coins
+- **`dbcache=8192` causes swap thrashing and RPC timeouts on multi-coin setups** -- two daemons each with 8GB dbcache exceeded the 12GB memory limit, pushing into swap. RPC calls returned EOF, stalling block confirmations for 4+ hours. Reduced defaults: BTC/DGB/BCH/LTC/DOGE=4096, all other coins=2048 (minimum floor). `maxconnections` reduced from 256 to 64 across all coins
 - **Auto-sizing only ran on WSL2** -- RAM-based dbcache auto-sizing (25% of total RAM, capped) was gated behind a WSL2 detection check. Now runs on all platforms
 - **Existing configs not updated on upgrade** -- `upgrade.sh` now includes `rightsize_daemon_resources()` migration that detects and reduces oversized dbcache/maxconnections in existing daemon configs during every upgrade
 

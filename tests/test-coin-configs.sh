@@ -387,7 +387,7 @@ zmqpubhashblock=tcp://127.0.0.1:$zmq_port
 zmqpubrawtx=tcp://127.0.0.1:$zmq_port
 
 # === PERFORMANCE OPTIMIZATION ===
-dbcache=2048
+dbcache=4096
 maxmempool=300
 par=4
 maxsigcachesize=250
@@ -579,7 +579,7 @@ zmqpubhashblock=tcp://127.0.0.1:$zmq_port
 zmqpubrawtx=tcp://127.0.0.1:$zmq_port
 
 # === PERFORMANCE OPTIMIZATION ===
-dbcache=2048
+dbcache=4096
 maxmempool=300
 par=4
 
@@ -768,7 +768,7 @@ listen=1
 dnsseed=1
 
 # Performance
-dbcache=512
+dbcache=2048
 maxmempool=300
 
 # Wallet
@@ -835,7 +835,7 @@ listen=1
 dnsseed=1
 
 # Performance
-dbcache=1024
+dbcache=2048
 maxmempool=300
 
 # Wallet
@@ -902,7 +902,7 @@ listen=1
 dnsseed=1
 
 # Performance
-dbcache=512
+dbcache=2048
 maxmempool=300
 
 # Wallet
@@ -983,7 +983,7 @@ dnsseed=dnsseed-mainnet.fractalbitcoin.io
 dnsseed=dnsseed-mainnet.unisat.io
 
 # Performance
-dbcache=1024
+dbcache=2048
 maxmempool=300
 
 # Wallet
@@ -1057,7 +1057,7 @@ maxconnections=32
 listen=1
 
 # Performance
-dbcache=512
+dbcache=2048
 maxmempool=300
 
 # Wallet
@@ -1122,7 +1122,7 @@ onlynet=ipv4
 dnsseed=1
 
 # Performance
-dbcache=1024
+dbcache=4096
 maxmempool=300
 
 # Logging
@@ -1188,7 +1188,7 @@ listen=1
 dnsseed=1
 
 # Performance
-dbcache=512
+dbcache=4096
 maxmempool=300
 
 # Logging
@@ -1254,7 +1254,7 @@ listen=1
 dnsseed=1
 
 # Performance
-dbcache=256
+dbcache=2048
 maxmempool=200
 
 # Logging
@@ -1323,7 +1323,7 @@ listen=1
 dnsseed=1
 
 # Performance
-dbcache=256
+dbcache=2048
 maxmempool=200
 
 # Logging

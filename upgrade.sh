@@ -2271,7 +2271,7 @@ cleanup_daemon_configs() {
 #
 # This migration caps:
 #   - BTC: dbcache=4096  (largest UTXO set)
-#   - DGB/BCH/LTC/NMC/other: dbcache=2048
+#   - DGB/BCH/LTC/DOGE: dbcache=4096
 #   - All coins: maxconnections=64 (was 256)
 #
 # Idempotent — skips configs already at or below the cap.
@@ -2284,18 +2284,18 @@ rightsize_daemon_resources() {
     # coin_dir:conf_name:max_dbcache
     local COIN_LIMITS=(
         "btc:bitcoin.conf:4096"
-        "dgb:digibyte.conf:2048"
-        "bch:bitcoin.conf:2048"
-        "ltc:litecoin.conf:2048"
+        "dgb:digibyte.conf:4096"
+        "bch:bitcoin.conf:4096"
+        "ltc:litecoin.conf:4096"
         "nmc:namecoin.conf:2048"
         "bc2:bitcoinii.conf:2048"
         "sys:syscoin.conf:2048"
         "xmy:myriadcoin.conf:2048"
         "fbtc:fractal.conf:2048"
-        "doge:dogecoin.conf:2048"
-        "qbx:qbitx.conf:1024"
-        "pep:pepecoin.conf:1024"
-        "cat:catcoin.conf:1024"
+        "doge:dogecoin.conf:4096"
+        "qbx:qbitx.conf:2048"
+        "pep:pepecoin.conf:2048"
+        "cat:catcoin.conf:2048"
     )
 
     for entry in "${COIN_LIMITS[@]}"; do

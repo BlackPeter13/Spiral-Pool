@@ -42,7 +42,7 @@ rpcthreads=4
 # PERFORMANCE TUNING
 # ═══════════════════════════════════════════════════════════════════════════════
 # Database cache size in MB (PepeCoin chain is small)
-dbcache=1024
+dbcache=2048
 
 # Script verification threads (0 = auto-detect CPU cores)
 par=0

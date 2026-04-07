@@ -39,7 +39,7 @@ zmqpubrawblock=tcp://0.0.0.0:28555
 # PERFORMANCE TUNING
 # ═══════════════════════════════════════════════════════════════════════════════
 # Database cache size in MB
-dbcache=2048
+dbcache=4096
 
 # Script verification threads (0 = auto-detect CPU cores)
 par=0
