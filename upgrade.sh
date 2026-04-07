@@ -2121,6 +2121,21 @@ except Exception as e:
     fi
     unset final_api_key
 
+    # --- v2.2.5: Fix payments disabled for coins added via dashboard/pool-mode ---
+    # Go bool zero-value is false; any coin without explicit "payments: enabled: true"
+    # had its payment processor silently skipped — blocks found but never paid out.
+    # Fix all "enabled: false" immediately following a "payments:" line.
+    if grep -q "enabled: false" "$CONFIG_FILE" 2>/dev/null; then
+        # Only target lines directly after "payments:" to avoid touching coin-level or ZMQ enabled flags
+        local payment_fixes
+        payment_fixes=$(awk '/^[[:space:]]*payments:/{getline; if($0 ~ /enabled: false/) print NR}' "$CONFIG_FILE" | wc -l)
+        if [[ "$payment_fixes" -gt 0 ]]; then
+            sed -i '/^[[:space:]]*payments:/{n;s/enabled: false/enabled: true/}' "$CONFIG_FILE"
+            log_info "  - Fixed $payment_fixes coin(s) with payments disabled (v2.2.5 bug fix)"
+            MIGRATIONS_APPLIED=$((MIGRATIONS_APPLIED + payment_fixes))
+        fi
+    fi
+
     if [[ $MIGRATIONS_APPLIED -gt 0 ]]; then
         chown "${POOL_USER}:${POOL_USER}" "$CONFIG_FILE" 2>/dev/null || true
         chmod 600 "$CONFIG_FILE" 2>/dev/null || true
