@@ -25,6 +25,7 @@ Versioning follows `MAJOR.MINOR.PATCH`  -  patch releases are applied in-place o
 **Upgrade**
 
 - **`upgrade.sh` skips hotfixes when version tag matches** -- version comparison (`sort -V`) treated same-version or hotfix-patched releases as "already on latest" and silently skipped the upgrade. Users had to know about `--force` to apply hotfixes. `--force` is now the default behavior; `--auto` mode still blocks downgrades
+- **`upgrade.sh` auto-fixes disabled payments in existing configs** -- `migrate_v2_config()` now patches `payments: enabled: false` → `enabled: true` for all coins during every upgrade. No manual config editing required
 
 ### Changed
 
