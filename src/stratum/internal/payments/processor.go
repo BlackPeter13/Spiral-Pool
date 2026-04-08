@@ -274,6 +274,11 @@ func (p *Processor) Stop() error {
 	return nil
 }
 
+// Interval returns the payment processing interval (public, used by sentinel).
+func (p *Processor) Interval() time.Duration {
+	return p.getEffectiveInterval()
+}
+
 // getEffectiveInterval returns the payment processing interval, auto-scaling
 // to the chain's block time if no explicit interval is configured.
 // V14 FIX: On fast chains like DGB (15s blocks), the default 600s interval means

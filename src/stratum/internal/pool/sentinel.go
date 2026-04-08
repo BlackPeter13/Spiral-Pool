@@ -1044,6 +1044,11 @@ func (s *Sentinel) checkRetryStorm() {
 // no blocks confirmed, no blocks paid, and no pending blocks cleared.
 // Simply having pending blocks is NOT a stall — blocks take time to confirm
 // (e.g., DGB ~60 min for 240 confirmations).
+//
+// IMPORTANT: The payment processor updates the DB on its own interval (default 600s).
+// The sentinel checks far more frequently (default 60s). Between payment cycles,
+// DB values don't change — this is NORMAL, not a stall. We only count stall checks
+// that span at least one full payment processing interval to avoid false positives.
 func (s *Sentinel) checkPaymentProcessors(ctx context.Context) {
 	if s.cfg.PaymentStallChecks <= 0 {
 		return
@@ -1103,9 +1108,24 @@ func (s *Sentinel) checkPaymentProcessors(ctx context.Context) {
 		stallCount := s.paymentStallCount[poolID]
 		s.mu.Unlock()
 
-		if stallCount >= s.cfg.PaymentStallChecks {
+		// The payment processor only updates the DB on its own interval (e.g. 600s).
+		// The sentinel checks every CheckInterval (e.g. 60s). Between payment cycles,
+		// DB values are static — that's normal, not a stall. Require enough stall checks
+		// to span at least 3 full payment processing intervals before alerting.
+		// This prevents false positives from the sentinel outpacing the processor.
+		paymentInterval := proc.Interval()
+		checksPerInterval := 1
+		if s.cfg.CheckInterval > 0 {
+			checksPerInterval = int(paymentInterval.Seconds() / s.cfg.CheckInterval.Seconds())
+			if checksPerInterval < 1 {
+				checksPerInterval = 1
+			}
+		}
+		effectiveThreshold := s.cfg.PaymentStallChecks * checksPerInterval
+
+		if stallCount >= effectiveThreshold {
 			severity := severityWarning
-			if stallCount >= s.cfg.PaymentStallChecks*2 {
+			if stallCount >= effectiveThreshold*2 {
 				severity = severityCritical
 			}
 
@@ -1119,7 +1139,7 @@ func (s *Sentinel) checkPaymentProcessors(ctx context.Context) {
 					"confirmed_blocks": stats.ConfirmedBlocks,
 					"paid_blocks":      stats.PaidBlocks,
 					"stall_checks":     stallCount,
-					"threshold":        s.cfg.PaymentStallChecks,
+					"threshold":        effectiveThreshold,
 				},
 			)
 		}
