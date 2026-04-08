@@ -40,6 +40,7 @@ func testSentinel(cfg *config.SentinelConfig) *Sentinel {
 		paymentPending:    make(map[string]int),
 		paymentConfirmed:  make(map[string]int),
 		paymentProgress:   make(map[string]float64),
+		paymentStability:  make(map[string]int),
 		paymentStallCount: make(map[string]int),
 		prevOrphaned:    make(map[string]int),
 		haRoleHistory:   make([]time.Time, 0, 16),
