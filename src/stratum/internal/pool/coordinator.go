@@ -947,10 +947,20 @@ func (c *Coordinator) Run(ctx context.Context) error {
 	// Print summary (will update as more pools come online)
 	c.printStartupSummary()
 
-	// Start Multi coin smart port (multi-port) if configured
+	// Start Multi coin smart port (multi-port) if configured.
+	// If some coins are still pending (nodes syncing after reboot), defer multi-port
+	// startup to the retry loop — it will start once all coins are online.
+	// Previously this was fatal, causing the entire process to crash on reboot
+	// before daemons finished syncing.
 	if c.cfg.MultiPort.Enabled {
-		if err := c.startMultiPort(ctx); err != nil {
-			return fmt.Errorf("failed to start multi-port server: %w", err)
+		if len(c.failedCoins) > 0 {
+			c.logger.Infow("Deferring multi-port startup until all coins are online",
+				"pendingCoins", len(c.failedCoins),
+			)
+		} else {
+			if err := c.startMultiPort(ctx); err != nil {
+				return fmt.Errorf("failed to start multi-port server: %w", err)
+			}
 		}
 	}
 
@@ -1300,6 +1310,16 @@ func (c *Coordinator) retryFailedCoinsLoop(ctx context.Context) {
 
 			if len(stillFailed) == 0 {
 				c.logger.Info("All coin pools now online!")
+
+				// Start multi-port if it was deferred during initial startup
+				// (coins were still syncing when the coordinator started).
+				if c.cfg.MultiPort.Enabled && c.multiServer == nil {
+					c.logger.Info("All coins ready — starting deferred multi-port server")
+					if err := c.startMultiPort(ctx); err != nil {
+						c.logger.Errorw("Failed to start deferred multi-port server", "error", err)
+					}
+				}
+
 				return
 			}
 		}
