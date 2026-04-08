@@ -52,7 +52,7 @@ func TestSpiralRouterDetection(t *testing.T) {
 
 		// BitAxe / ESP-Miner — sends "bitaxe/{ASIC}/{ver}" [CONFIRMED: bitaxeorg/ESP-Miner]
 		{"bitaxe/BM1370/v2.4.5", MinerClassLow, "BitAxe (BM1370)"},
-		{"bitaxe/BM1368/v2.3.0", MinerClassLow, "BitAxe (BM1368)"},
+		{"bitaxe/BM1368/v2.3.1", MinerClassLow, "BitAxe (BM1368)"},
 		{"bitaxe/BM1366/v2.9.31", MinerClassLow, "BitAxe (BM1366)"},  // NMAxe real UA
 		{"bitaxe/BM1366/v2.0.5", MinerClassLow, "BitAxe (BM1366)"},   // BitAxe Ultra real UA
 		{"bitaxe/BM1397/v1.0.0", MinerClassLow, "BitAxe (BM1397)"},
@@ -184,7 +184,7 @@ func TestSpiralRouterDifficulties(t *testing.T) {
 		// LOW — InitialDiff 580, TargetShareTime 5s
 		// ========================================================================
 		{"bitaxe/BM1370/v2.4.5", 580},
-		{"bitaxe/BM1368/v2.3.0", 580},
+		{"bitaxe/BM1368/v2.3.1", 580},
 		{"bitaxe/BM1366/v2.9.31", 580},  // NMAxe real UA
 		{"bitaxe/BM1397/v1.0.0", 580},
 		{"bitaxe/unknown/v1.0", 580},
