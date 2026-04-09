@@ -125,6 +125,10 @@ type CoinPool struct {
 	// Server start time (for accurate hashrate calculation)
 	startTime time.Time
 
+	// Block stats (loaded from DB on startup, incremented on each block found)
+	cachedBlocksFound int64
+	blockStatsMu      sync.RWMutex
+
 	// Multi-port job listener: called when job manager produces a new job,
 	// allowing the multi-port server to relay block templates to its miners.
 	// Set via SetMultiPortJobListener; read inside the job callback closure.
@@ -1617,6 +1621,11 @@ func (cp *CoinPool) handleBlock(share *protocol.Share, result *protocol.ShareRes
 		cp.metricsServer.RecordBlockForCoin(cp.coinSymbol)
 	}
 
+	// Increment cached block count for API
+	cp.blockStatsMu.Lock()
+	cp.cachedBlocksFound++
+	cp.blockStatsMu.Unlock()
+
 	// V1 PARITY FIX (F-5): Log accepted blocks to dedicated block logger.
 	// Only log blocks that were actually accepted (not orphaned/rejected)
 	// to prevent false positive alerts in log monitoring systems.
@@ -1896,6 +1905,9 @@ func (cp *CoinPool) Start(ctx context.Context) error {
 	if err := cp.waitForSync(ctx); err != nil {
 		return fmt.Errorf("sync gate failed: %w", err)
 	}
+
+	// Initialize block stats from database for API (blocksFound)
+	cp.initBlockStats(ctx)
 
 	// CLEANUP: Remove stale shares from previous sessions
 	if err := cp.cleanupStaleShares(ctx); err != nil {
@@ -2601,9 +2613,32 @@ func (cp *CoinPool) GetNetworkHashrate() float64 {
 	return 0
 }
 
-// GetBlocksFound returns blocks found (V2 placeholder - returns 0).
+// GetBlocksFound returns the total number of blocks found by this coin pool.
 func (cp *CoinPool) GetBlocksFound() int64 {
-	return 0
+	cp.blockStatsMu.RLock()
+	defer cp.blockStatsMu.RUnlock()
+	return cp.cachedBlocksFound
+}
+
+// initBlockStats loads historical block count from the database on startup.
+func (cp *CoinPool) initBlockStats(ctx context.Context) {
+	postgresDB, ok := cp.db.(*database.PostgresDB)
+	if !ok {
+		return
+	}
+
+	blockStats, err := postgresDB.GetBlockStats(ctx)
+	if err != nil {
+		cp.logger.Warnw("Failed to load block stats on startup", "error", err)
+		return
+	}
+	total := int64(blockStats.Pending + blockStats.Confirmed + blockStats.Orphaned + blockStats.Paid)
+	cp.blockStatsMu.Lock()
+	cp.cachedBlocksFound = total
+	cp.blockStatsMu.Unlock()
+	cp.logger.Infow("Loaded block stats from database", "total", total,
+		"pending", blockStats.Pending, "confirmed", blockStats.Confirmed,
+		"orphaned", blockStats.Orphaned, "paid", blockStats.Paid)
 }
 
 // GetBlockReward returns the current block reward from the job template.
