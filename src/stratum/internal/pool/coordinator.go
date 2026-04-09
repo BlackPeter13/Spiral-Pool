@@ -818,7 +818,13 @@ func (c *Coordinator) Run(ctx context.Context) error {
 			go func(id string, p *CoinPool) {
 				defer startWg.Done()
 				c.logger.Infow("Starting coin pool", "poolId", id, "coin", p.Symbol())
-				if err := p.Start(ctx); err != nil {
+				// Give each pool 90 seconds to start. If the daemon is still syncing
+				// (e.g. DGB at 3% after a fresh install), the sync gate will block
+				// indefinitely. A timeout lets the pool fail fast and move to the
+				// retry list so other coins (and Smart Port) aren't held hostage.
+				startCtx, startCancel := context.WithTimeout(ctx, 90*time.Second)
+				defer startCancel()
+				if err := p.Start(startCtx); err != nil {
 					failedStarts <- startFailure{poolID: id, err: err}
 				}
 			}(poolID, pool)
@@ -1095,8 +1101,12 @@ func (c *Coordinator) retryFailedCoinsLoop(ctx context.Context) {
 					continue
 				}
 
-				// Pool created, now start it
-				if err := pool.Start(ctx); err != nil {
+				// Pool created, now start it.
+				// Timeout prevents a syncing daemon's sync gate from blocking
+				// the entire retry loop (other coins need retries too).
+				retryStartCtx, retryStartCancel := context.WithTimeout(ctx, 90*time.Second)
+				if err := pool.Start(retryStartCtx); err != nil {
+					retryStartCancel()
 					c.logger.Warnw("Coin pool start failed",
 						"coin", coinCfg.Symbol,
 						"error", err,
@@ -1107,6 +1117,8 @@ func (c *Coordinator) retryFailedCoinsLoop(ctx context.Context) {
 					stillFailed = append(stillFailed, coinCfg)
 					continue
 				}
+
+				retryStartCancel()
 
 				// AUDIT FIX (ISSUE-3): Wire Redis dedup tracker to late-created pools
 				if c.redisDedupTracker != nil {
