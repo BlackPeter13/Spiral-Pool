@@ -2127,7 +2127,7 @@ except Exception as e:
     fi
     unset final_api_key
 
-    # --- v2.3.3: Fix payments disabled for coins added via dashboard/pool-mode ---
+    # --- v2.3.5: Fix payments disabled for coins added via dashboard/pool-mode ---
     # Go bool zero-value is false; any coin without explicit "payments: enabled: true"
     # had its payment processor silently skipped — blocks found but never paid out.
     # Fix all "enabled: false" immediately following a "payments:" line.
@@ -2137,7 +2137,7 @@ except Exception as e:
         payment_fixes=$(awk '/^[[:space:]]*payments:/{getline; if($0 ~ /enabled: false/) print NR}' "$CONFIG_FILE" | wc -l)
         if [[ "$payment_fixes" -gt 0 ]]; then
             sed -i '/^[[:space:]]*payments:/{n;s/enabled: false/enabled: true/}' "$CONFIG_FILE"
-            log_info "  - Fixed $payment_fixes coin(s) with payments disabled (v2.3.3 bug fix)"
+            log_info "  - Fixed $payment_fixes coin(s) with payments disabled (v2.3.5 bug fix)"
             MIGRATIONS_APPLIED=$((MIGRATIONS_APPLIED + payment_fixes))
         fi
     fi
@@ -2270,7 +2270,7 @@ cleanup_daemon_configs() {
 # ============================================================================
 # Right-size dbcache and maxconnections in existing daemon configs.
 #
-# v2.3.3 and earlier shipped dbcache=8192 for SHA-256d coins and dbcache=4096
+# v2.3.5 and earlier shipped dbcache=8192 for SHA-256d coins and dbcache=4096
 # for scrypt coins.  On multi-coin setups (Smart Port), multiple daemons with
 # oversized caches exhaust RAM, push into swap, and cause RPC timeouts that
 # stall block confirmation.
@@ -5038,12 +5038,12 @@ SSHDEOF
     # maxdebugfilesize, etc.) — idempotent, always safe to re-run.
     cleanup_daemon_configs
 
-    # v2.3.3: Reduce oversized dbcache/maxconnections in existing daemon configs.
+    # v2.3.5: Reduce oversized dbcache/maxconnections in existing daemon configs.
     # Multi-coin setups with dbcache=8192 per daemon exhaust RAM and cause RPC
     # timeouts that stall block confirmation.
     rightsize_daemon_resources
 
-    # v2.3.3: Patch daemon service files with ExecStartPre ownership fix.
+    # v2.3.5: Patch daemon service files with ExecStartPre ownership fix.
     # Daemon SIGABRT on shutdown can corrupt file ownership, preventing restart.
     fix_daemon_service_ownership_pre
 

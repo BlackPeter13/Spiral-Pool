@@ -7,7 +7,7 @@ Versioning follows `MAJOR.MINOR.PATCH`  -  patch releases are applied in-place o
 
 ---
 
-## [2.3.3]  -  2026-04-09  -  Phi Hash Reactor
+## [2.3.5]  -  2026-04-09  -  Phi Hash Reactor
 
 > *Native multi-port config fix, health monitor false restart, startup timeout for syncing daemons.*
 
@@ -33,7 +33,7 @@ Versioning follows `MAJOR.MINOR.PATCH`  -  patch releases are applied in-place o
 
 ### Changed
 
-- **Version bump** -- all version strings updated to 2.3.3
+- **Version bump** -- all version strings updated to 2.3.5
 
 ---
 
