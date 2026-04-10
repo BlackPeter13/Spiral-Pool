@@ -10057,11 +10057,22 @@ def fetch_wallet_balance_for_coin(addr, symbol):
     # Primary method: use scantxoutset RPC against the local node.
     # This is authoritative, works without a loaded wallet, and doesn't
     # depend on flaky external APIs (chainz.cryptoid.info returns 0 intermittently).
+    # IMPORTANT: Skip scantxoutset if the node is still syncing (IBD) — an unsynced
+    # node returns total_amount=0 for UTXOs it hasn't indexed yet, which would mask
+    # the real balance. Fall through to the external API instead.
     try:
         for _ec in (get_enabled_coins() or []):
             if _ec.get("symbol", "").upper() == symbol:
                 rpc_port = _ec.get("rpc_port")
                 if rpc_port:
+                    # Check if node is still syncing before trusting scantxoutset
+                    try:
+                        bci = _rpc_call("127.0.0.1", rpc_port, "getblockchaininfo", [], timeout=10)
+                        if bci and bci.get("initialblockdownload", True):
+                            logger.debug(f"{symbol} node still in IBD — skipping scantxoutset, using external API")
+                            break
+                    except Exception:
+                        break  # Can't reach node — skip to external API
                     result = _rpc_call(
                         "127.0.0.1", rpc_port, "scantxoutset",
                         ["start", [{"desc": f"addr({addr})"}]],
