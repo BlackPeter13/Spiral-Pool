@@ -344,6 +344,18 @@ func NewCoinPool(cfg *CoinPoolConfig) (*CoinPool, error) {
 	if walErr != nil {
 		return nil, fmt.Errorf("failed to initialize block WAL for %s: %w", cfg.CoinConfig.PoolID, walErr)
 	}
+	// V43 FIX: Release WAL file lock if pool creation fails after this point.
+	// Without this, a failed NewCoinPool() leaks the flock — subsequent retries
+	// from the coordinator fail with "is another instance running?" forever.
+	walCleanup := true
+	defer func() {
+		if walCleanup {
+			log.Warnw("Closing orphaned block WAL after pool creation failure",
+				"poolId", cfg.CoinConfig.PoolID,
+			)
+			blockWAL.Close()
+		}
+	}()
 	log.Infow("Block write-ahead log initialized",
 		"walFile", blockWAL.FilePath(),
 		"poolId", cfg.CoinConfig.PoolID,
@@ -534,6 +546,7 @@ func NewCoinPool(cfg *CoinPoolConfig) (*CoinPool, error) {
 		)
 	}
 
+	walCleanup = false // V43 FIX: pool created successfully, don't close the WAL
 	return cp, nil
 }
 
