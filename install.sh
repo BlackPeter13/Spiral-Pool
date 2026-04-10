@@ -27105,11 +27105,28 @@ show_status() {
             fi
         done
 
-        # Show pool address — single-coin config uses pool.address directly (no symbol: block)
+        # Show pool address — find address for the specific coin being synced
+        # In multi-coin configs, each coin has its own symbol: + address: block.
+        # In single-coin configs, there's only one address: line.
         local pool_addr
-        pool_addr=$(grep -E '^\s*address:' "${INSTALL_DIR}/config/config.yaml" 2>/dev/null \
-            | grep -v 'PENDING_GENERATION' | head -1 \
-            | sed 's/.*address:[[:space:]]*["'\'']\?\([^"'\'' ]*\)["'\'']\?.*/\1/')
+        if [[ -n "$COIN_SYMBOL" ]] && grep -q "symbol:.*\"${COIN_SYMBOL}\"" "${INSTALL_DIR}/config/config.yaml" 2>/dev/null; then
+            # Multi-coin config: find the address line after the matching symbol
+            pool_addr=$(awk -v sym="$COIN_SYMBOL" '
+                $0 ~ "symbol:.*\""sym"\"" { found=1; next }
+                found && /^\s*address:/ {
+                    gsub(/.*address:[[:space:]]*["'\''"]?/, "")
+                    gsub(/["'\''"].*/, "")
+                    print; exit
+                }
+                found && /^\s*-\s+symbol:/ { exit }
+            ' "${INSTALL_DIR}/config/config.yaml" 2>/dev/null)
+        fi
+        # Fallback: single-coin config or symbol not found — use first address
+        if [[ -z "$pool_addr" ]]; then
+            pool_addr=$(grep -E '^\s*address:' "${INSTALL_DIR}/config/config.yaml" 2>/dev/null \
+                | grep -v 'PENDING_GENERATION' | head -1 \
+                | sed 's/.*address:[[:space:]]*["'\'']\?\([^"'\'' ]*\)["'\'']\?.*/\1/')
+        fi
         if [[ -n "$pool_addr" ]] && [[ "$pool_addr" != "PENDING_GENERATION" ]] && [[ "$pool_addr" != '""' ]]; then
             echo ""
             echo -e "  ${WHITE}Pool Address:${NC} ${GREEN}$pool_addr${NC}"
@@ -27668,10 +27685,24 @@ watch_sync() {
             echo ""
 
             # Always show pool address — point miners here as their username
+            # In multi-coin configs, find address for this specific coin symbol
             local _pool_addr
-            _pool_addr=$(grep -E '^\s*address:' /spiralpool/config/config.yaml 2>/dev/null \
-                | grep -v 'PENDING_GENERATION' | head -1 \
-                | sed 's/.*address:[[:space:]]*["'\'']\?\([^"'\'' ]*\)["'\'']\?.*/\1/')
+            if [[ -n "$COIN_SYMBOL" ]] && grep -q "symbol:.*\"${COIN_SYMBOL}\"" /spiralpool/config/config.yaml 2>/dev/null; then
+                _pool_addr=$(awk -v sym="$COIN_SYMBOL" '
+                    $0 ~ "symbol:.*\""sym"\"" { found=1; next }
+                    found && /^\s*address:/ {
+                        gsub(/.*address:[[:space:]]*["'\''"]?/, "")
+                        gsub(/["'\''"].*/, "")
+                        print; exit
+                    }
+                    found && /^\s*-\s+symbol:/ { exit }
+                ' /spiralpool/config/config.yaml 2>/dev/null)
+            fi
+            if [[ -z "$_pool_addr" ]]; then
+                _pool_addr=$(grep -E '^\s*address:' /spiralpool/config/config.yaml 2>/dev/null \
+                    | grep -v 'PENDING_GENERATION' | head -1 \
+                    | sed 's/.*address:[[:space:]]*["'\'']\?\([^"'\'' ]*\)["'\'']\?.*/\1/')
+            fi
             if [[ -n "$_pool_addr" ]]; then
                 echo -e "  ${WHITE}Pool Address:${NC} ${GREEN}${_pool_addr}${NC}"
                 echo -e "  ${DIM}Use this as the username on your miners${NC}"
