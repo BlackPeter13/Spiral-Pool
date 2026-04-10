@@ -25181,6 +25181,19 @@ check_stratum_health() {
         return
     fi
 
+    # STARTUP GRACE PERIOD: Don't protocol-check stratum that just started.
+    # The stratum needs time to bind ports, complete sync gates, and register
+    # coin pools. Checking mining.subscribe during this window returns empty
+    # and triggers a false "protocol failure" restart loop.
+    local _svc_start _now_ts _uptime_secs
+    _svc_start=$(date -d "$(systemctl show -p ActiveEnterTimestamp --value spiralstratum 2>/dev/null)" +%s 2>/dev/null || echo 0)
+    _now_ts=$(date +%s)
+    _uptime_secs=$(( _now_ts - _svc_start ))
+    if [[ $_uptime_secs -lt 300 ]]; then
+        log "INFO: Stratum started ${_uptime_secs}s ago — skipping protocol check (grace period: 300s)"
+        return
+    fi
+
     # Check stratum ports - in multi-coin mode, check all enabled coin ports
     # In single-coin mode, just check the configured port
     local COIN_MODE STRATUM_PORT
@@ -25207,7 +25220,10 @@ check_stratum_health() {
         MULTIPORT_ENABLED=$(grep -oP '^MULTIPORT_ENABLED=\K(true|false)$' "$INSTALL_DIR/config/coins.env" 2>/dev/null || echo "false")
 
         if [[ "$COIN_MODE" == "multi" ]]; then
-            # Multi-coin mode: check each enabled coin's port
+            # Multi-coin mode: smart port first (primary entry point), then per-coin ports.
+            # The smart port is the most reliable health indicator — it's always listening
+            # when stratum is running, even if some per-coin daemons are still syncing.
+            [[ "$MULTIPORT_ENABLED" == "true" ]] && ports_to_check+=(16180)
             [[ "$ENABLE_DGB" == "true" ]] && ports_to_check+=(3333)
             [[ "$ENABLE_BTC" == "true" ]] && ports_to_check+=(4333)
             [[ "$ENABLE_BCH" == "true" ]] && ports_to_check+=(5333)
@@ -25222,8 +25238,6 @@ check_stratum_health() {
             [[ "$ENABLE_XMY" == "true" ]] && ports_to_check+=(17335)
             [[ "$ENABLE_FBTC" == "true" ]] && ports_to_check+=(18335)
             [[ "$ENABLE_QBX" == "true" ]] && ports_to_check+=(20335)
-            # Multi coin smart port
-            [[ "$MULTIPORT_ENABLED" == "true" ]] && ports_to_check+=(16180)
         else
             # Single-coin mode: use configured port (no default)
             if [[ -n "$STRATUM_PORT" ]]; then
@@ -25245,9 +25259,11 @@ check_stratum_health() {
 
     # Check if at least one stratum port is listening
     local any_listening=false
+    local first_listening_port=""
     for port in "${ports_to_check[@]}"; do
         if ss -tlnp 2>/dev/null | grep -q ":$port"; then
             any_listening=true
+            first_listening_port="$port"
             break
         fi
     done
@@ -25258,12 +25274,15 @@ check_stratum_health() {
         return
     fi
 
-    # CRITICAL: Test actual stratum protocol handshake on first available port
-    # This catches the case where TCP port is open but stratum is not responding.
+    # CRITICAL: Test actual stratum protocol handshake on a port that is LISTENING.
+    # BUG FIX: Previously used ports_to_check[0] (always the first coin, e.g. DGB=3333),
+    # which fails during partial startup when that coin's daemon is still syncing.
+    # Now uses the first port confirmed listening above, so partial startup (e.g. QBX
+    # online while DGB syncs) doesn't trigger a false "protocol failure" restart.
     # NOTE: Do NOT pipe through head -1 — that causes nc to exit while stratum is still
     # writing its job notification, producing "broken pipe" spam in stratum logs.
     # Instead let nc drain all output until the idle timeout, then stratum gets a clean EOF.
-    local test_port="${ports_to_check[0]}"
+    local test_port="$first_listening_port"
     local stratum_response stratum_first_line
     stratum_response=$(echo '{"id":1,"method":"mining.subscribe","params":["health-check/1.0"]}' | \
         timeout 5 nc -w 3 127.0.0.1 $test_port 2>/dev/null)

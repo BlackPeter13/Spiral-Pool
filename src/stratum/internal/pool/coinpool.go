@@ -3427,6 +3427,17 @@ func (cp *CoinPool) waitForSync(ctx context.Context) error {
 				cp.onSyncStatusChange(cp.coinSymbol, bcInfo.VerificationProgress*100, int64(bcInfo.Blocks))
 			}
 
+			// FAST FAIL: If the daemon is in initial block download and far from
+			// synced, there's no point polling for 90 seconds — it won't finish
+			// IBD in that time. Fail immediately so the coordinator can move this
+			// coin to the retry list and start Smart Port with available coins.
+			// Only fast-fail when clearly in early IBD (< 95%); near-complete
+			// IBD (>= 95%) might finish within the startup timeout.
+			if bcInfo.InitialBlockDownload && bcInfo.VerificationProgress < 0.95 && bcInfo.Chain != "regtest" {
+				return fmt.Errorf("daemon is in initial block download (%.2f%% synced) — will retry via coordinator",
+					bcInfo.VerificationProgress*100)
+			}
+
 			// Check sync criteria
 			// On regtest, skip IBD check entirely — regtest is a private test network
 			// with no peers, so there's no risk of mining on stale blocks. This allows
