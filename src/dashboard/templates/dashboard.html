@@ -93,6 +93,71 @@
             color: #a855f7;
         }
 
+        /* Coin Selector Badges */
+        .coin-selector-group {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            flex-wrap: wrap;
+        }
+        .coin-selector-badge {
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            padding: 0.25rem 0.6rem;
+            border-radius: 4px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            user-select: none;
+            white-space: nowrap;
+            border: 1px solid transparent;
+        }
+        .coin-selector-badge.primary {
+            background: rgba(148, 163, 184, 0.08);
+            border-color: rgba(148, 163, 184, 0.3);
+            color: var(--text-muted);
+            font-weight: 400;
+        }
+        .coin-selector-badge.primary:hover {
+            background: rgba(0, 212, 255, 0.12);
+            border-color: rgba(0, 212, 255, 0.5);
+            color: var(--neon-cyan);
+        }
+        .coin-selector-badge.primary.active {
+            background: rgba(0, 212, 255, 0.2);
+            border-color: var(--neon-cyan);
+            color: var(--neon-cyan);
+            font-weight: 600;
+            box-shadow: 0 0 8px rgba(0, 212, 255, 0.3);
+        }
+        .coin-selector-badge.secondary {
+            background: rgba(148, 163, 184, 0.08);
+            border-color: rgba(148, 163, 184, 0.3);
+            color: var(--text-muted);
+            font-weight: 400;
+        }
+        .coin-selector-badge.secondary:hover {
+            background: rgba(148, 163, 184, 0.15);
+            border-color: rgba(148, 163, 184, 0.5);
+            color: var(--text-secondary);
+        }
+        .coin-selector-badge.secondary.active {
+            background: rgba(74, 222, 128, 0.15);
+            border-color: var(--neon-green);
+            color: var(--neon-green);
+            font-weight: 600;
+            box-shadow: 0 0 8px rgba(74, 222, 128, 0.2);
+        }
+        .coin-selector-label {
+            font-family: var(--font-mono);
+            font-size: 0.55rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            opacity: 0.6;
+        }
+
         /* Service Restart Buttons */
         .health-status-row {
             display: flex;
@@ -2427,7 +2492,9 @@
     <header class="dashboard-header">
         <div class="header-left">
             <h1 class="logo">{{ config.dashboard_title or 'Spiral Pool' }}</h1>
-            <span class="coin-badge" id="coin-badge">SHA-256D</span>
+            <div class="coin-selector-group" id="coin-selector-group">
+                <span class="coin-badge" id="coin-badge">SHA-256D</span>
+            </div>
             <span class="mode-badge" id="mode-badge">POOL</span>
             <div class="status-indicator">
                 <span class="status-dot"></span>
@@ -4030,6 +4097,22 @@
 
         function changeStatsCoin(value) {
             _selectedStatsCoin = value;
+            // When "All Coins" is selected, clear the user coin selection
+            if (value === 'all') {
+                _userSelectedCoin = null;
+                // Reset header badges to highlight primary
+                const group = document.getElementById('coin-selector-group');
+                if (group) {
+                    group.querySelectorAll('.coin-selector-badge').forEach(badge => {
+                        badge.classList.remove('active');
+                        if (badge.classList.contains('primary')) badge.classList.add('active');
+                    });
+                }
+            } else if (value !== _userSelectedCoin) {
+                // Sync header coin badges when a specific coin is selected from stats dropdown
+                switchDashboardCoin(value);
+                return; // switchDashboardCoin already handles charts and filters
+            }
             // Re-render charts with per-coin or aggregated history
             updateAllStatsCharts();
             // Re-render value displays with the selected coin's stats
@@ -4191,6 +4274,199 @@
                 chart.options.plugins.tooltip.titleColor = color;
                 chart.update('none');
             });
+        }
+
+        // --- Coin Selector Badges (header) ---
+        // Track which coin the user has explicitly selected (null = follow primary from API)
+        let _userSelectedCoin = null;
+
+        /**
+         * Build coin selector badges in the header from API data.
+         * Shows primary coin with "Primary" label, secondary coins alongside.
+         * The currently-viewed coin gets the .active class.
+         */
+        function buildCoinBadges(data) {
+            const group = document.getElementById('coin-selector-group');
+            if (!group) return;
+
+            const coins = data.coins || {};
+            const enabled = coins.enabled || [];
+            const primaryCoin = coins.primary || (enabled.length ? enabled[0] : null);
+
+            // Single coin mode — just show the algorithm badge like before
+            if (enabled.length <= 1) {
+                const coinBadge = document.getElementById('coin-badge');
+                if (coinBadge) {
+                    coinBadge.textContent = currentAlgorithm === 'scrypt' ? 'SCRYPT' : 'SHA-256D';
+                    coinBadge.style.display = '';
+                }
+                // Remove any previously built selector badges
+                group.querySelectorAll('.coin-selector-badge, .coin-selector-label').forEach(el => el.remove());
+                return;
+            }
+
+            // Multi-coin mode — hide the old algorithm badge, build coin badges
+            const coinBadge = document.getElementById('coin-badge');
+            if (coinBadge) coinBadge.style.display = 'none';
+
+            // Determine the active coin (user selection or primary)
+            const activeCoin = _userSelectedCoin && enabled.includes(_userSelectedCoin)
+                ? _userSelectedCoin
+                : primaryCoin;
+
+            // Only rebuild if the coin set changed (order-independent comparison)
+            const existingBadges = Array.from(group.querySelectorAll('.coin-selector-badge')).map(b => b.dataset.coin);
+            const needsRebuild = JSON.stringify([...existingBadges].sort()) !== JSON.stringify([...enabled].sort());
+
+            if (needsRebuild) {
+                // Clear old badges (keep coin-badge element)
+                group.querySelectorAll('.coin-selector-badge, .coin-selector-label').forEach(el => el.remove());
+
+                enabled.forEach(sym => {
+                    const isPrimary = sym === primaryCoin;
+                    const badge = document.createElement('span');
+                    badge.className = 'coin-selector-badge ' + (isPrimary ? 'primary' : 'secondary');
+                    badge.dataset.coin = sym;
+                    badge.textContent = sym;
+                    badge.title = isPrimary ? sym + ' (Primary)' : sym;
+                    badge.onclick = function() { switchDashboardCoin(sym); };
+                    if (sym === activeCoin) badge.classList.add('active');
+                    group.appendChild(badge);
+                });
+            } else {
+                // Just update active state
+                group.querySelectorAll('.coin-selector-badge').forEach(badge => {
+                    badge.classList.toggle('active', badge.dataset.coin === activeCoin);
+                });
+            }
+        }
+
+        // Static coin metadata for fallback when per_coin_stats is unavailable
+        const _coinDefaults = {
+            'BTC': {coin_name:'Bitcoin', algorithm:'sha256d', block_time:600, block_reward:3.125},
+            'BCH': {coin_name:'Bitcoin Cash', algorithm:'sha256d', block_time:600, block_reward:3.125},
+            'BC2': {coin_name:'Bitcoin II', algorithm:'sha256d', block_time:600, block_reward:50},
+            'DGB': {coin_name:'DigiByte', algorithm:'sha256d', block_time:15, block_reward:277.38},
+            'DGB-SCRYPT': {coin_name:'DigiByte Scrypt', algorithm:'scrypt', block_time:15, block_reward:277.38},
+            'LTC': {coin_name:'Litecoin', algorithm:'scrypt', block_time:150, block_reward:6.25},
+            'DOGE': {coin_name:'Dogecoin', algorithm:'scrypt', block_time:60, block_reward:10000},
+            'NMC': {coin_name:'Namecoin', algorithm:'sha256d', block_time:600, block_reward:6.25},
+            'SYS': {coin_name:'Syscoin', algorithm:'sha256d', block_time:150, block_reward:1.25},
+            'XMY': {coin_name:'Myriad', algorithm:'sha256d', block_time:300, block_reward:500},
+            'FBTC': {coin_name:'Fractal Bitcoin', algorithm:'sha256d', block_time:600, block_reward:25},
+            'QBX': {coin_name:'Q-BitX', algorithm:'sha256d', block_time:300, block_reward:12.5},
+            'PEP': {coin_name:'PepeCoin', algorithm:'scrypt', block_time:60, block_reward:50},
+            'CAT': {coin_name:'Catcoin', algorithm:'scrypt', block_time:60, block_reward:25},
+        };
+
+        /**
+         * Switch the entire dashboard to display a specific coin's data.
+         * Updates: header badges, stats bar, earnings, coin symbols, stats chart selector.
+         * Works even when per_coin_stats is empty — uses static defaults as fallback.
+         */
+        function switchDashboardCoin(symbol) {
+            _userSelectedCoin = symbol;
+            const pcs = _lastPerCoinStats || {};
+            const coinData = pcs[symbol];
+            const defaults = _coinDefaults[symbol] || {};
+
+            // Update global coin state (per-coin stats > static defaults)
+            currentCoin = symbol;
+            currentCoinName = (coinData && coinData.coin_name) || defaults.coin_name || symbol;
+            currentAlgorithm = (coinData && coinData.algorithm) || defaults.algorithm || getAlgorithmForCoin(symbol);
+            currentBlockTime = (coinData && coinData.block_time) || defaults.block_time || 600;
+            currentBlockReward = (coinData && coinData.block_reward) || defaults.block_reward || 0;
+            currentNetworkDifficulty = (coinData && coinData.difficulty) || 0;
+
+            // Update prices from per-coin data (if available)
+            if (coinData) {
+                currentCoinPrices = {};
+                const curCodes = ['usd', 'cad', 'eur', 'gbp', 'jpy', 'aud', 'chf', 'cny', 'nzd', 'sek'];
+                curCodes.forEach(code => {
+                    const priceKey = 'price_' + code;
+                    if (coinData[priceKey] !== undefined) {
+                        currentCoinPrices[code] = coinData[priceKey];
+                    }
+                });
+                currentCoinPriceUsd = currentCoinPrices['usd'] || 0;
+                currentCoinPriceCad = currentCoinPrices['cad'] || 0;
+            }
+
+            // Update pool hashrate from per-coin stats (if available)
+            if (coinData) {
+                const coinHashrateHps = coinData.hashrate || 0;
+                currentHashrateThs = coinHashrateHps / 1e12;
+
+                // Update stats bar
+                const hrValEl = document.getElementById('hashrate-value');
+                const hrUnitEl = document.getElementById('hashrate-unit');
+                const hrSubEl = document.getElementById('hashrate-sub');
+                if (hrValEl) hrValEl.textContent = formatHashrate(currentHashrateThs);
+                if (hrUnitEl) hrUnitEl.textContent = getHashrateUnit(currentHashrateThs);
+                if (hrSubEl) hrSubEl.textContent = 'Workers: ' + (coinData.miners || 0);
+
+                // Update network stats (Statistics chart labels)
+                const netHps = coinData.network_hashrate || 0;
+                const netHashEl = document.getElementById('chart-val-network-hashrate');
+                if (netHashEl) {
+                    netHashEl.textContent = netHps > 0 ? formatHashrateValue(netHps) : '--';
+                }
+                const diffEl = document.getElementById('chart-val-difficulty');
+                if (diffEl) {
+                    diffEl.textContent = coinData.difficulty ? formatDifficultyValue(coinData.difficulty) : '--';
+                }
+                const workEl = document.getElementById('chart-val-workers');
+                if (workEl) workEl.textContent = (coinData.miners || 0) + ' w';
+
+                // Update Block Analytics stats bar (Network Hashrate, Pool Share)
+                const baNetHr = document.getElementById('ba-network-hashrate');
+                const baNetUnit = document.getElementById('ba-network-hashrate-unit');
+                if (baNetHr && baNetUnit) {
+                    const netFmt = formatHpsForDisplay(netHps);
+                    baNetHr.textContent = netFmt.value;
+                    baNetUnit.textContent = netFmt.unit;
+                }
+                const baPoolHr = document.getElementById('ba-pool-hashrate');
+                const baPoolUnit = document.getElementById('ba-pool-hashrate-unit');
+                if (baPoolHr && baPoolUnit) {
+                    const poolFmt = formatHpsForDisplay(coinHashrateHps);
+                    baPoolHr.textContent = poolFmt.value;
+                    baPoolUnit.textContent = poolFmt.unit;
+                }
+                const baShare = document.getElementById('ba-pool-share');
+                if (baShare) {
+                    const sharePercent = netHps > 0 ? ((coinHashrateHps / netHps) * 100) : 0;
+                    baShare.textContent = sharePercent < 0.01 ? sharePercent.toExponential(2) : sharePercent.toFixed(sharePercent >= 1 ? 2 : 4);
+                }
+            }
+
+            // Update header badge active states
+            const group = document.getElementById('coin-selector-group');
+            if (group) {
+                group.querySelectorAll('.coin-selector-badge').forEach(badge => {
+                    badge.classList.toggle('active', badge.dataset.coin === symbol);
+                });
+            }
+
+            // Sync the stats coin selector dropdown
+            const statsSel = document.getElementById('stats-coin-selector');
+            if (statsSel && statsSel.value !== symbol) {
+                statsSel.value = symbol;
+            }
+
+            // Re-render charts for the selected coin
+            _selectedStatsCoin = symbol;
+            updateAllStatsCharts();
+            applyStatsCoinFilter();
+
+            // Update all coin symbol displays and earnings
+            updateCoinSymbols();
+            updateEarnings();
+
+            // Refresh Blocks tab if it's currently visible
+            if (currentTab === 'blocks') {
+                loadBlockAnalytics();
+            }
         }
 
         // Update all coin symbol displays
@@ -7371,23 +7647,43 @@
             }
 
             // Update coin info from API (multi-coin support)
-            if (data.coin) {
-                currentCoin = data.coin;
-                // Update algorithm based on coin (for proper hashrate formatting)
-                currentAlgorithm = data.algorithm || getAlgorithmForCoin(data.coin);
-            }
-            if (data.coin_name) {
-                currentCoinName = data.coin_name;
-            }
-            if (blockReward.block_time) {
-                currentBlockTime = blockReward.block_time;
+            // If user has explicitly selected a coin via header badges, keep it.
+            // Otherwise, follow the API primary coin.
+            const apiPrimary = data.coin;
+            const activeCoin = (_userSelectedCoin && (data.coins?.enabled || []).includes(_userSelectedCoin))
+                ? _userSelectedCoin
+                : apiPrimary;
+            const pcs = data.per_coin_stats || {};
+            const activeCoinData = pcs[activeCoin];
+
+            if (activeCoinData) {
+                // Use per-coin data for the selected coin
+                currentCoin = activeCoin;
+                currentAlgorithm = activeCoinData.algorithm || getAlgorithmForCoin(activeCoin);
+                currentCoinName = activeCoinData.coin_name || activeCoin;
+                currentBlockTime = activeCoinData.block_time || blockReward.block_time || 600;
+                currentBlockReward = activeCoinData.block_reward || 0;
+                currentNetworkDifficulty = activeCoinData.difficulty || 0;
+                // Update prices from per-coin data
+                const curCodes = ['usd', 'cad', 'eur', 'gbp', 'jpy', 'aud', 'chf', 'cny', 'nzd', 'sek'];
+                curCodes.forEach(code => {
+                    const priceKey = 'price_' + code;
+                    if (activeCoinData[priceKey] !== undefined) {
+                        currentCoinPrices[code] = activeCoinData[priceKey];
+                    }
+                });
+                currentCoinPriceUsd = currentCoinPrices['usd'] || 0;
+                currentCoinPriceCad = currentCoinPrices['cad'] || 0;
+            } else if (apiPrimary) {
+                // Fallback: single coin mode or no per-coin data
+                currentCoin = apiPrimary;
+                currentAlgorithm = data.algorithm || getAlgorithmForCoin(apiPrimary);
+                if (data.coin_name) currentCoinName = data.coin_name;
+                if (blockReward.block_time) currentBlockTime = blockReward.block_time;
             }
 
-            // Update algorithm badge display
-            const coinBadge = document.getElementById('coin-badge');
-            if (coinBadge) {
-                coinBadge.textContent = currentAlgorithm === 'scrypt' ? 'SCRYPT' : 'SHA-256D';
-            }
+            // Build coin selector badges in header (replaces old coin-badge in multi-coin mode)
+            buildCoinBadges(data);
 
             // Update mining mode badge (solo / multi-coin / merge)
             const modeBadge = document.getElementById('mode-badge');
@@ -7415,29 +7711,32 @@
             // Update all coin symbol displays
             updateCoinSymbols();
 
-            // Update block reward cache for celebration (coin-agnostic keys only)
-            if (blockReward.block_reward !== undefined) {
-                currentBlockReward = blockReward.block_reward;
-            }
-            // Store all currency prices from block reward data
-            if (blockReward.price_usd !== undefined) {
-                currentCoinPriceUsd = blockReward.price_usd;
-                currentCoinPrices['usd'] = blockReward.price_usd;
-            }
-            if (blockReward.price_cad !== undefined) {
-                currentCoinPriceCad = blockReward.price_cad;
-                currentCoinPrices['cad'] = blockReward.price_cad;
-            }
-            // Populate all currency prices from API response (price_eur, price_gbp, etc.)
-            const currencyCodes = ['eur', 'gbp', 'jpy', 'aud', 'chf', 'cny', 'nzd', 'sek'];
-            currencyCodes.forEach(code => {
-                const key = 'price_' + code;
-                if (blockReward[key] !== undefined) {
-                    currentCoinPrices[code] = blockReward[key];
+            // Update block reward / prices from API block_reward data
+            // This data comes from fetch_block_reward() which always targets the API primary coin.
+            // Only apply when viewing the primary coin (no user override, or user selected primary).
+            const viewingPrimary = !_userSelectedCoin || _userSelectedCoin === apiPrimary;
+            if (viewingPrimary) {
+                if (blockReward.block_reward !== undefined && blockReward.block_reward > 0) {
+                    currentBlockReward = blockReward.block_reward;
                 }
-            });
-            if (data.network_difficulty !== undefined && data.network_difficulty > 0) {
-                currentNetworkDifficulty = data.network_difficulty;
+                if (blockReward.price_usd !== undefined) {
+                    currentCoinPriceUsd = blockReward.price_usd;
+                    currentCoinPrices['usd'] = blockReward.price_usd;
+                }
+                if (blockReward.price_cad !== undefined) {
+                    currentCoinPriceCad = blockReward.price_cad;
+                    currentCoinPrices['cad'] = blockReward.price_cad;
+                }
+                const currencyCodes = ['eur', 'gbp', 'jpy', 'aud', 'chf', 'cny', 'nzd', 'sek'];
+                currencyCodes.forEach(code => {
+                    const key = 'price_' + code;
+                    if (blockReward[key] !== undefined) {
+                        currentCoinPrices[code] = blockReward[key];
+                    }
+                });
+                if (data.network_difficulty !== undefined && data.network_difficulty > 0) {
+                    currentNetworkDifficulty = data.network_difficulty;
+                }
             }
 
             // Update connection status
@@ -7471,7 +7770,16 @@
             // Pool Hashrate card: only show stratum hashrate, never farm fallback
             // Farm hashrate is self-reported by devices and can be wildly inaccurate
             const poolMinersConnected = data.pool_connected_miners || 0;
-            const displayHashrateThs = poolHashrateThs;
+
+            // If user has selected a specific coin, use per-coin hashrate/miners
+            let displayHashrateThs, displayMiners;
+            if (_userSelectedCoin && activeCoinData) {
+                displayHashrateThs = (activeCoinData.hashrate || 0) / 1e12;
+                displayMiners = activeCoinData.miners || 0;
+            } else {
+                displayHashrateThs = poolHashrateThs;
+                displayMiners = poolMinersConnected;
+            }
             currentHashrateThs = displayHashrateThs; // Store for earnings calc
 
             // Update Pool Hashrate stat card
@@ -7480,11 +7788,16 @@
             const hrSubEl = document.getElementById('hashrate-sub');
             if (hrValEl) hrValEl.textContent = formatHashrate(displayHashrateThs);
             if (hrUnitEl) hrUnitEl.textContent = getHashrateUnit(displayHashrateThs);
-            if (hrSubEl) hrSubEl.textContent = 'Workers: ' + poolMinersConnected;
+            if (hrSubEl) hrSubEl.textContent = 'Workers: ' + displayMiners;
 
             // Update Statistics chart grid (pool hashrate, network, difficulty, workers)
-            const networkHashrateHps = data.network_hashrate || 0;
-            const networkDiff = data.network_difficulty || 0;
+            // When viewing a specific coin, use its per-coin network stats instead of the top-level aggregate
+            const networkHashrateHps = (_userSelectedCoin && activeCoinData && activeCoinData.network_hashrate)
+                ? activeCoinData.network_hashrate
+                : (data.network_hashrate || 0);
+            const networkDiff = (_userSelectedCoin && activeCoinData && activeCoinData.difficulty)
+                ? activeCoinData.difficulty
+                : (data.network_difficulty || 0);
             _lastNetworkHashrate = networkHashrateHps;
             _lastConnectedMiners = poolMinersConnected;
             _lastTotalMiners = totals.total_count || 0;
@@ -7492,7 +7805,9 @@
             const sharesRate = data.pool_shares_per_second || 0;
             _lastBlocksFound = blocksFound;
             _lastSharesRate = sharesRate;
-            updateStatsHistory(poolHashrateHps, networkHashrateHps, networkDiff, poolMinersConnected, blocksFound, sharesRate);
+            const displayPoolHps = (_userSelectedCoin && activeCoinData) ? (activeCoinData.hashrate || 0) : poolHashrateHps;
+            const displayMinersForStats = (_userSelectedCoin && activeCoinData) ? (activeCoinData.miners || 0) : poolMinersConnected;
+            updateStatsHistory(displayPoolHps, networkHashrateHps, networkDiff, displayMinersForStats, blocksFound, sharesRate);
             updateStatsValueDisplays();
 
             // Per-coin stats breakdown (multi-coin mode)
@@ -7501,6 +7816,14 @@
                 updateStatsCoinSelector(data.per_coin_stats);
                 // Record per-coin history for chart switching
                 updatePerCoinStatsHistory(data.per_coin_stats);
+                // Sync stats dropdown with header coin selector
+                if (_userSelectedCoin) {
+                    const statsSel = document.getElementById('stats-coin-selector');
+                    if (statsSel && statsSel.value !== _userSelectedCoin) {
+                        statsSel.value = _userSelectedCoin;
+                    }
+                    _selectedStatsCoin = _userSelectedCoin;
+                }
             }
             // Always re-apply coin filter so selected coin stays current
             applyStatsCoinFilter();
@@ -9357,7 +9680,9 @@
             try {
                 const headers = {};
                 if (typeof apiKey !== 'undefined' && apiKey) headers['X-API-Key'] = apiKey;
-                const resp = await fetch('/api/luck', { headers });
+                // Pass selected coin to filter luck/blocks data per-coin
+                const coinParam = _userSelectedCoin ? '?coin=' + encodeURIComponent(_userSelectedCoin) : '';
+                const resp = await fetch('/api/luck' + coinParam, { headers });
                 if (!resp.ok) return;
                 const data = await resp.json();
                 if (!data.success) return;

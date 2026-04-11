@@ -5340,6 +5340,49 @@ def _fetch_per_coin_prices(currency_code):
     return prices
 
 
+# Cache for per-coin all-currency prices (single CoinGecko call)
+_per_coin_all_prices_cache = {"data": {}, "last_update": 0}
+_per_coin_all_prices_lock = threading.Lock()
+
+
+def _fetch_per_coin_all_prices():
+    """Fetch prices for all coins in all fiat currencies with a single CoinGecko call.
+
+    Returns dict: {coin_symbol: {cur_code: price, ...}, ...}
+    Cached for 300 seconds to avoid rate limiting.
+    """
+    with _per_coin_all_prices_lock:
+        if time.time() - _per_coin_all_prices_cache["last_update"] < 300:
+            return _per_coin_all_prices_cache["data"]
+
+    id_to_coins = {}
+    for symbol, cg_id in COINGECKO_IDS.items():
+        if cg_id:
+            id_to_coins.setdefault(cg_id, []).append(symbol)
+    if not id_to_coins:
+        return {}
+
+    result = {}
+    try:
+        ids_param = ",".join(id_to_coins.keys())
+        resp = _http_session.get(
+            f"https://api.coingecko.com/api/v3/simple/price?ids={ids_param}&vs_currencies={DASHBOARD_VS_CURRENCIES}",
+            timeout=5,
+        )
+        data = resp.json()
+        for cg_id, symbols in id_to_coins.items():
+            coin_data = data.get(cg_id, {})
+            for sym in symbols:
+                result[sym] = {cur_code: coin_data.get(cur_code, 0) for cur_code in DASHBOARD_VS_CURRENCIES.split(",")}
+    except (requests.exceptions.RequestException, ValueError, KeyError, TypeError):
+        pass
+
+    with _per_coin_all_prices_lock:
+        _per_coin_all_prices_cache["data"] = result
+        _per_coin_all_prices_cache["last_update"] = time.time()
+    return result
+
+
 # ============================================
 # SUBNET SCANNER FUNCTIONS
 # ============================================
@@ -10051,6 +10094,44 @@ def get_miners():
         _net_diff = pool_stats.get("network_difficulty", 0)
         _net_hashrate = _compute_network_hashrate(_net_diff)
 
+        # Enrich per_coin_stats with block_reward, price, and metadata for frontend coin switching
+        per_coin_raw = pool_stats.get("per_coin", {})
+        per_coin_enriched = {}
+        _all_coin_prices = _fetch_per_coin_all_prices() if per_coin_raw else {}
+        for _pcs, _pcdata in per_coin_raw.items():
+            _enriched = dict(_pcdata)
+            # Use dynamic block reward for primary coin (from fetch_block_reward), static for others
+            if _pcs == primary_coin and reward_info.get("block_reward"):
+                _enriched["block_reward"] = reward_info["block_reward"]
+            else:
+                _enriched["block_reward"] = COIN_BLOCK_REWARDS.get(_pcs, 0)
+            _enriched["block_time"] = COIN_BLOCK_TIMES.get(_pcs, 600)
+            _enriched["coin_name"] = MULTI_COIN_NODES.get(_pcs, {}).get("name", _pcs)
+            _enriched["algorithm"] = "scrypt" if _pcs in ("CAT", "DGB-SCRYPT", "DOGE", "LTC", "PEP") else "sha256d"
+            # Use dynamic prices for primary coin (from fetch_block_reward), cached prices for others
+            _coin_prices = _all_coin_prices.get(_pcs, {})
+            if _pcs == primary_coin:
+                # Primary coin has fresh prices from fetch_block_reward
+                for _cur_code in DASHBOARD_VS_CURRENCIES.split(","):
+                    _price_key = f"price_{_cur_code}"
+                    if reward_info.get(_price_key):
+                        _enriched[_price_key] = reward_info[_price_key]
+                    elif _cur_code in _coin_prices:
+                        _enriched[_price_key] = _coin_prices[_cur_code]
+            else:
+                for _cur_code, _price_val in _coin_prices.items():
+                    _enriched[f"price_{_cur_code}"] = _price_val
+            # Enrich network_hashrate and difficulty from node health RPC when
+            # the stratum API doesn't provide them (common for non-primary coins)
+            if not _enriched.get("network_hashrate"):
+                _node_health = multi_coin_health_cache.get("nodes", {}).get(_pcs, {})
+                if _node_health.get("network_hashrate"):
+                    _enriched["network_hashrate"] = _node_health["network_hashrate"]
+                if _node_health.get("difficulty") and not _enriched.get("difficulty"):
+                    _enriched["difficulty"] = _node_health["difficulty"]
+
+            per_coin_enriched[_pcs] = _enriched
+
         return jsonify({
             "miners": miners_snapshot,
             "totals": totals_snapshot,
@@ -10087,8 +10168,8 @@ def get_miners():
                 "multi_coin_mode": coins.get("multi_coin_mode", False),
                 "merge_mining": _get_merge_mining_map(coins.get("enabled", [])),
             },
-            # Per-coin stats breakdown for multi-coin dashboards
-            "per_coin_stats": pool_stats.get("per_coin", {}),
+            # Per-coin stats breakdown for multi-coin dashboards (enriched with block_reward, prices)
+            "per_coin_stats": per_coin_enriched,
             # H-3: Wrong pool detection for UI warning
             "wrong_pool_detected": is_wrong_pool,
             "pool_status": "wrong_pool" if is_wrong_pool else "ok",
@@ -19860,7 +19941,11 @@ def update_luck_tracker():
 @app.route('/api/luck', methods=['GET'])
 @api_key_or_login_required
 def get_luck_overview():
-    """V1.0: Get mining luck statistics"""
+    """V1.0: Get mining luck statistics.
+
+    Optional query param: ?coin=QBX — returns per-coin hashrate/difficulty stats.
+    Luck history is always aggregate (not tracked per-coin).
+    """
     update_luck_tracker()
 
     luck = luck_tracker["luck_percent"]
@@ -19888,20 +19973,47 @@ def get_luck_overview():
         status = "Very Unlucky 😢"
         status_emoji = "😢"
 
+    # Per-coin filtering: use per-coin hashrate/difficulty when a specific coin is requested
+    requested_coin = request.args.get("coin", "").upper()
+    per_coin = pool_stats_cache.get("per_coin", {})
+    if requested_coin and requested_coin in per_coin:
+        coin_stats = per_coin[requested_coin]
+        pool_hps = coin_stats.get("hashrate", 0)
+        network_hps = coin_stats.get("network_hashrate", 0)
+        coin_blocks = coin_stats.get("blocks", 0)
+        # Calculate per-coin expected blocks
+        coin_diff = coin_stats.get("difficulty", 0)
+        mining_duration = time.time() - session_stats.get("start_time", time.time())
+        coin_expected = 0
+        if coin_diff > 0 and pool_hps > 0 and mining_duration > 0:
+            algo = get_algorithm_for_coin(requested_coin)
+            diff_multiplier = (2 ** 16) if algo == "scrypt" else (2 ** 32)
+            expected_hashes = coin_diff * diff_multiplier
+            if expected_hashes > 0:
+                coin_expected = (pool_hps * mining_duration) / expected_hashes
+        coin_luck = round((coin_blocks / coin_expected) * 100, 2) if coin_expected > 0 else 100.0
+    else:
+        pool_hps = pool_stats_cache.get("pool_hashrate", 0)
+        network_hps = pool_stats_cache.get("node_networkhashps", 0)
+        coin_blocks = luck_tracker["blocks_found"]
+        coin_expected = luck_tracker["blocks_expected"]
+        coin_luck = luck
+
     return jsonify({
         "success": True,
         "luck": {
-            "percent": luck_tracker["luck_percent"],
+            "percent": coin_luck,
             "status": status,
             "status_emoji": status_emoji,
-            "blocks_found": luck_tracker["blocks_found"],
-            "blocks_expected": luck_tracker["blocks_expected"]
+            "blocks_found": coin_blocks,
+            "blocks_expected": round(coin_expected, 4)
         },
-        "history": luck_tracker["luck_history"],  # Full history (up to 720 hourly samples)
+        "history": luck_tracker["luck_history"],  # Aggregate history (not per-coin)
         "hashrate": {
-            "pool_hps": pool_stats_cache.get("pool_hashrate", 0),
-            "network_hps": pool_stats_cache.get("node_networkhashps", 0)
+            "pool_hps": pool_hps,
+            "network_hps": network_hps,
         },
+        "coin": requested_coin or None,
         "note": "Luck >100% means you're finding more blocks than expected. Mining is random - short-term luck varies greatly!"
     })
 
