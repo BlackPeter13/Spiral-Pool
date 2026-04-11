@@ -6449,6 +6449,41 @@ def calc_efficiency(power_watts, hashrate_ghs):
     return power_watts / (hashrate_ghs / 1000)
 
 # === MINER POLLING ===
+def _normalize_nmaxe_v3(d):
+    """Flatten NMAxe v3.x nested API response to v2.x flat format.
+    v3.0.10+ nests fields under identity/miner/temps/power/asic sub-objects.
+    Returns original dict unchanged if already flat (v2.x) or not NMaxe."""
+    identity = d.get("identity")
+    if not isinstance(identity, dict):
+        return d
+    if str(identity.get("hwModel", "")).upper() != "NMAXE":
+        return d
+    miner = d.get("miner", {})
+    temps = d.get("temps", {})
+    power_obj = d.get("power", {})
+    asic = d.get("asic", {})
+    stratum = d.get("stratum", {})
+    flat = dict(d)
+    flat["hwModel"] = identity.get("hwModel", "")
+    flat["fwVersion"] = identity.get("fwVersion", "")
+    flat["hostName"] = identity.get("hostName", "")
+    flat["hashRate"] = miner.get("hashRate", 0)
+    flat["sharesAccepted"] = miner.get("sAccepted", 0)
+    flat["sharesRejected"] = miner.get("sRejected", 0)
+    flat["uptimeSeconds"] = miner.get("uptimeSeconds", 0)
+    flat["bestDiffEver"] = miner.get("bestDiffEver", "0")
+    flat["asicTemp"] = temps.get("asic", 0)
+    flat["vcoreTemp"] = temps.get("vcore", 0)
+    flat["mcuTemp"] = temps.get("vcore", 0)
+    flat["power"] = power_obj.get("power", 0) if isinstance(power_obj, dict) else power_obj
+    flat["freqReq"] = asic.get("freqReq", 0)
+    flat["vcoreActual"] = asic.get("vcoreReal", 0)
+    flat["vcoreReq"] = asic.get("vcoreReq", 0)
+    if isinstance(stratum, dict) and "url" in stratum and "used" not in stratum:
+        flat["stratum"] = {"used": {"url": stratum.get("url", ""), "user": stratum.get("user", "")}}
+    return flat
+
+
 def fetch_nmaxe(ip, timeout=5):
     # SECURITY: Validate IP to prevent SSRF
     if not validate_miner_ip(ip):
@@ -6456,7 +6491,7 @@ def fetch_nmaxe(ip, timeout=5):
     try:
         req = urllib.request.Request(f"http://{ip}/api/system/info", headers={"User-Agent": f"SpiralSentinel/{__version__}"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            d = json.loads(resp.read().decode())
+            d = _normalize_nmaxe_v3(json.loads(resp.read().decode()))
             # NMAxe firmware (v2.9.x+) uses nested stratum object and different field names.
             # pool URL: stratum.used.url  |  hostname: hostName  |  user: stratum.used.user
             stratum = d.get("stratum", {})
