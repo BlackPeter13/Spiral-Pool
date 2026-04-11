@@ -327,6 +327,38 @@ func (ms *MultiServer) handleDisconnect(session *protocol.Session) {
 func (ms *MultiServer) handleMinerClassified(sessionID uint64, profile stratum.MinerProfile) {
 	ms.sessionClass.Store(sessionID, profile.Class)
 
+	// Apply difficulty settings from config or profile.
+	// In multi-port mode, coin pool handlers are not wired to the shared stratum
+	// server, so difficulty must be applied here. Without this, miners get the
+	// early subscribe difficulty but never get updated after classification —
+	// causing "stuck at 500" when useConfigDifficulty is false and the miner
+	// reconnects as MinerClassUnknown.
+	if session, ok := ms.server.GetSession(sessionID); ok {
+		cfgDiff := ms.cfg.Stratum.Difficulty
+		initialDiff := profile.InitialDiff
+		useConfig := cfgDiff.VarDiff.UseConfigDifficulty || profile.Class == stratum.MinerClassUnknown
+		if useConfig && cfgDiff.Initial > 0 {
+			initialDiff = cfgDiff.Initial
+		}
+		// Only send if different from what was already sent at subscribe time
+		if initialDiff != session.GetDifficulty() {
+			session.SetDifficulty(initialDiff)
+			if err := ms.server.SendDifficulty(session, initialDiff); err != nil {
+				ms.logger.Warnw("Failed to send post-classify difficulty",
+					"sessionId", sessionID,
+					"error", err,
+				)
+			} else {
+				ms.logger.Infow("Sent post-classify difficulty",
+					"sessionId", sessionID,
+					"class", profile.Class.String(),
+					"difficulty", initialDiff,
+					"useConfigDifficulty", cfgDiff.VarDiff.UseConfigDifficulty,
+				)
+			}
+		}
+	}
+
 	// Re-evaluate coin assignment now that we know the miner class
 	selection := ms.selector.SelectCoin(sessionID)
 	if selection.Changed {
