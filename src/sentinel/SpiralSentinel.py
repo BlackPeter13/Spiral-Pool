@@ -9055,7 +9055,8 @@ def fetch_prometheus_metrics():
             # Parse metric line: metric_name{labels} value or metric_name value
             try:
                 # Handle metrics with labels: metric_name{label="value"} 123.45
-                if '{' in line:
+                has_labels = '{' in line
+                if has_labels:
                     name_part = line.split('{')[0]
                     value_part = line.split('}')[-1].strip()
                 else:
@@ -9069,7 +9070,17 @@ def fetch_prometheus_metrics():
                 # Parse value
                 try:
                     value = float(value_part)
-                    metrics[name_part] = value
+                    # Labeled metrics (e.g., stratum_shares_rejected_total{reason="stale"})
+                    # may have multiple label variants. Sum them under the bare metric name
+                    # so callers get the total. Also store the full labeled key for consumers
+                    # that need per-label breakdown.
+                    if has_labels:
+                        # Store full labeled key for per-label access
+                        metrics[line.split()[0].strip()] = value
+                        # Accumulate into bare name for total access
+                        metrics[name_part] = metrics.get(name_part, 0) + value
+                    else:
+                        metrics[name_part] = value
                 except ValueError:
                     continue
 
@@ -19723,9 +19734,14 @@ def monitor_loop(state):
                                         _pool_acc = _prom.get("stratum_shares_accepted_total", 0)
                                         _pool_rej = _prom.get("stratum_shares_rejected_total", 0)
                                         _pool_total = _pool_acc + _pool_rej
-                                        if _pool_total > 0:
+                                        if _pool_total > 100:
+                                            # Pool has meaningful share data — use it as ground truth
                                             _pool_rej_pct = (_pool_rej / _pool_total) * 100
                                             _pool_side_confirmed = _pool_rej_pct > 5
+                                        else:
+                                            # Pool counters missing or near-zero (auth failed, just restarted)
+                                            # — fall back to trusting miner data
+                                            _pool_side_confirmed = True
                                     else:
                                         # Metrics unavailable — fall back to trusting miner data
                                         _pool_side_confirmed = True
