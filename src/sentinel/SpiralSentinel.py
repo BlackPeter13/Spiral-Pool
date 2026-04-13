@@ -19726,27 +19726,23 @@ def monitor_loop(state):
                                 # Miner-reported "Rejected" includes internal HW rejects that never
                                 # reach the pool (Avalon cgminer API inflates this significantly).
                                 # Only alert if the pool itself confirms elevated rejection rate.
+                                # Uses _infra_health.metrics (already fetched with auth token earlier
+                                # in this loop via update_infrastructure_health) — NOT a separate
+                                # fetch_prometheus_metrics() call which would fail without the token.
                                 _pool_side_confirmed = False
                                 _pool_rej_pct = 0.0
-                                try:
-                                    _prom = fetch_prometheus_metrics()
-                                    if _prom:
-                                        _pool_acc = _prom.get("stratum_shares_accepted_total", 0)
-                                        _pool_rej = _prom.get("stratum_shares_rejected_total", 0)
-                                        _pool_total = _pool_acc + _pool_rej
-                                        if _pool_total > 100:
-                                            # Pool has meaningful share data — use it as ground truth
-                                            _pool_rej_pct = (_pool_rej / _pool_total) * 100
-                                            _pool_side_confirmed = _pool_rej_pct > 5
-                                        else:
-                                            # Pool counters missing or near-zero (auth failed, just restarted)
-                                            # — fall back to trusting miner data
-                                            _pool_side_confirmed = True
+                                _prom = _infra_health.metrics
+                                if _prom:
+                                    _pool_acc = _prom.get("stratum_shares_accepted_total", 0)
+                                    _pool_rej = _prom.get("stratum_shares_rejected_total", 0)
+                                    _pool_total = _pool_acc + _pool_rej
+                                    if _pool_total > 100:
+                                        _pool_rej_pct = (_pool_rej / _pool_total) * 100
+                                        _pool_side_confirmed = _pool_rej_pct > 5
                                     else:
-                                        # Metrics unavailable — fall back to trusting miner data
                                         _pool_side_confirmed = True
-                                except Exception:
-                                    _pool_side_confirmed = True  # Metrics fetch failed, don't suppress
+                                else:
+                                    _pool_side_confirmed = True
 
                                 if not _pool_side_confirmed:
                                     logger.debug(f"REJECTION SPIKE suppressed: {sanitize_log_input(name)} miner reports {reject_pct:.1f}% but pool-side is only {_pool_rej_pct:.1f}% — miner HW rejects inflating count")
