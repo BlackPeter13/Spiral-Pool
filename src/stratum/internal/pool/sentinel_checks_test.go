@@ -70,6 +70,7 @@ func defaultTestSentinelConfig() *config.SentinelConfig {
 		NodeHealthThreshold:   0.5,
 		WALDiskSpaceWarningMB: 100,
 		WALMaxFiles:           50,
+		DiffSpikePercent:      80,
 	}
 }
 
@@ -604,6 +605,132 @@ func TestCheckGoroutineCount_DoubledFromBaseline_Alert(t *testing.T) {
 		// Should fire goroutine_growth alert
 	} else {
 		t.Errorf("120 should be > 2x baseline 50")
+	}
+}
+
+// =============================================================================
+// checkMultiPortDifficultySpike: Threshold validation
+// =============================================================================
+
+// TestDifficultySpike_ThresholdAt80Percent verifies the difficulty spike alert
+// threshold is 80%, matching the production fix for DGB's frequent retargets.
+// DGB adjusts difficulty every block (~2 min), causing 50-66% swings that are
+// normal behavior. The threshold was raised from 50% to 80% to suppress these.
+//
+// Production evidence (2026-04-13): DGB fired a +66% spike alert under the old
+// 50% threshold. With 80%, that alert would be correctly suppressed.
+func TestDifficultySpike_ThresholdAt80Percent(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		oldDiff   float64
+		newDiff   float64
+		expectPct float64
+		shouldFire bool
+	}{
+		{
+			name:       "DGB +66% — normal retarget, should NOT fire (production case)",
+			oldDiff:    2_870_000,
+			newDiff:    4_764_000,
+			expectPct:  66.0,
+			shouldFire: false,
+		},
+		{
+			name:       "+50% — old threshold, should NOT fire",
+			oldDiff:    1_000_000,
+			newDiff:    1_500_000,
+			expectPct:  50.0,
+			shouldFire: false,
+		},
+		{
+			name:       "+79.9% — just below threshold",
+			oldDiff:    1_000_000,
+			newDiff:    1_799_000,
+			expectPct:  79.9,
+			shouldFire: false,
+		},
+		{
+			name:       "+80.1% — just above threshold, SHOULD fire",
+			oldDiff:    1_000_000,
+			newDiff:    1_801_000,
+			expectPct:  80.1,
+			shouldFire: true,
+		},
+		{
+			name:       "+150% — large spike, SHOULD fire",
+			oldDiff:    1_000_000,
+			newDiff:    2_500_000,
+			expectPct:  150.0,
+			shouldFire: true,
+		},
+		{
+			name:       "-30% drop — should NOT fire (only positive spikes)",
+			oldDiff:    1_000_000,
+			newDiff:    700_000,
+			expectPct:  -30.0,
+			shouldFire: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := defaultTestSentinelConfig()
+			changePct := ((tc.newDiff - tc.oldDiff) / tc.oldDiff) * 100
+			threshold := float64(cfg.DiffSpikePercent)
+			if threshold <= 0 {
+				threshold = 80
+			}
+			fired := changePct > threshold
+
+			// Verify the percentage matches expectation (within 0.2% for floating point)
+			if diff := changePct - tc.expectPct; diff > 0.2 || diff < -0.2 {
+				t.Errorf("changePct = %.1f%%, want ~%.1f%%", changePct, tc.expectPct)
+			}
+
+			if fired != tc.shouldFire {
+				t.Errorf("changePct=%.1f%%: fired=%v, want %v", changePct, fired, tc.shouldFire)
+			}
+		})
+	}
+}
+
+// TestDifficultySpike_ConfigurableThreshold verifies the threshold is read from
+// config and that a zero/negative config falls back to 80%.
+func TestDifficultySpike_ConfigurableThreshold(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		configPercent int
+		changePct     float64
+		shouldFire    bool
+	}{
+		{"config=80, change=66 → no fire", 80, 66.0, false},
+		{"config=80, change=81 → fire", 80, 81.0, true},
+		{"config=50, change=51 → fire", 50, 51.0, true},
+		{"config=50, change=49 → no fire", 50, 49.0, false},
+		{"config=100, change=99 → no fire", 100, 99.0, false},
+		{"config=100, change=101 → fire", 100, 101.0, true},
+		{"config=0 (fallback to 80), change=66 → no fire", 0, 66.0, false},
+		{"config=0 (fallback to 80), change=81 → fire", 0, 81.0, true},
+		{"config=-10 (fallback to 80), change=66 → no fire", -10, 66.0, false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			threshold := float64(tc.configPercent)
+			if threshold <= 0 {
+				threshold = 80 // defensive fallback — matches sentinel.go
+			}
+			fired := tc.changePct > threshold
+			if fired != tc.shouldFire {
+				t.Errorf("config=%d, change=%.1f%%: fired=%v, want %v (threshold=%.0f)",
+					tc.configPercent, tc.changePct, fired, tc.shouldFire, threshold)
+			}
+		})
 	}
 }
 

@@ -282,67 +282,67 @@ func (h *multiPortTestHarness) pollAndUpdate() {
 // =============================================================================
 
 func TestIntegration_FullScheduledFlow(t *testing.T) {
-	// DGB=50% (00:00–12:00), BCH=30% (12:00–19:12), BTC=20% (19:12–24:00)
-	h := newHarness(t, 6, 0) // Start at 06:00 → DGB slot
+	// Sorted: BCH=30% (00:00–07:12), BTC=20% (07:12–12:00), DGB=50% (12:00–24:00)
+	h := newHarness(t, 2, 0) // Start at 02:00 → BCH slot
 
-	// Step 1: Connect miner → should be assigned to DGB (current slot)
+	// Step 1: Connect miner → should be assigned to BCH (current slot)
 	sel := h.selectAndAssign(1)
-	if sel.Symbol != "DGB" || !sel.Changed {
-		t.Fatalf("Step 1: expected DGB initial_assignment, got %s (changed=%v)", sel.Symbol, sel.Changed)
+	if sel.Symbol != "BCH" || !sel.Changed {
+		t.Fatalf("Step 1: expected BCH initial_assignment, got %s (changed=%v)", sel.Symbol, sel.Changed)
 	}
-	t.Logf("Step 1: Miner assigned to %s at 06:00 UTC ✓", sel.Symbol)
+	t.Logf("Step 1: Miner assigned to %s at 02:00 UTC ✓", sel.Symbol)
 
-	// Step 2: Mine shares on DGB
+	// Step 2: Mine shares on BCH
 	for i := 0; i < 10; i++ {
-		coin, result := h.routeShare(1, "DGB-job-1", 1000)
-		if coin != "DGB" || !result.Accepted {
+		coin, result := h.routeShare(1, "BCH-job-1", 500)
+		if coin != "BCH" || !result.Accepted {
 			t.Fatalf("Step 2: share %d: coin=%s, accepted=%v", i, coin, result.Accepted)
 		}
 	}
-	t.Logf("Step 2: 10 shares mined on DGB ✓")
+	t.Logf("Step 2: 10 shares mined on BCH ✓")
 
-	// Step 3: Time advances to 13:00 → BCH slot
+	// Step 3: Time advances to 13:00 → DGB slot
 	h.setTime(13, 0)
 	sel = h.selectAndAssign(1)
-	if sel.Symbol != "BCH" || !sel.Changed {
-		t.Fatalf("Step 3: expected BCH scheduled_rotation, got %s (changed=%v, reason=%s)", sel.Symbol, sel.Changed, sel.Reason)
+	if sel.Symbol != "DGB" || !sel.Changed {
+		t.Fatalf("Step 3: expected DGB scheduled_rotation, got %s (changed=%v, reason=%s)", sel.Symbol, sel.Changed, sel.Reason)
 	}
-	t.Logf("Step 3: Scheduled rotation → BCH at 13:00 UTC ✓")
+	t.Logf("Step 3: Scheduled rotation → DGB at 13:00 UTC ✓")
 
-	// Step 4: Mine shares on BCH
+	// Step 4: Mine shares on DGB
 	for i := 0; i < 5; i++ {
-		coin, result := h.routeShare(1, "BCH-job-1", 500)
-		if coin != "BCH" || !result.Accepted {
+		coin, result := h.routeShare(1, "DGB-job-1", 1000)
+		if coin != "DGB" || !result.Accepted {
 			t.Fatalf("Step 4: share %d: coin=%s, accepted=%v", i, coin, result.Accepted)
 		}
 	}
-	t.Logf("Step 4: 5 shares mined on BCH ✓")
+	t.Logf("Step 4: 5 shares mined on DGB ✓")
 
-	// Step 5: Find a block on BCH
-	h.bch.SetBlockResult("0000000000000000000bch-block-found")
-	coin, result := h.routeShare(1, "BCH-job-1", 500)
-	if coin != "BCH" || !result.IsBlock {
-		t.Fatalf("Step 5: block not found on BCH: coin=%s, isBlock=%v", coin, result.IsBlock)
+	// Step 5: Find a block on DGB
+	h.dgb.SetBlockResult("0000000000000000000dgb-block-found")
+	coin, result := h.routeShare(1, "DGB-job-1", 1000)
+	if coin != "DGB" || !result.IsBlock {
+		t.Fatalf("Step 5: block not found on DGB: coin=%s, isBlock=%v", coin, result.IsBlock)
 	}
-	h.bch.ClearBlockResult()
-	t.Logf("Step 5: Block found on BCH ✓ (hash: %s)", result.BlockHash)
+	h.dgb.ClearBlockResult()
+	t.Logf("Step 5: Block found on DGB ✓ (hash: %s)", result.BlockHash)
 
-	// Step 6: Time advances to 20:00 → BTC slot
+	// Step 6: Still DGB slot at 20:00
 	h.setTime(20, 0)
 	sel = h.selectAndAssign(1)
-	if sel.Symbol != "BTC" || !sel.Changed {
-		t.Fatalf("Step 6: expected BTC, got %s (reason=%s)", sel.Symbol, sel.Reason)
+	if sel.Symbol != "DGB" {
+		t.Fatalf("Step 6: expected DGB still, got %s (reason=%s)", sel.Symbol, sel.Reason)
 	}
-	t.Logf("Step 6: Scheduled rotation → BTC at 20:00 UTC ✓")
+	t.Logf("Step 6: Still on DGB at 20:00 UTC ✓")
 
 	// Step 7: Verify share counts
-	dgbShares := len(h.dgb.GetReceivedShares())
 	bchShares := len(h.bch.GetReceivedShares())
-	bchBlocks := len(h.bch.GetBlocksFound())
+	dgbShares := len(h.dgb.GetReceivedShares())
+	dgbBlocks := len(h.dgb.GetBlocksFound())
 	t.Logf("\n=== FULL FLOW SUMMARY ===")
-	t.Logf("DGB shares: %d, BCH shares: %d (1 block), BTC shares: 0", dgbShares, bchShares)
-	if dgbShares != 10 || bchShares != 6 || bchBlocks != 1 {
-		t.Errorf("unexpected counts: DGB=%d BCH=%d bchBlocks=%d", dgbShares, bchShares, bchBlocks)
+	t.Logf("BCH shares: %d, DGB shares: %d (1 block), BTC shares: 0", bchShares, dgbShares)
+	if bchShares != 10 || dgbShares != 6 || dgbBlocks != 1 {
+		t.Errorf("unexpected counts: BCH=%d DGB=%d dgbBlocks=%d", bchShares, dgbShares, dgbBlocks)
 	}
 }
 
@@ -351,7 +351,8 @@ func TestIntegration_FullScheduledFlow(t *testing.T) {
 // =============================================================================
 
 func TestIntegration_BlockCreationRoutedToCorrectPool(t *testing.T) {
-	h := newHarness(t, 6, 0) // DGB slot
+	// Sorted: BCH 00:00–07:12, BTC 07:12–12:00, DGB 12:00–24:00
+	h := newHarness(t, 14, 0) // DGB slot
 
 	// Two miners, both on DGB
 	h.selectAndAssign(1)
@@ -371,8 +372,8 @@ func TestIntegration_BlockCreationRoutedToCorrectPool(t *testing.T) {
 		t.Fatalf("session 2 normal share wrong: coin=%s, accepted=%v, isBlock=%v", coin2, result2.Accepted, result2.IsBlock)
 	}
 
-	// Move to BCH slot
-	h.setTime(13, 0)
+	// Move to BCH slot (next day, 02:00)
+	h.setTime(2, 0)
 	h.selectAndAssign(1)
 	h.selectAndAssign(2)
 
@@ -402,7 +403,7 @@ func TestIntegration_BlockCreationRoutedToCorrectPool(t *testing.T) {
 // =============================================================================
 
 func TestIntegration_CoinPoolGoesDown_MinersFailover(t *testing.T) {
-	h := newHarness(t, 6, 0) // DGB slot
+	h := newHarness(t, 14, 0) // DGB slot (12:00–24:00)
 
 	// 5 miners on DGB
 	for i := uint64(1); i <= 5; i++ {
@@ -447,7 +448,7 @@ func TestIntegration_CoinPoolGoesDown_MinersFailover(t *testing.T) {
 // =============================================================================
 
 func TestIntegration_AllCoinsDown_GracefulDegradation(t *testing.T) {
-	h := newHarness(t, 6, 0)
+	h := newHarness(t, 14, 0) // DGB slot
 
 	h.selectAndAssign(1)
 
@@ -473,7 +474,7 @@ func TestIntegration_AllCoinsDown_GracefulDegradation(t *testing.T) {
 
 func TestIntegration_SharesRoutedToCorrectPool_Isolated(t *testing.T) {
 	// Session 1 mines during DGB slot, session 2 mines during BCH slot
-	h := newHarness(t, 6, 0) // DGB slot
+	h := newHarness(t, 14, 0) // DGB slot (12:00–24:00)
 
 	h.selectAndAssign(1)
 
@@ -485,8 +486,8 @@ func TestIntegration_SharesRoutedToCorrectPool_Isolated(t *testing.T) {
 		}
 	}
 
-	// Move to BCH slot
-	h.setTime(13, 0)
+	// Move to BCH slot (00:00–07:12)
+	h.setTime(2, 0)
 	h.selectAndAssign(2) // new session during BCH slot
 
 	for i := 0; i < 10; i++ {
@@ -651,32 +652,33 @@ func TestIntegration_ConcurrentMiners_StressTest(t *testing.T) {
 // =============================================================================
 
 func TestIntegration_BlockFoundDuringCoinSwitch(t *testing.T) {
-	h := newHarness(t, 6, 0) // DGB slot
+	// Sorted: BCH 00:00–07:12, BTC 07:12–12:00, DGB 12:00–24:00
+	h := newHarness(t, 2, 0) // BCH slot
 
 	h.selectAndAssign(1)
 
-	// Miner finds a block on DGB
-	h.dgb.SetBlockResult("0000000-dgb-block-during-switch")
-	coin, result := h.routeShare(1, "DGB-job-1", 1000)
-	if coin != "DGB" || !result.IsBlock {
-		t.Fatalf("block not on DGB: coin=%s, isBlock=%v", coin, result.IsBlock)
+	// Miner finds a block on BCH
+	h.bch.SetBlockResult("0000000-bch-block-during-switch")
+	coin, result := h.routeShare(1, "BCH-job-1", 500)
+	if coin != "BCH" || !result.IsBlock {
+		t.Fatalf("block not on BCH: coin=%s, isBlock=%v", coin, result.IsBlock)
 	}
-	t.Logf("Block found on DGB ✓ (hash: %s)", result.BlockHash)
+	t.Logf("Block found on BCH ✓ (hash: %s)", result.BlockHash)
 
-	// Now switch to BCH slot
-	h.dgb.ClearBlockResult()
+	// Now switch to DGB slot
+	h.bch.ClearBlockResult()
 	h.setTime(13, 0)
 	sel := h.selectAndAssign(1)
-	if sel.Symbol != "BCH" {
-		t.Fatalf("expected BCH after switch, got %s", sel.Symbol)
+	if sel.Symbol != "DGB" {
+		t.Fatalf("expected DGB after switch, got %s", sel.Symbol)
 	}
 
-	// Verify block was recorded on DGB
-	dgbBlocks := h.dgb.GetBlocksFound()
-	if len(dgbBlocks) != 1 {
-		t.Errorf("DGB should have 1 block, got %d", len(dgbBlocks))
+	// Verify block was recorded on BCH
+	bchBlocks := h.bch.GetBlocksFound()
+	if len(bchBlocks) != 1 {
+		t.Errorf("BCH should have 1 block, got %d", len(bchBlocks))
 	}
-	t.Logf("Block on DGB recorded ✓, then switched to %s ✓", sel.Symbol)
+	t.Logf("Block on BCH recorded ✓, then switched to %s ✓", sel.Symbol)
 }
 
 // =============================================================================

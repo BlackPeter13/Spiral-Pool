@@ -45,8 +45,8 @@ func setupSelectorAt(t *testing.T, hour, minute int) (*Monitor, *Selector, *mock
 	mon.RegisterCoin(bch, 600)
 	mon.poll()
 
-	// DGB=80%, BCH=15%, BTC=5%
-	// Time slots: DGB 00:00–19:12, BCH 19:12–22:48, BTC 22:48–24:00
+	// BCH=15%, BTC=5%, DGB=80% (alphabetical order after sort)
+	// Time slots: BCH 00:00–03:36, BTC 03:36–04:48, DGB 04:48–24:00
 	sel := NewSelector(SelectorConfig{
 		Monitor:      mon,
 		AllowedCoins: []string{"DGB", "BTC", "BCH"},
@@ -81,21 +81,21 @@ func TestSelectorInitialAssignment(t *testing.T) {
 }
 
 func TestSelectorTimeSlots(t *testing.T) {
-	// DGB=80%, BCH=15%, BTC=5%
-	// DGB: 00:00–19:12, BCH: 19:12–22:48, BTC: 22:48–24:00
+	// Sorted alphabetically: BCH=15%, BTC=5%, DGB=80%
+	// BCH: 00:00–03:36, BTC: 03:36–04:48, DGB: 04:48–24:00
 
 	tests := []struct {
 		hour, minute int
 		wantCoin     string
 		desc         string
 	}{
-		{0, 0, "DGB", "midnight — start of DGB slot"},
-		{10, 0, "DGB", "mid-morning — middle of DGB slot"},
-		{19, 0, "DGB", "19:00 — still DGB (ends at 19:12)"},
-		{19, 15, "BCH", "19:15 — BCH slot (19:12–22:48)"},
-		{21, 0, "BCH", "21:00 — middle of BCH slot"},
-		{22, 50, "BTC", "22:50 — BTC slot (22:48–24:00)"},
-		{23, 59, "BTC", "23:59 — end of BTC slot"},
+		{0, 0, "BCH", "midnight — start of BCH slot"},
+		{2, 0, "BCH", "02:00 — middle of BCH slot"},
+		{3, 40, "BTC", "03:40 — BTC slot (03:36–04:48)"},
+		{5, 0, "DGB", "05:00 — DGB slot (04:48–24:00)"},
+		{10, 0, "DGB", "10:00 — middle of DGB slot"},
+		{19, 0, "DGB", "19:00 — DGB slot"},
+		{23, 59, "DGB", "23:59 — end of DGB slot"},
 	}
 
 	for _, tt := range tests {
@@ -110,7 +110,7 @@ func TestSelectorTimeSlots(t *testing.T) {
 }
 
 func TestSelector5050Split(t *testing.T) {
-	// 50/50 DGB/BTC → DGB 00:00–12:00, BTC 12:00–24:00
+	// 50/50 DGB/BTC → sorted: BTC 00:00–12:00, DGB 12:00–24:00
 	mon := NewMonitor(MonitorConfig{
 		PollInterval: time.Hour,
 		Logger:       zap.NewNop(),
@@ -126,12 +126,12 @@ func TestSelector5050Split(t *testing.T) {
 		hour     int
 		wantCoin string
 	}{
-		{0, "DGB"},
-		{6, "DGB"},
-		{11, "DGB"},
-		{12, "BTC"},
-		{18, "BTC"},
-		{23, "BTC"},
+		{0, "BTC"},
+		{6, "BTC"},
+		{11, "BTC"},
+		{12, "DGB"},
+		{18, "DGB"},
+		{23, "DGB"},
 	}
 
 	for _, tt := range tests {
@@ -169,8 +169,8 @@ func TestSelectorScheduledRotation(t *testing.T) {
 	mon.RegisterCoin(bch, 600)
 	mon.poll()
 
-	// 50/50: DGB 00:00–12:00, BCH 12:00–24:00
-	currentTime := mockTime(10, 0) // Start in DGB slot
+	// Sorted: BCH 00:00–12:00, DGB 12:00–24:00
+	currentTime := mockTime(2, 0) // Start in BCH slot
 	sel := NewSelector(SelectorConfig{
 		Monitor:      mon,
 		AllowedCoins: []string{"DGB", "BCH"},
@@ -184,10 +184,10 @@ func TestSelectorScheduledRotation(t *testing.T) {
 		Logger:        zap.NewNop(),
 	})
 
-	// Initial: DGB
+	// Initial: BCH (00:00–12:00 slot)
 	sel1 := sel.SelectCoin(1)
-	if sel1.Symbol != "DGB" {
-		t.Fatalf("at 10:00: got %s, want DGB", sel1.Symbol)
+	if sel1.Symbol != "BCH" {
+		t.Fatalf("at 02:00: got %s, want BCH", sel1.Symbol)
 	}
 	sel.AssignCoin(1, sel1.Symbol, "worker1", "low")
 
@@ -197,14 +197,14 @@ func TestSelectorScheduledRotation(t *testing.T) {
 		t.Error("same time slot — should not change")
 	}
 
-	// Advance to 13:00 (BCH slot)
+	// Advance to 13:00 (DGB slot)
 	currentTime = mockTime(13, 0)
 	sel3 := sel.SelectCoin(1)
 	if !sel3.Changed {
-		t.Error("crossed into BCH slot — should switch")
+		t.Error("crossed into DGB slot — should switch")
 	}
-	if sel3.Symbol != "BCH" {
-		t.Errorf("at 13:00: got %s, want BCH", sel3.Symbol)
+	if sel3.Symbol != "DGB" {
+		t.Errorf("at 13:00: got %s, want DGB", sel3.Symbol)
 	}
 	if sel3.Reason != "scheduled_rotation" {
 		t.Errorf("reason = %q, want scheduled_rotation", sel3.Reason)
@@ -240,7 +240,8 @@ func TestSelectorMinTimeOnCoin(t *testing.T) {
 	mon.RegisterCoin(btc, 600)
 	mon.poll()
 
-	// 50/50, time at 13:00 (BTC slot), miner on DGB with 1h min_time
+	// Sorted: BTC 00:00–12:00, DGB 12:00–24:00
+	// Time at 13:00 (DGB slot), miner on BTC with 1h min_time → should NOT switch
 	sel := NewSelector(SelectorConfig{
 		Monitor:      mon,
 		AllowedCoins: []string{"DGB", "BTC"},
@@ -254,7 +255,7 @@ func TestSelectorMinTimeOnCoin(t *testing.T) {
 		Logger:        zap.NewNop(),
 	})
 
-	sel.AssignCoin(1, "DGB", "worker1", "low")
+	sel.AssignCoin(1, "BTC", "worker1", "low")
 
 	selection := sel.SelectCoin(1)
 	if selection.Changed {
@@ -406,7 +407,8 @@ func TestSelectorZeroWeightExcluded(t *testing.T) {
 }
 
 func TestSelectorBuildTimeSlots(t *testing.T) {
-	slots := buildTimeSlots([]CoinWeight{
+	// Input order doesn't matter — buildTimeSlots sorts alphabetically
+	slots, anchor := buildTimeSlots([]CoinWeight{
 		{Symbol: "DGB", Weight: 80},
 		{Symbol: "BCH", Weight: 15},
 		{Symbol: "BTC", Weight: 5},
@@ -415,32 +417,35 @@ func TestSelectorBuildTimeSlots(t *testing.T) {
 	if len(slots) != 3 {
 		t.Fatalf("expected 3 slots, got %d", len(slots))
 	}
-
-	// DGB: 0.0–0.8
-	if slots[0].symbol != "DGB" || slots[0].startFrac != 0.0 {
-		t.Errorf("slot 0: got %s@%.2f, want DGB@0.00", slots[0].symbol, slots[0].startFrac)
-	}
-	if math.Abs(slots[0].endFrac-0.80) > 0.001 {
-		t.Errorf("DGB endFrac = %.4f, want 0.80", slots[0].endFrac)
+	if anchor != 0.0 {
+		t.Errorf("anchor = %f, want 0.0 (no start_hour set)", anchor)
 	}
 
-	// BCH: 0.8–0.95
-	if slots[1].symbol != "BCH" {
-		t.Errorf("slot 1: got %s, want BCH", slots[1].symbol)
+	// BCH: 0.0–0.15 (alphabetically first)
+	if slots[0].symbol != "BCH" || slots[0].startFrac != 0.0 {
+		t.Errorf("slot 0: got %s@%.2f, want BCH@0.00", slots[0].symbol, slots[0].startFrac)
 	}
-	if math.Abs(slots[1].startFrac-0.80) > 0.001 {
-		t.Errorf("BCH startFrac = %.4f, want 0.80", slots[1].startFrac)
-	}
-	if math.Abs(slots[1].endFrac-0.95) > 0.001 {
-		t.Errorf("BCH endFrac = %.4f, want 0.95", slots[1].endFrac)
+	if math.Abs(slots[0].endFrac-0.15) > 0.001 {
+		t.Errorf("BCH endFrac = %.4f, want 0.15", slots[0].endFrac)
 	}
 
-	// BTC: 0.95–1.0
-	if slots[2].symbol != "BTC" {
-		t.Errorf("slot 2: got %s, want BTC", slots[2].symbol)
+	// BTC: 0.15–0.20
+	if slots[1].symbol != "BTC" {
+		t.Errorf("slot 1: got %s, want BTC", slots[1].symbol)
+	}
+	if math.Abs(slots[1].startFrac-0.15) > 0.001 {
+		t.Errorf("BTC startFrac = %.4f, want 0.15", slots[1].startFrac)
+	}
+	if math.Abs(slots[1].endFrac-0.20) > 0.001 {
+		t.Errorf("BTC endFrac = %.4f, want 0.20", slots[1].endFrac)
+	}
+
+	// DGB: 0.20–1.0
+	if slots[2].symbol != "DGB" {
+		t.Errorf("slot 2: got %s, want DGB", slots[2].symbol)
 	}
 	if slots[2].endFrac != 1.0 {
-		t.Errorf("BTC endFrac = %.4f, want 1.00", slots[2].endFrac)
+		t.Errorf("DGB endFrac = %.4f, want 1.00", slots[2].endFrac)
 	}
 
 	for _, s := range slots {
@@ -449,4 +454,257 @@ func TestSelectorBuildTimeSlots(t *testing.T) {
 		t.Logf("%s: %.1fh – %.1fh (%.0f%% of day)",
 			s.symbol, startH, endH, (s.endFrac-s.startFrac)*100)
 	}
+}
+
+// =============================================================================
+// START_HOUR TESTS — proves the fix for the QBX timing bug
+// =============================================================================
+
+func floatPtr(v float64) *float64 { return &v }
+
+func TestSelectorStartHour_BuildTimeSlots(t *testing.T) {
+	// QBX starts at 22:00 with 8% weight (~1.92h), DGB gets the rest (92%)
+	// This is the exact scenario from the production bug.
+	slots, anchor := buildTimeSlots([]CoinWeight{
+		{Symbol: "DGB", Weight: 92},
+		{Symbol: "QBX", Weight: 8, StartHour: floatPtr(22.0)},
+	})
+
+	if len(slots) != 2 {
+		t.Fatalf("expected 2 slots, got %d", len(slots))
+	}
+
+	// QBX has start_hour so it sorts first; anchor = 22/24
+	expectedAnchor := 22.0 / 24.0
+	if math.Abs(anchor-expectedAnchor) > 0.0001 {
+		t.Errorf("anchor = %f, want %f (22:00)", anchor, expectedAnchor)
+	}
+
+	// QBX: slot 0 in anchor-relative space, 0.00–0.08
+	if slots[0].symbol != "QBX" {
+		t.Errorf("slot 0: got %s, want QBX", slots[0].symbol)
+	}
+	if math.Abs(slots[0].endFrac-0.08) > 0.001 {
+		t.Errorf("QBX endFrac = %.4f, want 0.08 (8%%)", slots[0].endFrac)
+	}
+
+	// DGB: slot 1, 0.08–1.00
+	if slots[1].symbol != "DGB" {
+		t.Errorf("slot 1: got %s, want DGB", slots[1].symbol)
+	}
+	if slots[1].endFrac != 1.0 {
+		t.Errorf("DGB endFrac = %.4f, want 1.00", slots[1].endFrac)
+	}
+
+	// In wall-clock terms with anchor at 22:00:
+	// QBX: 22:00 – 23:55 (0.08 * 24 = 1.92 hours)
+	// DGB: 23:55 – 22:00 next day (0.92 * 24 = 22.08 hours)
+	qbxHours := (slots[0].endFrac - slots[0].startFrac) * 24
+	dgbHours := (slots[1].endFrac - slots[1].startFrac) * 24
+	t.Logf("QBX: %.2f hours starting at 22:00", qbxHours)
+	t.Logf("DGB: %.2f hours starting at %.2f:00", dgbHours, 22.0+qbxHours)
+
+	if math.Abs(qbxHours-1.92) > 0.01 {
+		t.Errorf("QBX duration = %.2f hours, want 1.92", qbxHours)
+	}
+}
+
+func TestSelectorStartHour_CoinSelection(t *testing.T) {
+	// Reproduce the exact production scenario:
+	// QBX: start_hour=22, weight=8 → 22:00–23:55 EST
+	// DGB: weight=92 → 23:55–22:00 EST
+	// Timezone: America/New_York
+
+	mon := NewMonitor(MonitorConfig{
+		PollInterval: time.Hour,
+		Logger:       zap.NewNop(),
+	})
+	dgb := newMockSource("DGB", "pool_dgb", 1000.0)
+	qbx := newMockSource("QBX", "pool_qbx", 5000.0)
+	mon.RegisterCoin(dgb, 15)
+	mon.RegisterCoin(qbx, 150)
+	mon.poll()
+
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("failed to load timezone: %v", err)
+	}
+
+	tests := []struct {
+		hour, minute int
+		wantCoin     string
+		desc         string
+	}{
+		// QBX window: 22:00–23:55 EST
+		{22, 0, "QBX", "22:00 — QBX slot starts"},
+		{22, 30, "QBX", "22:30 — middle of QBX slot"},
+		{23, 0, "QBX", "23:00 — still QBX"},
+		{23, 50, "QBX", "23:50 — near end of QBX slot"},
+		// DGB window: 23:55–22:00 next day
+		{23, 56, "DGB", "23:56 — DGB slot starts"},
+		{0, 0, "DGB", "midnight — DGB slot"},
+		{3, 8, "DGB", "03:08 — should NOT be QBX (the bug)"},
+		{10, 0, "DGB", "10:00 — DGB slot"},
+		{15, 0, "DGB", "15:00 — DGB slot"},
+		{21, 0, "DGB", "21:00 — DGB slot (just before QBX)"},
+		{21, 59, "DGB", "21:59 — last minute before QBX"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			mockNow := time.Date(2026, 4, 13, tt.hour, tt.minute, 0, 0, loc)
+			sel := NewSelector(SelectorConfig{
+				Monitor:      mon,
+				AllowedCoins: []string{"DGB", "QBX"},
+				CoinWeights: []CoinWeight{
+					{Symbol: "DGB", Weight: 92},
+					{Symbol: "QBX", Weight: 8, StartHour: floatPtr(22.0)},
+				},
+				PreferCoin:    "DGB",
+				MinTimeOnCoin: -1,
+				Location:      loc,
+				NowFunc:       func() time.Time { return mockNow },
+				Logger:        zap.NewNop(),
+			})
+
+			selection := sel.SelectCoin(1)
+			if selection.Symbol != tt.wantCoin {
+				t.Errorf("at %02d:%02d EST: got %s, want %s",
+					tt.hour, tt.minute, selection.Symbol, tt.wantCoin)
+			}
+		})
+	}
+}
+
+func TestSelectorStartHour_MultipleCoinsWithStartHour(t *testing.T) {
+	// Multiple coins with explicit start_hours
+	// DGB: start_hour=0, weight=80 → 00:00–19:12
+	// BCH: start_hour=19.2, weight=15 → 19:12–22:48
+	// BTC: start_hour=22.8, weight=5 → 22:48–24:00
+	slots, anchor := buildTimeSlots([]CoinWeight{
+		{Symbol: "BTC", Weight: 5, StartHour: floatPtr(22.8)},
+		{Symbol: "DGB", Weight: 80, StartHour: floatPtr(0.0)},
+		{Symbol: "BCH", Weight: 15, StartHour: floatPtr(19.2)},
+	})
+
+	if len(slots) != 3 {
+		t.Fatalf("expected 3 slots, got %d", len(slots))
+	}
+	if anchor != 0.0 {
+		t.Errorf("anchor = %f, want 0.0", anchor)
+	}
+
+	// Sorted by start_hour: DGB(0.0), BCH(19.2), BTC(22.8)
+	if slots[0].symbol != "DGB" {
+		t.Errorf("slot 0: got %s, want DGB", slots[0].symbol)
+	}
+	if slots[1].symbol != "BCH" {
+		t.Errorf("slot 1: got %s, want BCH", slots[1].symbol)
+	}
+	if slots[2].symbol != "BTC" {
+		t.Errorf("slot 2: got %s, want BTC", slots[2].symbol)
+	}
+}
+
+// =============================================================================
+// DEFENSE IN DEPTH: StartHour edge cases
+// =============================================================================
+
+func TestSelectorStartHour_NegativeClampedToZero(t *testing.T) {
+	// Negative start_hour should be clamped to 0 (midnight)
+	slots, anchor := buildTimeSlots([]CoinWeight{
+		{Symbol: "QBX", Weight: 10, StartHour: floatPtr(-5.0)},
+		{Symbol: "DGB", Weight: 90},
+	})
+
+	if len(slots) != 2 {
+		t.Fatalf("expected 2 slots, got %d", len(slots))
+	}
+	// Anchor should be clamped to 0.0, not -5/24
+	if anchor != 0.0 {
+		t.Errorf("anchor = %f, want 0.0 (negative clamped)", anchor)
+	}
+	t.Logf("Negative start_hour clamped to 0.0 ✓ (anchor=%f)", anchor)
+}
+
+func TestSelectorStartHour_GreaterThan24ClampedToZero(t *testing.T) {
+	// start_hour >= 24 should be clamped to 0 (midnight)
+	slots, anchor := buildTimeSlots([]CoinWeight{
+		{Symbol: "QBX", Weight: 10, StartHour: floatPtr(25.0)},
+		{Symbol: "DGB", Weight: 90},
+	})
+
+	if len(slots) != 2 {
+		t.Fatalf("expected 2 slots, got %d", len(slots))
+	}
+	if anchor != 0.0 {
+		t.Errorf("anchor = %f, want 0.0 (>=24 clamped)", anchor)
+	}
+	t.Logf("start_hour>=24 clamped to 0.0 ✓ (anchor=%f)", anchor)
+}
+
+func TestSelectorStartHour_Exactly24ClampedToZero(t *testing.T) {
+	// start_hour == 24.0 should be clamped to 0 (24 == midnight next day == 0)
+	slots, anchor := buildTimeSlots([]CoinWeight{
+		{Symbol: "QBX", Weight: 10, StartHour: floatPtr(24.0)},
+		{Symbol: "DGB", Weight: 90},
+	})
+
+	if len(slots) != 2 {
+		t.Fatalf("expected 2 slots, got %d", len(slots))
+	}
+	if anchor != 0.0 {
+		t.Errorf("anchor = %f, want 0.0 (24.0 clamped)", anchor)
+	}
+	t.Logf("start_hour==24 clamped to 0.0 ✓ (anchor=%f)", anchor)
+}
+
+func TestSelectorStartHour_23_99IsValid(t *testing.T) {
+	// 23.99 is the max valid start_hour — should NOT be clamped
+	_, anchor := buildTimeSlots([]CoinWeight{
+		{Symbol: "QBX", Weight: 10, StartHour: floatPtr(23.99)},
+		{Symbol: "DGB", Weight: 90},
+	})
+
+	expected := 23.99 / 24.0
+	if math.Abs(anchor-expected) > 1e-9 {
+		t.Errorf("anchor = %f, want %f (23.99 is valid)", anchor, expected)
+	}
+	t.Logf("start_hour=23.99 accepted ✓ (anchor=%f)", anchor)
+}
+
+func TestSelectorStartHour_ZeroIsValid(t *testing.T) {
+	// start_hour=0.0 means midnight — explicit zero should work
+	_, anchor := buildTimeSlots([]CoinWeight{
+		{Symbol: "QBX", Weight: 10, StartHour: floatPtr(0.0)},
+		{Symbol: "DGB", Weight: 90},
+	})
+
+	if anchor != 0.0 {
+		t.Errorf("anchor = %f, want 0.0", anchor)
+	}
+	t.Logf("start_hour=0.0 (midnight) ✓ (anchor=%f)", anchor)
+}
+
+func TestSelectorStartHour_NilStartHourDefaultsToAlphabetical(t *testing.T) {
+	// No coins have start_hour — should sort alphabetically and anchor at 0
+	slots, anchor := buildTimeSlots([]CoinWeight{
+		{Symbol: "DGB", Weight: 50},
+		{Symbol: "BCH", Weight: 30},
+		{Symbol: "BTC", Weight: 20},
+	})
+
+	if anchor != 0.0 {
+		t.Errorf("anchor = %f, want 0.0 (no start_hours)", anchor)
+	}
+	if slots[0].symbol != "BCH" {
+		t.Errorf("slot 0: got %s, want BCH (alphabetical)", slots[0].symbol)
+	}
+	if slots[1].symbol != "BTC" {
+		t.Errorf("slot 1: got %s, want BTC (alphabetical)", slots[1].symbol)
+	}
+	if slots[2].symbol != "DGB" {
+		t.Errorf("slot 2: got %s, want DGB (alphabetical)", slots[2].symbol)
+	}
+	t.Logf("No start_hour → alphabetical sort, anchor=0 ✓")
 }

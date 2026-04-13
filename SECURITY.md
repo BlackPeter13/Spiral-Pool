@@ -1,6 +1,6 @@
 # Security Policy
 
-**Last Updated:** 2026-03-27
+**Last Updated:** 2026-04-13
 
 ## Reporting a Vulnerability
 
@@ -178,5 +178,5 @@ See [OPERATIONS.md Section 10](docs/setup/OPERATIONS.md#10-operator-legal-protec
 
 *Security is a shared responsibility. This policy describes how to report vulnerabilities and provides general security guidance. You are responsible for securing your deployment.*
 
-*Spiral Pool v2.4.0 - Security Policy*
+*Spiral Pool v2.4.1 - Security Policy*
 *Made with 💙 from Canada 🍁 — ☮️✌️Peace and Love to the World 🌎 ❤️*

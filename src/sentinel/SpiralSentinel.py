@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 Spiral Pool Contributors
 """
 ╔═════════════════════════════════════════════════════════════════════════════╗
-║  Spiral Sentinel v2.4.0 - PHI HASH REACTOR EDITION                                 ║
+║  Spiral Sentinel v2.4.1 - PHI HASH REACTOR EDITION                                 ║
 ║  Autonomous SHA-256 Solo Mining Monitor (DGB/BTC/BCH/BC2)                   ║
 ║  Self-Healing + Share Monitoring (No Pool Software Dependency)              ║
 ╠═════════════════════════════════════════════════════════════════════════════╣
@@ -28,7 +28,7 @@
 ║  • Whatsminer API: whatsminer.com                                           ║
 ╚═════════════════════════════════════════════════════════════════════════════╝
 """
-__version__ = "2.4.0-PHI_HASH_REACTOR"
+__version__ = "2.4.1-PHI_HASH_REACTOR"
 __codename__ = "PHI_HASH_REACTOR"
 
 import copy, json, socket, sys, time, os, urllib.request, urllib.error, ssl, random, ipaddress, re, threading, http.server
@@ -5773,7 +5773,7 @@ def reload_miners():
                 "old_count": old_count,
                 "new_count": new_count,
                 "success": True,
-                "sentinel_version": "V2.4.0-PHI_HASH_REACTOR"
+                "sentinel_version": "V2.4.1-PHI_HASH_REACTOR"
             }
             _atomic_json_save(MINER_RELOAD_ACK, ack_data)
             logger.debug(f"Wrote reload ACK: {MINER_RELOAD_ACK}")
@@ -5792,7 +5792,7 @@ def reload_miners():
                 "timestamp_iso": datetime.now(timezone.utc).isoformat(),
                 "success": False,
                 "error": "Failed to reload miner configuration",
-                "sentinel_version": "V2.4.0-PHI_HASH_REACTOR"
+                "sentinel_version": "V2.4.1-PHI_HASH_REACTOR"
             }
             _atomic_json_save(MINER_RELOAD_ACK, ack_data)
         except (PermissionError, OSError):
@@ -19734,18 +19734,51 @@ def monitor_loop(state):
                                 _prom = _infra_health.metrics
                                 if _prom:
                                     _pool_acc = _prom.get("stratum_shares_accepted_total", 0)
-                                    _pool_rej = _prom.get("stratum_shares_rejected_total", 0)
+                                    # Exclude stale shares from pool-side rejection count.
+                                    # stratum_shares_rejected_total sums ALL labels including
+                                    # reason="stale". Stale shares are normal mining behavior
+                                    # (especially with fast block coins like DGB) and should not
+                                    # count toward the rejection confirmation threshold. Without
+                                    # this exclusion, elevated stale rates (e.g., from delayed
+                                    # job broadcasts) inflate the global rejection metric past 5%
+                                    # and cause false confirmation of miner-side rejection spikes.
+                                    _pool_rej_total = _prom.get("stratum_shares_rejected_total", 0)
+                                    _pool_stale = _prom.get('stratum_shares_rejected_total{reason="stale"}', 0)
+                                    _pool_rej = max(0, _pool_rej_total - _pool_stale)
                                     _pool_total = _pool_acc + _pool_rej
                                     if _pool_total > 100:
                                         _pool_rej_pct = (_pool_rej / _pool_total) * 100
                                         _pool_side_confirmed = _pool_rej_pct > 5
                                     else:
-                                        _pool_side_confirmed = True
+                                        # Not enough pool-side data to confirm — suppress rather
+                                        # than false-alarm. If real rejections accumulate, we'll
+                                        # catch it on the next cycle when _pool_total > 100.
+                                        _pool_side_confirmed = False
+                                        logger.debug(f"REJECTION SPIKE suppressed: {sanitize_log_input(name)} pool-side has <100 shares, cannot cross-reference")
                                 else:
-                                    _pool_side_confirmed = True
+                                    # No Prometheus metrics available — cannot verify pool-side.
+                                    # Suppress rather than fire unverified alerts. Miner HW rejects
+                                    # (BitAxe/Avalon) routinely inflate rejection counts far beyond
+                                    # actual pool-side rejections (e.g., miner reports 20% but pool
+                                    # sees 0%). Firing without cross-reference caused repeated false
+                                    # alerts for Heat2Sats at 20% miner-reported / 0% pool-side.
+                                    _pool_side_confirmed = False
+                                    logger.debug(f"REJECTION SPIKE suppressed: {sanitize_log_input(name)} no Prometheus metrics available for cross-reference")
 
                                 if not _pool_side_confirmed:
-                                    logger.debug(f"REJECTION SPIKE suppressed: {sanitize_log_input(name)} miner reports {reject_pct:.1f}% but pool-side is only {_pool_rej_pct:.1f}% — miner HW rejects inflating count")
+                                    # Log at INFO (not debug) so suppression is visible in normal
+                                    # operation — silent suppression makes it impossible to verify
+                                    # the cross-reference is working. Uses the same cooldown key
+                                    # so we don't spam: first suppression per miner per hour is INFO,
+                                    # subsequent ones within the cooldown window are debug.
+                                    _supp_key = f"rejection_suppressed:{name}"
+                                    _supp_last = state.last_alerts.get(_supp_key, 0)
+                                    _supp_cooldown = ALERT_COOLDOWNS.get("share_rejection_spike", 3600)
+                                    if (current_time - _supp_last) >= _supp_cooldown:
+                                        logger.info(f"REJECTION SPIKE suppressed: {sanitize_log_input(name)} miner reports {reject_pct:.1f}% but pool-side is only {_pool_rej_pct:.1f}% — miner HW rejects, not pool-side [cross-ref working]")
+                                        state.last_alerts[_supp_key] = current_time
+                                    else:
+                                        logger.debug(f"REJECTION SPIKE suppressed: {sanitize_log_input(name)} miner reports {reject_pct:.1f}% but pool-side is only {_pool_rej_pct:.1f}% — miner HW rejects inflating count")
                                 else:
                                     rej_alert_key = f"share_rejection_spike:{name}"
                                     last_rej_alert = state.last_alerts.get(rej_alert_key, 0)

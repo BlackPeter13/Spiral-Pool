@@ -76,7 +76,7 @@ import (
 )
 
 var (
-	Version   = "2.4.0"
+	Version   = "2.4.1"
 	BuildTime = "unknown"
 	GitCommit = "unknown"
 )

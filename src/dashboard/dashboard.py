@@ -19,7 +19,7 @@ ASIC Miner API Protocol References (protocol documentation, not derived code):
 See LICENSE file for full BSD-3-Clause license terms.
 """
 
-__version__ = "2.4.0-PHI_HASH_REACTOR"
+__version__ = "2.4.1-PHI_HASH_REACTOR"
 
 import os
 import json
@@ -1521,7 +1521,7 @@ share_heatmap = {
 firmware_tracker = {
     "miners": {},          # {ip: {version, device_type, last_seen, update_available}}
     "known_versions": {    # Latest known firmware versions
-        "bitaxe": "2.4.0",
+        "bitaxe": "2.4.1",
         "antminer_s19": "Antminer-S19-202312",
         "antminer_s21": "Antminer-S21-202401",
         "whatsminer_m50": "20231215",
@@ -14765,7 +14765,7 @@ def test_discord_webhook(url: str, test_message: str = None) -> dict:
         "title": "🧪 Spiral Pool Test Notification",
         "description": test_message or "This is a test message from Spiral Dashboard. If you see this, your webhook is configured correctly!",
         "color": 0x00d4ff,  # Cyan color
-        "footer": {"text": f"Spiral Pool v2.4.0 PHI HASH REACTOR"},
+        "footer": {"text": f"Spiral Pool v2.4.1 PHI HASH REACTOR"},
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 

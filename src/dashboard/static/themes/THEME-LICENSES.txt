@@ -97,5 +97,5 @@ are derived; colors, opacity, and integration are original work by Spiral Pool.
    Patterns adapted: dots
 
 ================================================================================
-Last Updated: 2026-03-22
+Last Updated: 2026-04-13
 ================================================================================

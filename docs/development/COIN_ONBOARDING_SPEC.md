@@ -319,4 +319,4 @@ QBX (Q-BitX)
 
 ---
 
-*Spiral Pool — Phi Hash Reactor 2.4.0 — Built on what came before. Growing toward phi.*
+*Spiral Pool — Phi Hash Reactor 2.4.1 — Built on what came before. Growing toward phi.*

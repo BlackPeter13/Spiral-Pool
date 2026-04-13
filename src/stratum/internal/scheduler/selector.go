@@ -4,6 +4,7 @@
 package scheduler
 
 import (
+	"sort"
 	"sync"
 	"time"
 
@@ -30,8 +31,9 @@ type SwitchEvent struct {
 
 // CoinWeight holds the weight for a single coin.
 type CoinWeight struct {
-	Symbol string
-	Weight int // percentage of daily mining time (0-100, all weights must sum to 100)
+	Symbol    string
+	Weight    int      // percentage of daily mining time (0-100, all weights must sum to 100)
+	StartHour *float64 // optional custom start hour (0-23.99) in configured timezone
 }
 
 // timeSlot represents a contiguous time window in the 24-hour cycle assigned to a coin.
@@ -54,6 +56,7 @@ type Selector struct {
 	// Time-based scheduling
 	coinWeights []CoinWeight
 	timeSlots   []timeSlot
+	anchorFrac  float64          // Schedule anchor as fraction of day (0.0–1.0); slots are relative to this
 	location    *time.Location   // Timezone for schedule (default: UTC)
 	nowFunc     func() time.Time // injectable clock for testing
 
@@ -121,34 +124,77 @@ func NewSelector(cfg SelectorConfig) *Selector {
 		logger:           logger.Sugar().Named("coin-selector"),
 	}
 
-	s.timeSlots = buildTimeSlots(cfg.CoinWeights)
+	s.timeSlots, s.anchorFrac = buildTimeSlots(cfg.CoinWeights)
 
 	return s
 }
 
 // buildTimeSlots converts coin weights into contiguous 24-hour time slots.
-// Example: DGB:80, BCH:15, BTC:5 (total 100) →
+// Coins are sorted by StartHour (if set), then alphabetically — matching the
+// dashboard's schedule computation. The first coin's StartHour (default 0.0 =
+// midnight) anchors the schedule; subsequent coins are stacked contiguously.
+//
+// Returns the slots (in anchor-relative space, 0.0–1.0) and the anchor
+// fraction (absolute position in the 24h day, 0.0–1.0). SelectCoin adjusts
+// the wall-clock day fraction by the anchor before looking up a slot.
+//
+// Example without start_hour: DGB:80, BCH:15, BTC:5 (total 100) →
 //
 //	DGB: 0.00–0.80 (00:00–19:12 local)
 //	BCH: 0.80–0.95 (19:12–22:48 local)
 //	BTC: 0.95–1.00 (22:48–24:00 local)
-func buildTimeSlots(weights []CoinWeight) []timeSlot {
+//	anchorFrac = 0.0
+//
+// Example with start_hour: QBX(start_hour=22, weight=8), DGB(weight=92) →
+//
+//	QBX: 0.00–0.08 (22:00–23:55 local)
+//	DGB: 0.08–1.00 (23:55–22:00 next day)
+//	anchorFrac = 22/24 ≈ 0.9167
+func buildTimeSlots(weights []CoinWeight) ([]timeSlot, float64) {
+	// Filter to positive weights
+	active := make([]CoinWeight, 0, len(weights))
 	totalWeight := 0
 	for _, cw := range weights {
 		if cw.Weight > 0 {
+			active = append(active, cw)
 			totalWeight += cw.Weight
 		}
 	}
 	if totalWeight == 0 {
-		return nil
+		return nil, 0
 	}
 
+	// Sort by StartHour (coins with start_hour first, ordered by hour),
+	// then alphabetically — matches dashboard.py schedule logic.
+	sort.SliceStable(active, func(i, j int) bool {
+		iHas := active[i].StartHour != nil
+		jHas := active[j].StartHour != nil
+		if iHas != jHas {
+			return iHas // coins with start_hour come first
+		}
+		if iHas && jHas {
+			return *active[i].StartHour < *active[j].StartHour
+		}
+		return active[i].Symbol < active[j].Symbol
+	})
+
+	// Anchor: first coin's StartHour (default 0.0 = midnight)
+	// Clamp to [0, 24) — out-of-range values would produce nonsensical schedules.
+	anchorHour := 0.0
+	if active[0].StartHour != nil {
+		anchorHour = *active[0].StartHour
+		if anchorHour < 0 {
+			anchorHour = 0
+		} else if anchorHour >= 24 {
+			anchorHour = 0
+		}
+	}
+	anchorFrac := anchorHour / 24.0
+
+	// Build slots in anchor-relative space (0.0–1.0)
 	var slots []timeSlot
 	cursor := 0.0
-	for _, cw := range weights {
-		if cw.Weight <= 0 {
-			continue
-		}
+	for _, cw := range active {
 		frac := float64(cw.Weight) / float64(totalWeight)
 		slots = append(slots, timeSlot{
 			symbol:    cw.Symbol,
@@ -161,7 +207,7 @@ func buildTimeSlots(weights []CoinWeight) []timeSlot {
 	if len(slots) > 0 {
 		slots[len(slots)-1].endFrac = 1.0
 	}
-	return slots
+	return slots, anchorFrac
 }
 
 // SelectCoin determines which coin a session should be mining right now
@@ -216,6 +262,13 @@ func (s *Selector) SelectCoin(sessionID uint64) CoinSelection {
 	}
 	secondsIntoDay := now.Sub(startOfDay).Seconds()
 	dayFraction := secondsIntoDay / dayLengthSec
+
+	// Shift into anchor-relative space: if the schedule starts at 22:00
+	// (anchorFrac=0.917), then 22:00 maps to 0.0 and 21:59 maps to ~1.0.
+	dayFraction = dayFraction - s.anchorFrac
+	if dayFraction < 0 {
+		dayFraction += 1.0
+	}
 	if dayFraction >= 1.0 {
 		dayFraction = 0.9999999 // clamp to last slot
 	}

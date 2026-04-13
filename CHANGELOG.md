@@ -7,6 +7,36 @@ Versioning follows `MAJOR.MINOR.PATCH`  -  patch releases are applied in-place o
 
 ---
 
+## [2.4.1]  -  2026-04-13  -  Phi Hash Reactor
+
+> *Smart Port start_hour scheduling fix, ZMQ job broadcast race condition fix, sentinel tuning.*
+
+### Fixed
+
+**Stratum — Smart Port `start_hour` Ignored**
+
+- **Coins with `start_hour` config did not mine at the specified time** — `start_hour` was parsed from YAML and used by the dashboard's schedule display, but the Go stratum scheduler never received or used it. `coordinator.go` built `CoinWeight` structs without passing `StartHour`, and `buildTimeSlots()` had no mechanism to anchor slots at a specific hour. QBX configured with `start_hour: 22` and weight 8% (≈1.9 hours) was supposed to mine from 10:00 PM to ~11:55 PM, but instead mined whenever the alphabetical sort placed it — resulting in 3+ hours of QBX mining at the wrong time of day
+- **Fix**: `StartHour *float64` is now passed from config through `coordinator.go` into `CoinWeight`. `buildTimeSlots()` sorts coins by `StartHour` (then alphabetically for coins without one), computes an `anchorFrac` from the earliest `StartHour`, and returns it alongside the time slots. `SelectCoin()` shifts the current day-fraction into anchor-relative space before slot lookup, ensuring coins mine at their configured hours. The logic matches the dashboard's Python schedule builder exactly
+
+**Stratum — ZMQ Job Broadcast Delayed for Multi-Port Miners**
+
+- **Multi-port miners received new block jobs 4-8 seconds late after ZMQ notification** — in `coinpool.go`, the job callback called `BroadcastJob()` synchronously (which iterates and writes to every single-coin session) BEFORE calling the multi-port listener. With 8+ miners, `BroadcastJob()` blocked for 2-5 seconds, causing the multi-port callback to fire late. Multi-port miners missed the ZMQ update and waited for the next `job_rebroadcast` tick instead. With DGB's 15-second block time, a 4-8 second delay meant miners worked on stale templates for ~30% of each block interval
+- **Fix**: The multi-port listener callback is now launched in a goroutine (`go listener(job)`) BEFORE the blocking `BroadcastJob()` call. Multi-port miners receive the new job within milliseconds of the ZMQ notification, in parallel with the single-coin broadcast. `handleCoinJobUpdate()` is already concurrency-safe (uses `sync.Map` and per-session write locks)
+
+**Sentinel — Difficulty Spike Alert Too Sensitive for DGB**
+
+- **DGB +66% difficulty spikes triggered alerts despite being normal retarget behavior** — DGB adjusts difficulty every block (~2 min), causing frequent 50-66% swings. The 50% threshold caught these routine retargets. Raised threshold to 80% so only genuinely unusual spikes fire
+
+**Sentinel — Share Rejection Alerts Fired Without Pool-Side Confirmation**
+
+- **Rejection spike alerts fired for miner-reported 20% when pool-side was 0%** — the cross-reference was supposed to verify miner-reported rejections against pool-side Prometheus metrics before alerting. Two bugs caused false alerts: (1) when Prometheus metrics were unavailable (`_infra_health.metrics` is None), the fallback defaulted to `_pool_side_confirmed = True`, firing unverified alerts. (2) `stratum_shares_rejected_total` summed ALL labels including `reason="stale"`, inflating pool-side counts. Production logs confirmed: Heat2Sats fired 6 alerts in one day at 20% miner-reported / 0.0% pool-side — all were internal BitAxe hardware rejects that never reached the pool. Fixed by: (a) changing both fallback paths to suppress (`_pool_side_confirmed = False`) instead of confirm, and (b) excluding stale shares from pool-side rejection count
+
+### Changed
+
+- **Version bump** -- all version strings updated to 2.4.1
+
+---
+
 ## [2.4.0]  -  2026-04-10  -  Phi Hash Reactor
 
 > *QBX block detection fix, setup wizard multi-coin detection for syncing nodes.*

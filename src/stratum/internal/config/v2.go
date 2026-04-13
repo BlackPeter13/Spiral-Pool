@@ -130,6 +130,7 @@ type SentinelConfig struct {
 	ChainTipStallMinutes  int           `yaml:"chain_tip_stall_minutes,omitempty"` // Default: 30 (alert if daemon height unchanged for this long)
 	MinPeerCount          int           `yaml:"min_peer_count,omitempty"`          // Default: 3 (alert if daemon peer count drops below this)
 	MaturityStallHours    int           `yaml:"maturity_stall_hours,omitempty"`    // Default: 6 (alert if found block pending for this long)
+	DiffSpikePercent      int           `yaml:"diff_spike_percent,omitempty"`      // Default: 80 (network difficulty spike % to alert on; DGB retargets every block so 50% was too noisy)
 	HostnameOverride      string        `yaml:"hostname_override,omitempty"`       // M13: Override os.Hostname() in webhook payloads (for NAT/container environments)
 	// Deprecated: Webhooks are no longer fired directly by API Sentinel.
 	// Alerts are now exposed via /api/sentinel/alerts and consumed by the Python
@@ -201,6 +202,9 @@ func (s *SentinelConfig) SetSentinelDefaults() {
 	}
 	if s.MaturityStallHours == 0 {
 		s.MaturityStallHours = 6
+	}
+	if s.DiffSpikePercent == 0 {
+		s.DiffSpikePercent = 80
 	}
 }
 

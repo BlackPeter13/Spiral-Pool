@@ -1532,7 +1532,11 @@ func (s *Sentinel) checkMultiPortDifficultySpike(ctx context.Context) {
 		}
 
 		changePct := ((state.NetworkDiff - prev) / prev) * 100
-		if changePct > 50 { // >50% spike — DGB adjusts every block, 25% was too spammy
+		diffThreshold := float64(s.cfg.DiffSpikePercent)
+		if diffThreshold <= 0 {
+			diffThreshold = 80 // defensive fallback
+		}
+		if changePct > diffThreshold {
 			s.fireAlert(ctx,
 				"multi_port_difficulty_spike",
 				severityWarning,

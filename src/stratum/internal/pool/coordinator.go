@@ -13,7 +13,6 @@ package pool
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -1918,14 +1917,15 @@ func (c *Coordinator) startMultiPort(ctx context.Context) error {
 
 	c.diffMonitor.Start(ctx)
 
-	// 2. Build coin weights from config (sorted for deterministic schedule)
-	sort.Strings(coinSymbols)
+	// 2. Build coin weights from config
+	// Sorting is now handled by buildTimeSlots (by StartHour, then alphabetically).
 	var coinWeights []scheduler.CoinWeight
 	for _, sym := range coinSymbols {
 		routeCfg := mpCfg.Coins[sym]
 		coinWeights = append(coinWeights, scheduler.CoinWeight{
-			Symbol: sym,
-			Weight: routeCfg.Weight,
+			Symbol:    sym,
+			Weight:    routeCfg.Weight,
+			StartHour: routeCfg.StartHour,
 		})
 	}
 

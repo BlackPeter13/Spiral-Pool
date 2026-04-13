@@ -555,13 +555,31 @@ func (cp *CoinPool) setupCallbacks() {
 	// Job manager broadcasts to stratum server AND multi-port listener (if set).
 	// The multi-port listener is registered later via SetMultiPortJobListener,
 	// so we load it dynamically from the atomic.Value on each callback invocation.
+	//
+	// IMPORTANT: The multi-port listener is called in a separate goroutine so that
+	// multi-port miners receive the new job immediately after ZMQ notification,
+	// without waiting for the single-coin BroadcastJob() to finish iterating all
+	// sessions. BroadcastJob() is synchronous and can take 2-5 seconds with many
+	// miners — blocking the multi-port callback behind it caused multi-port miners
+	// to miss ZMQ updates and wait for the next rebroadcast tick instead.
 	cp.jobManager.SetJobCallback(func(job *protocol.Job) {
-		cp.stratumServer.BroadcastJob(job)
-
-		// Relay to multi-port server if registered
+		// Relay to multi-port server FIRST and non-blocking — multi-port miners
+		// get the new job within milliseconds of the ZMQ notification.
 		if listener, ok := cp.multiPortJobListener.Load().(func(*protocol.Job)); ok && listener != nil {
-			listener(job)
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						cp.logger.Errorw("PANIC in multi-port job listener (recovered — stratum stays up)",
+							"panic", r,
+							"jobId", job.ID,
+						)
+					}
+				}()
+				listener(job)
+			}()
 		}
+
+		cp.stratumServer.BroadcastJob(job)
 	})
 
 	// Stratum server sends shares to pool for processing

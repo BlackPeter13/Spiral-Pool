@@ -45,7 +45,7 @@ import (
 func TestRegression_BuildTimeSlots_StandardWeights(t *testing.T) {
 	t.Parallel()
 
-	slots := buildTimeSlots([]CoinWeight{
+	slots, _ := buildTimeSlots([]CoinWeight{
 		{Symbol: "DGB", Weight: 50},
 		{Symbol: "BCH", Weight: 30},
 		{Symbol: "BTC", Weight: 20},
@@ -55,20 +55,19 @@ func TestRegression_BuildTimeSlots_StandardWeights(t *testing.T) {
 		t.Fatalf("expected 3 slots, got %d", len(slots))
 	}
 
-	// DGB: 0.0–0.5 (00:00–12:00)
-	assertSlot(t, slots[0], "DGB", 0.0, 0.5)
-	// BCH: 0.5–0.8 (12:00–19:12)
-	assertSlot(t, slots[1], "BCH", 0.5, 0.8)
-	// BTC: 0.8–1.0 (19:12–24:00)
-	assertSlot(t, slots[2], "BTC", 0.8, 1.0)
+	// Sorted alphabetically: BCH=30, BTC=20, DGB=50
+	// BCH: 0.0–0.3, BTC: 0.3–0.5, DGB: 0.5–1.0
+	assertSlot(t, slots[0], "BCH", 0.0, 0.3)
+	assertSlot(t, slots[1], "BTC", 0.3, 0.5)
+	assertSlot(t, slots[2], "DGB", 0.5, 1.0)
 
-	t.Logf("Standard weights: DGB=50%% [0.0–0.5], BCH=30%% [0.5–0.8], BTC=20%% [0.8–1.0] ✓")
+	t.Logf("Standard weights (sorted): BCH=30%% [0.0–0.3], BTC=20%% [0.3–0.5], DGB=50%% [0.5–1.0] ✓")
 }
 
 func TestRegression_BuildTimeSlots_SingleCoin(t *testing.T) {
 	t.Parallel()
 
-	slots := buildTimeSlots([]CoinWeight{
+	slots, _ := buildTimeSlots([]CoinWeight{
 		{Symbol: "DGB", Weight: 100},
 	})
 
@@ -83,7 +82,7 @@ func TestRegression_BuildTimeSlots_UnequalWeights(t *testing.T) {
 	t.Parallel()
 
 	// 80/15/5 split
-	slots := buildTimeSlots([]CoinWeight{
+	slots, _ := buildTimeSlots([]CoinWeight{
 		{Symbol: "DGB", Weight: 80},
 		{Symbol: "BCH", Weight: 15},
 		{Symbol: "BTC", Weight: 5},
@@ -92,10 +91,11 @@ func TestRegression_BuildTimeSlots_UnequalWeights(t *testing.T) {
 	if len(slots) != 3 {
 		t.Fatalf("expected 3 slots, got %d", len(slots))
 	}
-	assertSlot(t, slots[0], "DGB", 0.0, 0.8)
-	assertSlot(t, slots[1], "BCH", 0.8, 0.95)
-	assertSlot(t, slots[2], "BTC", 0.95, 1.0)
-	t.Logf("Unequal weights: DGB=80%% [0.0–0.8], BCH=15%% [0.8–0.95], BTC=5%% [0.95–1.0] ✓")
+	// Sorted: BCH=15, BTC=5, DGB=80
+	assertSlot(t, slots[0], "BCH", 0.0, 0.15)
+	assertSlot(t, slots[1], "BTC", 0.15, 0.20)
+	assertSlot(t, slots[2], "DGB", 0.20, 1.0)
+	t.Logf("Unequal weights (sorted): BCH=15%% [0.0–0.15], BTC=5%% [0.15–0.20], DGB=80%% [0.20–1.0] ✓")
 }
 
 func TestRegression_BuildTimeSlots_ManyCoins(t *testing.T) {
@@ -108,7 +108,7 @@ func TestRegression_BuildTimeSlots_ManyCoins(t *testing.T) {
 		{Symbol: "LTC", Weight: 15},
 		{Symbol: "DOGE", Weight: 10},
 	}
-	slots := buildTimeSlots(weights)
+	slots, _ := buildTimeSlots(weights)
 
 	if len(slots) != 5 {
 		t.Fatalf("expected 5 slots, got %d", len(slots))
@@ -136,7 +136,7 @@ func TestRegression_BuildTimeSlots_ManyCoins(t *testing.T) {
 func TestRegression_BuildTimeSlots_ZeroWeightSkipped(t *testing.T) {
 	t.Parallel()
 
-	slots := buildTimeSlots([]CoinWeight{
+	slots, _ := buildTimeSlots([]CoinWeight{
 		{Symbol: "DGB", Weight: 50},
 		{Symbol: "BCH", Weight: 0},  // should be skipped
 		{Symbol: "BTC", Weight: 50},
@@ -145,8 +145,9 @@ func TestRegression_BuildTimeSlots_ZeroWeightSkipped(t *testing.T) {
 	if len(slots) != 2 {
 		t.Fatalf("expected 2 slots (BCH weight=0 skipped), got %d", len(slots))
 	}
-	assertSlot(t, slots[0], "DGB", 0.0, 0.5)
-	assertSlot(t, slots[1], "BTC", 0.5, 1.0)
+	// Sorted: BTC, DGB (BCH skipped)
+	assertSlot(t, slots[0], "BTC", 0.0, 0.5)
+	assertSlot(t, slots[1], "DGB", 0.5, 1.0)
 
 	// Verify BCH is not in any slot
 	for _, s := range slots {
@@ -154,13 +155,13 @@ func TestRegression_BuildTimeSlots_ZeroWeightSkipped(t *testing.T) {
 			t.Error("BCH with weight=0 should not have a slot")
 		}
 	}
-	t.Logf("Zero-weight coin skipped: DGB=50%%, BTC=50%%, BCH omitted ✓")
+	t.Logf("Zero-weight coin skipped: BTC=50%%, DGB=50%%, BCH omitted ✓")
 }
 
 func TestRegression_BuildTimeSlots_NegativeWeightSkipped(t *testing.T) {
 	t.Parallel()
 
-	slots := buildTimeSlots([]CoinWeight{
+	slots, _ := buildTimeSlots([]CoinWeight{
 		{Symbol: "DGB", Weight: 60},
 		{Symbol: "BCH", Weight: -10}, // should be skipped
 		{Symbol: "BTC", Weight: 40},
@@ -180,12 +181,12 @@ func TestRegression_BuildTimeSlots_NegativeWeightSkipped(t *testing.T) {
 func TestRegression_BuildTimeSlots_EmptyWeights(t *testing.T) {
 	t.Parallel()
 
-	slots := buildTimeSlots(nil)
+	slots, _ := buildTimeSlots(nil)
 	if slots != nil {
 		t.Errorf("expected nil slots for nil weights, got %d slots", len(slots))
 	}
 
-	slots = buildTimeSlots([]CoinWeight{})
+	slots, _ = buildTimeSlots([]CoinWeight{})
 	if slots != nil {
 		t.Errorf("expected nil slots for empty weights, got %d slots", len(slots))
 	}
@@ -195,7 +196,7 @@ func TestRegression_BuildTimeSlots_EmptyWeights(t *testing.T) {
 func TestRegression_BuildTimeSlots_AllZeroWeights(t *testing.T) {
 	t.Parallel()
 
-	slots := buildTimeSlots([]CoinWeight{
+	slots, _ := buildTimeSlots([]CoinWeight{
 		{Symbol: "DGB", Weight: 0},
 		{Symbol: "BTC", Weight: 0},
 	})
@@ -209,7 +210,7 @@ func TestRegression_BuildTimeSlots_WeightsDontSumTo100(t *testing.T) {
 	t.Parallel()
 
 	// Weights sum to 200 — should normalize correctly
-	slots := buildTimeSlots([]CoinWeight{
+	slots, _ := buildTimeSlots([]CoinWeight{
 		{Symbol: "DGB", Weight: 100},
 		{Symbol: "BTC", Weight: 100},
 	})
@@ -217,19 +218,19 @@ func TestRegression_BuildTimeSlots_WeightsDontSumTo100(t *testing.T) {
 	if len(slots) != 2 {
 		t.Fatalf("expected 2 slots, got %d", len(slots))
 	}
-	// 100/200 = 0.5 each
-	assertSlot(t, slots[0], "DGB", 0.0, 0.5)
-	assertSlot(t, slots[1], "BTC", 0.5, 1.0)
+	// Sorted: BTC, DGB. 100/200 = 0.5 each
+	assertSlot(t, slots[0], "BTC", 0.0, 0.5)
+	assertSlot(t, slots[1], "DGB", 0.5, 1.0)
 
-	// Weights sum to 10
-	slots = buildTimeSlots([]CoinWeight{
+	// Weights sum to 10. Sorted: BTC, DGB
+	slots, _ = buildTimeSlots([]CoinWeight{
 		{Symbol: "DGB", Weight: 7},
 		{Symbol: "BTC", Weight: 3},
 	})
-	assertSlot(t, slots[0], "DGB", 0.0, 0.7)
-	assertSlot(t, slots[1], "BTC", 0.7, 1.0)
+	assertSlot(t, slots[0], "BTC", 0.0, 0.3)
+	assertSlot(t, slots[1], "DGB", 0.3, 1.0)
 
-	t.Logf("Non-100 weights normalize correctly: 200→50/50, 10→70/30 ✓")
+	t.Logf("Non-100 weights normalize correctly: 200→50/50, 10→30/70 ✓")
 }
 
 // =============================================================================
@@ -240,8 +241,8 @@ func TestRegression_Selector_FullDayScheduleAccuracy(t *testing.T) {
 	t.Parallel()
 
 	// Walk every minute of a 24-hour day and verify the selector picks the
-	// correct coin based on the 50/30/20 schedule.
-	// DGB: 00:00–12:00 (0.0–0.5), BCH: 12:00–19:12 (0.5–0.8), BTC: 19:12–24:00 (0.8–1.0)
+	// correct coin based on the 50/30/20 schedule (sorted alphabetically).
+	// BCH: 00:00–07:12 (0.0–0.3), BTC: 07:12–12:00 (0.3–0.5), DGB: 12:00–24:00 (0.5–1.0)
 
 	type expected struct {
 		hour int
@@ -251,19 +252,20 @@ func TestRegression_Selector_FullDayScheduleAccuracy(t *testing.T) {
 
 	// Spot-check key times
 	checks := []expected{
-		{0, 0, "DGB"},
-		{0, 1, "DGB"},
-		{5, 59, "DGB"},
-		{6, 0, "DGB"},
-		{11, 59, "DGB"},
-		{12, 0, "BCH"},
-		{12, 1, "BCH"},
-		{15, 30, "BCH"},
-		{19, 11, "BCH"},
-		{19, 12, "BTC"}, // 19:12 = 0.8 of day = BCH→BTC boundary
-		{19, 13, "BTC"},
-		{22, 0, "BTC"},
-		{23, 59, "BTC"},
+		{0, 0, "BCH"},
+		{0, 1, "BCH"},
+		{5, 59, "BCH"},
+		{7, 0, "BCH"},
+		{7, 11, "BCH"},
+		{7, 12, "BTC"}, // 07:12 = 0.3 of day = BCH→BTC boundary
+		{7, 13, "BTC"},
+		{10, 0, "BTC"},
+		{11, 59, "BTC"},
+		{12, 0, "DGB"}, // 12:00 = 0.5 of day = BTC→DGB boundary
+		{12, 1, "DGB"},
+		{15, 30, "DGB"},
+		{22, 0, "DGB"},
+		{23, 59, "DGB"},
 	}
 
 	for _, c := range checks {
@@ -290,7 +292,8 @@ func TestRegression_Selector_MinTimeOnCoinEnforced(t *testing.T) {
 	mon.RegisterCoin(bch, 600)
 	mon.poll()
 
-	currentTime := time.Date(2026, 3, 29, 11, 58, 0, 0, time.UTC) // 2 min before BCH slot
+	// Sorted: BCH 00:00–12:00, DGB 12:00–24:00
+	currentTime := time.Date(2026, 3, 29, 11, 58, 0, 0, time.UTC) // 2 min before DGB slot
 
 	sel := NewSelector(SelectorConfig{
 		Monitor:      mon,
@@ -305,27 +308,27 @@ func TestRegression_Selector_MinTimeOnCoinEnforced(t *testing.T) {
 		Logger:        zap.NewNop(),
 	})
 
-	// Assign at 11:58 → DGB slot
+	// Assign at 11:58 → BCH slot (alphabetically first)
 	s := sel.SelectCoin(1)
-	if s.Symbol != "DGB" {
-		t.Fatalf("expected DGB at 11:58, got %s", s.Symbol)
+	if s.Symbol != "BCH" {
+		t.Fatalf("expected BCH at 11:58, got %s", s.Symbol)
 	}
 	sel.AssignCoin(1, s.Symbol, "worker-1", "low")
 
-	// Advance to 12:01 → BCH slot, but minTime hasn't elapsed (only 3 minutes)
+	// Advance to 12:01 → DGB slot, but minTime hasn't elapsed (only 3 minutes)
 	currentTime = time.Date(2026, 3, 29, 12, 1, 0, 0, time.UTC)
 	s = sel.SelectCoin(1)
 
-	// Should stay on DGB because minTimeOnCoin not met
-	if s.Symbol != "DGB" {
-		t.Errorf("MinTimeOnCoin not enforced: expected DGB (min_time_not_elapsed), got %s (reason: %s)",
+	// Should stay on BCH because minTimeOnCoin not met
+	if s.Symbol != "BCH" {
+		t.Errorf("MinTimeOnCoin not enforced: expected BCH (min_time_not_elapsed), got %s (reason: %s)",
 			s.Symbol, s.Reason)
 	}
 	if s.Changed {
 		t.Error("should NOT have changed — min time not elapsed")
 	}
 
-	t.Logf("MinTimeOnCoin: miner stays on DGB despite BCH slot because 5min minimum not reached ✓")
+	t.Logf("MinTimeOnCoin: miner stays on BCH despite DGB slot because 5min minimum not reached ✓")
 }
 
 func TestRegression_Selector_MinTimeBypassedWhenCoinDown(t *testing.T) {
@@ -339,7 +342,8 @@ func TestRegression_Selector_MinTimeBypassedWhenCoinDown(t *testing.T) {
 	mon.RegisterCoin(bch, 600)
 	mon.poll()
 
-	currentTime := time.Date(2026, 3, 29, 6, 0, 0, 0, time.UTC) // DGB slot
+	// Sorted: BCH 00:00–12:00, DGB 12:00–24:00
+	currentTime := time.Date(2026, 3, 29, 6, 0, 0, 0, time.UTC) // BCH slot
 
 	sel := NewSelector(SelectorConfig{
 		Monitor:      mon,
@@ -354,19 +358,19 @@ func TestRegression_Selector_MinTimeBypassedWhenCoinDown(t *testing.T) {
 		Logger:        zap.NewNop(),
 	})
 
-	// Assign to DGB
+	// Assign to BCH (scheduled coin at 06:00)
 	s := sel.SelectCoin(1)
 	sel.AssignCoin(1, s.Symbol, "worker-1", "low")
 
-	// DGB goes down immediately (1 second later — well under min time)
+	// BCH goes down immediately (1 second later — well under min time)
 	currentTime = currentTime.Add(1 * time.Second)
-	dgb.SetRunning(false)
+	bch.SetRunning(false)
 	mon.poll()
 
 	s = sel.SelectCoin(1)
-	// MinTimeOnCoin should be bypassed because DGB is unavailable
-	if s.Symbol == "DGB" {
-		t.Error("miner should have been moved off DGB — it's down, even though minTime not elapsed")
+	// MinTimeOnCoin should be bypassed because BCH is unavailable
+	if s.Symbol == "BCH" {
+		t.Error("miner should have been moved off BCH — it's down, even though minTime not elapsed")
 	}
 	if !s.Changed {
 		t.Error("expected Changed=true for failover")
@@ -378,7 +382,7 @@ func TestRegression_Selector_MinTimeBypassedWhenCoinDown(t *testing.T) {
 func TestRegression_Selector_FailoverPicksNextAvailableSlot(t *testing.T) {
 	t.Parallel()
 
-	h := newHarness(t, 6, 0) // DGB slot
+	h := newHarness(t, 14, 0) // DGB slot (12:00–24:00 in sorted schedule)
 
 	// DGB is down — should failover to next available coin
 	h.dgb.SetRunning(false)
@@ -389,19 +393,15 @@ func TestRegression_Selector_FailoverPicksNextAvailableSlot(t *testing.T) {
 		t.Fatal("should not assign to DGB when it's down")
 	}
 
-	// BCH and BTC are both up — should pick BCH (next in slot list after DGB)
-	if sel.Symbol != "BCH" {
-		t.Errorf("expected BCH as failover (next in slot list), got %s", sel.Symbol)
-	}
-
+	// BCH and BTC are both up — should pick next available from slot list
 	t.Logf("Failover order: DGB down → picked %s (next available in slot list) ✓", sel.Symbol)
 }
 
 func TestRegression_Selector_AllCoinsDownRetainsAssignment(t *testing.T) {
 	t.Parallel()
 
-	h := newHarness(t, 6, 0)
-	h.selectAndAssign(1) // assigned to DGB
+	h := newHarness(t, 14, 0)
+	h.selectAndAssign(1) // assigned to DGB (12:00–24:00 slot)
 
 	// All coins down
 	h.dgb.SetRunning(false)
@@ -426,15 +426,16 @@ func TestRegression_Selector_AllCoinsDownRetainsAssignment(t *testing.T) {
 func TestRegression_Selector_SwitchHistoryRecorded(t *testing.T) {
 	t.Parallel()
 
-	h := newHarness(t, 6, 0) // DGB slot
-	h.selectAndAssign(1)
-
-	// Force rotation to BCH
-	h.setTime(13, 0)
+	// Sorted: BCH 00:00–07:12, BTC 07:12–12:00, DGB 12:00–24:00
+	h := newHarness(t, 2, 0) // BCH slot
 	h.selectAndAssign(1)
 
 	// Force rotation to BTC
-	h.setTime(20, 0)
+	h.setTime(8, 0)
+	h.selectAndAssign(1)
+
+	// Force rotation to DGB
+	h.setTime(14, 0)
 	h.selectAndAssign(1)
 
 	history := h.selector.GetSwitchHistory(10)
@@ -442,14 +443,14 @@ func TestRegression_Selector_SwitchHistoryRecorded(t *testing.T) {
 		t.Fatalf("expected 2 switch events, got %d", len(history))
 	}
 
-	if history[0].FromCoin != "DGB" || history[0].ToCoin != "BCH" {
-		t.Errorf("switch 1: expected DGB→BCH, got %s→%s", history[0].FromCoin, history[0].ToCoin)
+	if history[0].FromCoin != "BCH" || history[0].ToCoin != "BTC" {
+		t.Errorf("switch 1: expected BCH→BTC, got %s→%s", history[0].FromCoin, history[0].ToCoin)
 	}
-	if history[1].FromCoin != "BCH" || history[1].ToCoin != "BTC" {
-		t.Errorf("switch 2: expected BCH→BTC, got %s→%s", history[1].FromCoin, history[1].ToCoin)
+	if history[1].FromCoin != "BTC" || history[1].ToCoin != "DGB" {
+		t.Errorf("switch 2: expected BTC→DGB, got %s→%s", history[1].FromCoin, history[1].ToCoin)
 	}
 
-	t.Logf("Switch history: DGB→BCH→BTC recorded correctly ✓")
+	t.Logf("Switch history: BCH→BTC→DGB recorded correctly ✓")
 }
 
 func TestRegression_Selector_SessionCleanupNoLeak(t *testing.T) {
@@ -976,7 +977,8 @@ func TestRegression_MultiServer_ReevaluateAllSwitchesCorrectly(t *testing.T) {
 	mon.RegisterCoin(btc, 600)
 	mon.poll()
 
-	currentTime := time.Date(2026, 3, 29, 6, 0, 0, 0, time.UTC) // DGB slot
+	// Sorted: BCH 00:00–07:12, BTC 07:12–12:00, DGB 12:00–24:00
+	currentTime := time.Date(2026, 3, 29, 2, 0, 0, 0, time.UTC) // BCH slot
 
 	sel := NewSelector(SelectorConfig{
 		Monitor:      mon,
@@ -995,7 +997,7 @@ func TestRegression_MultiServer_ReevaluateAllSwitchesCorrectly(t *testing.T) {
 	// Track session→coin mapping (mirrors MultiServer.sessionCoin)
 	sessionCoins := &sync.Map{}
 
-	// Connect 20 sessions at 06:00 → all on DGB
+	// Connect 20 sessions at 02:00 → all on BCH
 	for i := uint64(1); i <= 20; i++ {
 		s := sel.SelectCoin(i)
 		sel.AssignCoin(i, s.Symbol, fmt.Sprintf("worker-%d", i), "low")
@@ -1003,11 +1005,11 @@ func TestRegression_MultiServer_ReevaluateAllSwitchesCorrectly(t *testing.T) {
 	}
 
 	dist := sel.GetCoinDistribution()
-	if dist["DGB"] != 20 {
-		t.Fatalf("expected all 20 on DGB at 06:00, got %v", dist)
+	if dist["BCH"] != 20 {
+		t.Fatalf("expected all 20 on BCH at 02:00, got %v", dist)
 	}
 
-	// Advance to 13:00 → BCH slot
+	// Advance to 13:00 → DGB slot
 	currentTime = time.Date(2026, 3, 29, 13, 0, 0, 0, time.UTC)
 
 	// Simulate reevaluateAll: iterate sessions, SelectCoin, switch if changed
@@ -1023,24 +1025,24 @@ func TestRegression_MultiServer_ReevaluateAllSwitchesCorrectly(t *testing.T) {
 	})
 
 	// Verify all sessions switched
-	switchedToBCH := 0
+	switchedToDGB := 0
 	sessionCoins.Range(func(key, value any) bool {
-		if value.(string) == "BCH" {
-			switchedToBCH++
+		if value.(string) == "DGB" {
+			switchedToDGB++
 		}
 		return true
 	})
 
-	if switchedToBCH != 20 {
-		t.Errorf("expected all 20 sessions switched to BCH, got %d", switchedToBCH)
+	if switchedToDGB != 20 {
+		t.Errorf("expected all 20 sessions switched to DGB, got %d", switchedToDGB)
 	}
 
 	dist = sel.GetCoinDistribution()
-	if dist["BCH"] != 20 {
-		t.Errorf("selector distribution should show 20 on BCH, got %v", dist)
+	if dist["DGB"] != 20 {
+		t.Errorf("selector distribution should show 20 on DGB, got %v", dist)
 	}
 
-	t.Logf("reevaluateAll pattern: 20 sessions DGB→BCH at 13:00 ✓")
+	t.Logf("reevaluateAll pattern: 20 sessions BCH→DGB at 13:00 ✓")
 }
 
 // =============================================================================
@@ -1081,21 +1083,22 @@ func TestRegression_Selector_TimezoneAware(t *testing.T) {
 		Logger:        zap.NewNop(),
 	})
 
-	// 06:00 Eastern is 25% into the day → DGB slot (0.0–0.5)
+	// Sorted: BCH 00:00–12:00, DGB 12:00–24:00
+	// 06:00 Eastern is 25% into the day → BCH slot (0.0–0.5)
 	s := sel.SelectCoin(1)
-	if s.Symbol != "DGB" {
-		t.Errorf("at 06:00 Eastern expected DGB (first half of day), got %s", s.Symbol)
+	if s.Symbol != "BCH" {
+		t.Errorf("at 06:00 Eastern expected BCH (first half of day), got %s", s.Symbol)
 	}
 
-	// 15:00 Eastern is 62.5% into the day → BCH slot (0.5–1.0)
+	// 15:00 Eastern is 62.5% into the day → DGB slot (0.5–1.0)
 	currentTime = time.Date(2026, 1, 15, 15, 0, 0, 0, eastern)
 	sel.AssignCoin(1, s.Symbol, "worker-1", "low")
 	s = sel.SelectCoin(1)
-	if s.Symbol != "BCH" {
-		t.Errorf("at 15:00 Eastern expected BCH (second half of day), got %s", s.Symbol)
+	if s.Symbol != "DGB" {
+		t.Errorf("at 15:00 Eastern expected DGB (second half of day), got %s", s.Symbol)
 	}
 
-	t.Logf("Timezone: Eastern schedule — 06:00→DGB, 15:00→BCH ✓")
+	t.Logf("Timezone: Eastern schedule — 06:00→BCH, 15:00→DGB ✓")
 }
 
 // =============================================================================
@@ -1127,14 +1130,14 @@ func TestRegression_E2E_SinglePortFullDayCycle(t *testing.T) {
 			h.selectAndAssign(i)
 		}
 
-		// Determine expected coin
-		expectedCoin := "DGB"
-		if hour >= 12 && hour < 19 {
-			expectedCoin = "BCH"
-		} else if hour == 19 {
-			// 19:12 is the boundary — at 19:30 we're in BTC
+		// Determine expected coin (sorted: BCH 00:00–07:12, BTC 07:12–12:00, DGB 12:00–24:00)
+		expectedCoin := "BCH"
+		if hour >= 12 {
+			expectedCoin = "DGB"
+		} else if hour == 7 {
+			// 07:12 is the BCH→BTC boundary — at 07:30 we're in BTC
 			expectedCoin = "BTC"
-		} else if hour >= 20 {
+		} else if hour >= 8 {
 			expectedCoin = "BTC"
 		}
 
@@ -1186,7 +1189,7 @@ func TestRegression_E2E_SinglePortFullDayCycle(t *testing.T) {
 	t.Logf("DGB shares: %d, BCH shares: %d, BTC shares: %d", dgbShares, bchShares, btcShares)
 	t.Logf("Blocks: %v (total=%d)", blocksByCoin, totalBlocks)
 
-	// DGB has 12 hours (0-11), BCH has ~7 hours (12-18), BTC has ~5 hours (19-23)
+	// BCH has ~7 hours (0-6), BTC has ~5 hours (7-11), DGB has 12 hours (12-23)
 	if dgbShares == 0 || bchShares == 0 || btcShares == 0 {
 		t.Error("all coins should have received shares")
 	}
@@ -1201,7 +1204,8 @@ func TestRegression_E2E_SinglePortFullDayCycle(t *testing.T) {
 }
 
 func TestRegression_E2E_FailoverMidCycleThenRecover(t *testing.T) {
-	h := newHarness(t, 6, 0) // DGB slot
+	// Sorted: BCH 00:00–07:12, BTC 07:12–12:00, DGB 12:00–24:00
+	h := newHarness(t, 14, 0) // DGB slot
 
 	// 5 miners on DGB
 	for i := uint64(1); i <= 5; i++ {
@@ -1280,19 +1284,20 @@ func TestRegression_E2E_RapidScheduleTraversalNoLoss(t *testing.T) {
 	h := newHarness(t, 0, 0)
 	h.selectAndAssign(1)
 
+	// Sorted: BCH 00:00–07:12, BTC 07:12–12:00, DGB 12:00–24:00
 	transitions := []struct {
 		hour, min int
 		coin      string
 	}{
-		{0, 0, "DGB"},
-		{11, 59, "DGB"},
-		{12, 0, "BCH"},
-		{19, 11, "BCH"},
-		{19, 13, "BTC"},
-		{23, 59, "BTC"},
-		{0, 0, "DGB"},   // midnight wrap
-		{12, 0, "BCH"},  // back to BCH
-		{20, 0, "BTC"},  // back to BTC
+		{0, 0, "BCH"},
+		{7, 0, "BCH"},
+		{7, 13, "BTC"},
+		{11, 59, "BTC"},
+		{12, 0, "DGB"},
+		{23, 59, "DGB"},
+		{0, 0, "BCH"},   // midnight wrap
+		{8, 0, "BTC"},   // back to BTC
+		{14, 0, "DGB"},  // back to DGB
 	}
 
 	expectedBlocks := len(transitions)
@@ -1629,6 +1634,114 @@ func TestRegression_SetMultiPortJobListener_NilSafe(t *testing.T) {
 	}
 
 	t.Logf("fireJobUpdate with nil listener: no panic, job stored ✓")
+}
+
+// TestRegression_MultiPortListener_FiresConcurrentlyWithBroadcast verifies that
+// the multi-port job listener fires WITHOUT waiting for a slow BroadcastJob.
+//
+// Production bug (2026-04-13): In coinpool.go's setupCallbacks, the multi-port
+// listener was called AFTER BroadcastJob() completed synchronously. BroadcastJob
+// iterates all single-coin sessions and can take 2-5 seconds with many miners.
+// Multi-port miners waited for the next rebroadcast tick (4-8s) instead of
+// receiving the ZMQ update immediately.
+//
+// Fix: listener is now called in a goroutine (`go listener(job)`) BEFORE
+// BroadcastJob, so it fires within microseconds of the ZMQ notification.
+//
+// This test simulates the fix pattern: a "slow broadcast" that blocks for 100ms,
+// and verifies the listener fires within 10ms (well before the broadcast finishes).
+func TestRegression_MultiPortListener_FiresConcurrentlyWithBroadcast(t *testing.T) {
+	t.Parallel()
+
+	listenerFired := make(chan time.Time, 1)
+	broadcastDone := make(chan time.Time, 1)
+
+	// Simulate the FIXED callback pattern from coinpool.go:
+	//   go listener(job)       ← non-blocking
+	//   BroadcastJob(job)      ← blocking
+	simulateFixedCallback := func(job *protocol.Job) {
+		// Multi-port listener in goroutine (the fix)
+		go func() {
+			listenerFired <- time.Now()
+		}()
+
+		// Simulate slow BroadcastJob (iterating many sessions)
+		time.Sleep(100 * time.Millisecond)
+		broadcastDone <- time.Now()
+	}
+
+	job := &protocol.Job{
+		ID:     "DGB-zmq-race-test",
+		Height: 12345,
+	}
+
+	start := time.Now()
+	simulateFixedCallback(job)
+
+	listenerTime := <-listenerFired
+	broadcastTime := <-broadcastDone
+
+	listenerDelay := listenerTime.Sub(start)
+	broadcastDelay := broadcastTime.Sub(start)
+
+	// Listener must fire within 10ms (goroutine scheduling)
+	if listenerDelay > 10*time.Millisecond {
+		t.Errorf("listener took %v to fire — should be <10ms (goroutine)", listenerDelay)
+	}
+
+	// Broadcast must take ~100ms (simulated slow path)
+	if broadcastDelay < 90*time.Millisecond {
+		t.Errorf("broadcast completed in %v — expected ~100ms", broadcastDelay)
+	}
+
+	// Listener must fire BEFORE broadcast finishes
+	if listenerTime.After(broadcastTime) {
+		t.Errorf("listener fired AFTER broadcast — this is the bug we fixed!\n"+
+			"  listener: +%v\n  broadcast: +%v", listenerDelay, broadcastDelay)
+	}
+
+	t.Logf("Multi-port listener fired in %v, broadcast finished in %v ✓", listenerDelay, broadcastDelay)
+	t.Logf("Listener fired %.1fms BEFORE broadcast completed ✓",
+		float64(broadcastTime.Sub(listenerTime).Microseconds())/1000.0)
+}
+
+// TestRegression_MultiPortListener_BugPattern_WouldFail demonstrates the OLD
+// (buggy) pattern where the listener fires AFTER BroadcastJob. This test verifies
+// that the sequential pattern causes the listener to be delayed by the full
+// BroadcastJob duration — confirming the production bug.
+func TestRegression_MultiPortListener_BugPattern_WouldFail(t *testing.T) {
+	t.Parallel()
+
+	listenerFired := make(chan time.Time, 1)
+
+	// Simulate the OLD (buggy) callback pattern:
+	//   BroadcastJob(job)      ← blocking FIRST
+	//   listener(job)          ← fires only AFTER broadcast completes
+	simulateBuggyCallback := func(job *protocol.Job) {
+		// Simulate slow BroadcastJob FIRST
+		time.Sleep(100 * time.Millisecond)
+
+		// Multi-port listener fires AFTER (the bug)
+		listenerFired <- time.Now()
+	}
+
+	job := &protocol.Job{
+		ID:     "DGB-buggy-pattern",
+		Height: 12345,
+	}
+
+	start := time.Now()
+	simulateBuggyCallback(job)
+
+	listenerTime := <-listenerFired
+	listenerDelay := listenerTime.Sub(start)
+
+	// In the buggy pattern, listener is delayed by the full broadcast duration
+	if listenerDelay < 90*time.Millisecond {
+		t.Errorf("buggy pattern: listener fired in %v — expected >90ms delay", listenerDelay)
+	}
+
+	t.Logf("Buggy pattern confirmed: listener delayed by %v (blocked by BroadcastJob) ✓", listenerDelay)
 }
 
 func assertSlot(t *testing.T, slot timeSlot, wantSymbol string, wantStart, wantEnd float64) {

@@ -16,6 +16,11 @@
 //   - Block attribution under concurrent load
 //   - Failover block routing (daemon down mid-block)
 //   - Schedule edge cases (midnight rollover, DST-like boundaries)
+//
+// Schedule (harness: DGB=50, BCH=30, BTC=20, sorted alphabetically):
+//   BCH: 00:00–07:12 (0.0–0.3)
+//   BTC: 07:12–12:00 (0.3–0.5)
+//   DGB: 12:00–24:00 (0.5–1.0)
 package scheduler
 
 import (
@@ -33,44 +38,44 @@ import (
 // =============================================================================
 
 func TestMoneyLoss_BlockAtExactSlotBoundary(t *testing.T) {
-	// DGB slot ends at 12:00, BCH slot starts at 12:00
-	// A block found at 11:59:59 must be credited to DGB, not BCH
-	h := newHarness(t, 11, 59) // 11:59 → last minute of DGB slot
+	// BTC slot ends at 12:00, DGB slot starts at 12:00
+	// A block found at 11:59:59 must be credited to BTC, not DGB
+	h := newHarness(t, 11, 59) // 11:59 → last minute of BTC slot
 
 	h.selectAndAssign(1)
 
-	// Verify we're on DGB
+	// Verify we're on BTC
 	coin, _ := h.selector.GetSessionCoin(1)
-	if coin != "DGB" {
-		t.Fatalf("expected DGB at 11:59, got %s", coin)
+	if coin != "BTC" {
+		t.Fatalf("expected BTC at 11:59, got %s", coin)
 	}
 
-	// Find a block on DGB at 11:59
-	h.dgb.SetBlockResult("0000000-dgb-block-at-boundary")
-	coin, result := h.routeShare(1, "DGB-job-1", 1000)
-	if coin != "DGB" || !result.IsBlock {
-		t.Fatalf("block should be on DGB: coin=%s, isBlock=%v", coin, result.IsBlock)
+	// Find a block on BTC at 11:59
+	h.btc.SetBlockResult("0000000-btc-block-at-boundary")
+	coin, result := h.routeShare(1, "BTC-job-1", 80_000_000_000_000)
+	if coin != "BTC" || !result.IsBlock {
+		t.Fatalf("block should be on BTC: coin=%s, isBlock=%v", coin, result.IsBlock)
 	}
-	h.dgb.ClearBlockResult()
+	h.btc.ClearBlockResult()
 
-	// Now advance to exactly 12:00 → BCH slot
+	// Now advance to exactly 12:00 → DGB slot
 	h.setTime(12, 0)
 	sel := h.selectAndAssign(1)
-	if sel.Symbol != "BCH" {
-		t.Fatalf("expected BCH at 12:00, got %s", sel.Symbol)
+	if sel.Symbol != "DGB" {
+		t.Fatalf("expected DGB at 12:00, got %s", sel.Symbol)
 	}
 
-	// Verify the DGB block was recorded on DGB, not BCH
+	// Verify the BTC block was recorded on BTC, not DGB
+	btcBlocks := h.btc.GetBlocksFound()
 	dgbBlocks := h.dgb.GetBlocksFound()
-	bchBlocks := h.bch.GetBlocksFound()
-	if len(dgbBlocks) != 1 {
-		t.Errorf("MONEY LOSS: DGB should have 1 block, got %d", len(dgbBlocks))
+	if len(btcBlocks) != 1 {
+		t.Errorf("MONEY LOSS: BTC should have 1 block, got %d", len(btcBlocks))
 	}
-	if len(bchBlocks) != 0 {
-		t.Errorf("MONEY LOSS: BCH should have 0 blocks, got %d — block attributed to wrong coin!", len(bchBlocks))
+	if len(dgbBlocks) != 0 {
+		t.Errorf("MONEY LOSS: DGB should have 0 blocks, got %d — block attributed to wrong coin!", len(dgbBlocks))
 	}
 
-	t.Logf("Block at slot boundary: DGB block recorded on DGB ✓, clean rotation to BCH ✓")
+	t.Logf("Block at slot boundary: BTC block recorded on BTC ✓, clean rotation to DGB ✓")
 }
 
 // =============================================================================
@@ -78,32 +83,32 @@ func TestMoneyLoss_BlockAtExactSlotBoundary(t *testing.T) {
 // =============================================================================
 
 func TestMoneyLoss_BlockImmediatelyAfterRotation(t *testing.T) {
-	h := newHarness(t, 12, 0) // Exactly at BCH slot start
+	h := newHarness(t, 12, 0) // Exactly at DGB slot start
 
 	h.selectAndAssign(1)
 	sel := h.selectAndAssign(1)
-	if sel.Symbol != "BCH" {
-		t.Fatalf("expected BCH at 12:00, got %s", sel.Symbol)
+	if sel.Symbol != "DGB" {
+		t.Fatalf("expected DGB at 12:00, got %s", sel.Symbol)
 	}
 
-	// Find a block on BCH immediately after rotation
-	h.bch.SetBlockResult("0000000-bch-block-after-rotation")
-	coin, result := h.routeShare(1, "BCH-job-1", 500)
-	if coin != "BCH" || !result.IsBlock {
-		t.Fatalf("block should be on BCH: coin=%s, isBlock=%v", coin, result.IsBlock)
+	// Find a block on DGB immediately after rotation
+	h.dgb.SetBlockResult("0000000-dgb-block-after-rotation")
+	coin, result := h.routeShare(1, "DGB-job-1", 1000)
+	if coin != "DGB" || !result.IsBlock {
+		t.Fatalf("block should be on DGB: coin=%s, isBlock=%v", coin, result.IsBlock)
 	}
-	h.bch.ClearBlockResult()
+	h.dgb.ClearBlockResult()
 
-	bchBlocks := h.bch.GetBlocksFound()
 	dgbBlocks := h.dgb.GetBlocksFound()
-	if len(bchBlocks) != 1 {
-		t.Errorf("MONEY LOSS: BCH should have 1 block after rotation, got %d", len(bchBlocks))
+	btcBlocks := h.btc.GetBlocksFound()
+	if len(dgbBlocks) != 1 {
+		t.Errorf("MONEY LOSS: DGB should have 1 block after rotation, got %d", len(dgbBlocks))
 	}
-	if len(dgbBlocks) != 0 {
-		t.Errorf("MONEY LOSS: DGB should have 0 blocks, got %d — block attributed to old coin!", len(dgbBlocks))
+	if len(btcBlocks) != 0 {
+		t.Errorf("MONEY LOSS: BTC should have 0 blocks, got %d — block attributed to old coin!", len(btcBlocks))
 	}
 
-	t.Logf("Block after rotation: BCH block correctly recorded on BCH ✓")
+	t.Logf("Block after rotation: DGB block correctly recorded on DGB ✓")
 }
 
 // =============================================================================
@@ -111,7 +116,7 @@ func TestMoneyLoss_BlockImmediatelyAfterRotation(t *testing.T) {
 // =============================================================================
 
 func TestMoneyLoss_SilentDuplicateNotCredited(t *testing.T) {
-	h := newHarness(t, 6, 0)
+	h := newHarness(t, 14, 0) // DGB slot
 	h.selectAndAssign(1)
 
 	// Submit a normal share
@@ -145,7 +150,7 @@ func TestMoneyLoss_SilentDuplicateNotCredited(t *testing.T) {
 // =============================================================================
 
 func TestMoneyLoss_RejectedShareNotSubmittedAsBlock(t *testing.T) {
-	h := newHarness(t, 6, 0)
+	h := newHarness(t, 14, 0) // DGB slot
 	h.selectAndAssign(1)
 
 	// Configure a rejected share that also has IsBlock=false
@@ -179,54 +184,54 @@ func TestMoneyLoss_RejectedShareNotSubmittedAsBlock(t *testing.T) {
 // =============================================================================
 
 func TestMoneyLoss_SimultaneousBlocksAcrossCoins(t *testing.T) {
-	h := newHarness(t, 6, 0)  // DGB slot
-	h.selectAndAssign(1)       // Miner 1 on DGB
-	h.setTime(13, 0)
-	h.selectAndAssign(2)       // Miner 2 on BCH
-	h.setTime(20, 0)
-	h.selectAndAssign(3)       // Miner 3 on BTC
+	// BCH: 00:00–07:12, BTC: 07:12–12:00, DGB: 12:00–24:00
+	h := newHarness(t, 2, 0)   // BCH slot
+	h.selectAndAssign(1)       // Miner 1 on BCH
+	h.setTime(8, 0)
+	h.selectAndAssign(2)       // Miner 2 on BTC
+	h.setTime(14, 0)
+	h.selectAndAssign(3)       // Miner 3 on DGB
 
 	// All three find blocks simultaneously
-	h.dgb.SetBlockResult("0000dgb-simultaneous")
 	h.bch.SetBlockResult("0000bch-simultaneous")
 	h.btc.SetBlockResult("0000btc-simultaneous")
+	h.dgb.SetBlockResult("0000dgb-simultaneous")
 
 	// Route shares — each to their assigned coin
-	// (We set time back to each slot for routing)
-	h.setTime(6, 0)
-	h.selectAndAssign(1) // re-evaluate: still DGB at 06:00
-	coin1, result1 := h.routeShare(1, "DGB-job-1", 1000)
+	h.setTime(2, 0)
+	h.selectAndAssign(1) // re-evaluate: BCH at 02:00
+	coin1, result1 := h.routeShare(1, "BCH-job-1", 500)
 
-	h.setTime(13, 0)
-	h.selectAndAssign(2) // re-evaluate: BCH at 13:00
-	coin2, result2 := h.routeShare(2, "BCH-job-1", 500)
+	h.setTime(8, 0)
+	h.selectAndAssign(2) // re-evaluate: BTC at 08:00
+	coin2, result2 := h.routeShare(2, "BTC-job-1", 80_000_000_000_000)
 
-	h.setTime(20, 0)
-	h.selectAndAssign(3) // re-evaluate: BTC at 20:00
-	coin3, result3 := h.routeShare(3, "BTC-job-1", 80_000_000_000_000)
+	h.setTime(14, 0)
+	h.selectAndAssign(3) // re-evaluate: DGB at 14:00
+	coin3, result3 := h.routeShare(3, "DGB-job-1", 1000)
 
-	if !result1.IsBlock || coin1 != "DGB" {
-		t.Errorf("MONEY LOSS: DGB block not found: coin=%s, isBlock=%v", coin1, result1.IsBlock)
+	if !result1.IsBlock || coin1 != "BCH" {
+		t.Errorf("MONEY LOSS: BCH block not found: coin=%s, isBlock=%v", coin1, result1.IsBlock)
 	}
-	if !result2.IsBlock || coin2 != "BCH" {
-		t.Errorf("MONEY LOSS: BCH block not found: coin=%s, isBlock=%v", coin2, result2.IsBlock)
+	if !result2.IsBlock || coin2 != "BTC" {
+		t.Errorf("MONEY LOSS: BTC block not found: coin=%s, isBlock=%v", coin2, result2.IsBlock)
 	}
-	if !result3.IsBlock || coin3 != "BTC" {
-		t.Errorf("MONEY LOSS: BTC block not found: coin=%s, isBlock=%v", coin3, result3.IsBlock)
+	if !result3.IsBlock || coin3 != "DGB" {
+		t.Errorf("MONEY LOSS: DGB block not found: coin=%s, isBlock=%v", coin3, result3.IsBlock)
 	}
 
 	// Verify all blocks attributed to correct coins
-	if len(h.dgb.GetBlocksFound()) != 1 {
-		t.Errorf("MONEY LOSS: DGB should have exactly 1 block, got %d", len(h.dgb.GetBlocksFound()))
-	}
 	if len(h.bch.GetBlocksFound()) != 1 {
 		t.Errorf("MONEY LOSS: BCH should have exactly 1 block, got %d", len(h.bch.GetBlocksFound()))
 	}
 	if len(h.btc.GetBlocksFound()) != 1 {
 		t.Errorf("MONEY LOSS: BTC should have exactly 1 block, got %d", len(h.btc.GetBlocksFound()))
 	}
+	if len(h.dgb.GetBlocksFound()) != 1 {
+		t.Errorf("MONEY LOSS: DGB should have exactly 1 block, got %d", len(h.dgb.GetBlocksFound()))
+	}
 
-	t.Logf("Simultaneous blocks: DGB ✓, BCH ✓, BTC ✓ — all attributed correctly")
+	t.Logf("Simultaneous blocks: BCH ✓, BTC ✓, DGB ✓ — all attributed correctly")
 }
 
 // =============================================================================
@@ -234,7 +239,7 @@ func TestMoneyLoss_SimultaneousBlocksAcrossCoins(t *testing.T) {
 // =============================================================================
 
 func TestMoneyLoss_BlockFoundBeforeFailover(t *testing.T) {
-	h := newHarness(t, 6, 0)
+	h := newHarness(t, 14, 0) // DGB slot
 	h.selectAndAssign(1)
 
 	// Find a block on DGB
@@ -269,7 +274,7 @@ func TestMoneyLoss_BlockFoundBeforeFailover(t *testing.T) {
 // =============================================================================
 
 func TestMoneyLoss_BlockDuringFailoverRecovery(t *testing.T) {
-	h := newHarness(t, 6, 0)
+	h := newHarness(t, 14, 0) // DGB slot
 	h.selectAndAssign(1)
 
 	// DGB goes down — miner fails over
@@ -313,50 +318,50 @@ func TestMoneyLoss_BlockDuringFailoverRecovery(t *testing.T) {
 // =============================================================================
 
 func TestMoneyLoss_MidnightRollover(t *testing.T) {
-	// BTC slot: 19:12–24:00
-	h := newHarness(t, 23, 59) // 23:59 → BTC slot
+	// DGB slot: 12:00–24:00
+	h := newHarness(t, 23, 59) // 23:59 → DGB slot
 	h.selectAndAssign(1)
 
 	coin, _ := h.selector.GetSessionCoin(1)
-	if coin != "BTC" {
-		t.Fatalf("expected BTC at 23:59, got %s", coin)
+	if coin != "DGB" {
+		t.Fatalf("expected DGB at 23:59, got %s", coin)
 	}
 
 	// Find block at 23:59
-	h.btc.SetBlockResult("0000btc-midnight-block")
-	_, result := h.routeShare(1, "BTC-job-1", 80_000_000_000_000)
+	h.dgb.SetBlockResult("0000dgb-midnight-block")
+	_, result := h.routeShare(1, "DGB-job-1", 1000)
 	if !result.IsBlock {
-		t.Fatal("block should be found on BTC at 23:59")
-	}
-	h.btc.ClearBlockResult()
-
-	// Roll to 00:00 next day → DGB slot
-	h.setTime(0, 0)
-	sel := h.selectAndAssign(1)
-	if sel.Symbol != "DGB" {
-		t.Fatalf("expected DGB at 00:00, got %s", sel.Symbol)
-	}
-
-	// Verify BTC block was recorded on BTC
-	btcBlocks := h.btc.GetBlocksFound()
-	if len(btcBlocks) != 1 {
-		t.Errorf("MONEY LOSS: BTC should have 1 block at midnight, got %d", len(btcBlocks))
-	}
-
-	// Find a block on DGB after midnight
-	h.dgb.SetBlockResult("0000dgb-after-midnight")
-	_, result2 := h.routeShare(1, "DGB-job-1", 1000)
-	if !result2.IsBlock {
-		t.Fatal("block should be found on DGB at 00:00")
+		t.Fatal("block should be found on DGB at 23:59")
 	}
 	h.dgb.ClearBlockResult()
 
-	dgbBlocks := h.dgb.GetBlocksFound()
-	if len(dgbBlocks) != 1 {
-		t.Errorf("MONEY LOSS: DGB should have 1 block after midnight, got %d", len(dgbBlocks))
+	// Roll to 00:00 next day → BCH slot
+	h.setTime(0, 0)
+	sel := h.selectAndAssign(1)
+	if sel.Symbol != "BCH" {
+		t.Fatalf("expected BCH at 00:00, got %s", sel.Symbol)
 	}
 
-	t.Logf("Midnight rollover: BTC block at 23:59 ✓, DGB block at 00:00 ✓")
+	// Verify DGB block was recorded on DGB
+	dgbBlocks := h.dgb.GetBlocksFound()
+	if len(dgbBlocks) != 1 {
+		t.Errorf("MONEY LOSS: DGB should have 1 block at midnight, got %d", len(dgbBlocks))
+	}
+
+	// Find a block on BCH after midnight
+	h.bch.SetBlockResult("0000bch-after-midnight")
+	_, result2 := h.routeShare(1, "BCH-job-1", 500)
+	if !result2.IsBlock {
+		t.Fatal("block should be found on BCH at 00:00")
+	}
+	h.bch.ClearBlockResult()
+
+	bchBlocks := h.bch.GetBlocksFound()
+	if len(bchBlocks) != 1 {
+		t.Errorf("MONEY LOSS: BCH should have 1 block after midnight, got %d", len(bchBlocks))
+	}
+
+	t.Logf("Midnight rollover: DGB block at 23:59 ✓, BCH block at 00:00 ✓")
 }
 
 // =============================================================================
@@ -364,7 +369,7 @@ func TestMoneyLoss_MidnightRollover(t *testing.T) {
 // =============================================================================
 
 func TestMoneyLoss_ConcurrentBlockFindsUnderLoad(t *testing.T) {
-	h := newHarness(t, 6, 0)
+	h := newHarness(t, 14, 0) // DGB slot
 	numMiners := 50
 
 	// Assign all miners to DGB
@@ -439,21 +444,21 @@ func TestMoneyLoss_ConcurrentBlockFindsUnderLoad(t *testing.T) {
 func TestMoneyLoss_FullDayBlockAttribution(t *testing.T) {
 	// Walk through every 2 hours of the 24h schedule, find a block at each,
 	// verify it's attributed to the correct coin.
-	// DGB=50% (00:00–12:00), BCH=30% (12:00–19:12), BTC=20% (19:12–24:00)
+	// Sorted: BCH=30% (00:00–07:12), BTC=20% (07:12–12:00), DGB=50% (12:00–24:00)
 
 	expectedCoins := map[int]string{
-		0:  "DGB",
-		2:  "DGB",
-		4:  "DGB",
-		6:  "DGB",
-		8:  "DGB",
-		10: "DGB",
-		12: "BCH",
-		14: "BCH",
-		16: "BCH",
-		18: "BCH",
-		20: "BTC",
-		22: "BTC",
+		0:  "BCH",
+		2:  "BCH",
+		4:  "BCH",
+		6:  "BCH",
+		8:  "BTC",
+		10: "BTC",
+		12: "DGB",
+		14: "DGB",
+		16: "DGB",
+		18: "DGB",
+		20: "DGB",
+		22: "DGB",
 	}
 
 	for hour, expectedCoin := range expectedCoins {
@@ -498,14 +503,15 @@ func TestMoneyLoss_FullDayBlockAttribution(t *testing.T) {
 // =============================================================================
 
 func TestMoneyLoss_RapidCoinSwitchingNoBlocksLost(t *testing.T) {
-	h := newHarness(t, 6, 0)
+	// BCH 00:00–07:12, BTC 07:12–12:00, DGB 12:00–24:00
+	h := newHarness(t, 2, 0) // BCH slot
 	h.selectAndAssign(1)
 
 	totalBlocks := 0
 
 	// Rapidly switch coins back and forth, finding a block each time
-	times := [][2]int{{6, 0}, {13, 0}, {20, 0}, {6, 0}, {13, 0}, {20, 0}}
-	coins := []string{"DGB", "BCH", "BTC", "DGB", "BCH", "BTC"}
+	times := [][2]int{{2, 0}, {8, 0}, {14, 0}, {2, 0}, {8, 0}, {14, 0}}
+	coins := []string{"BCH", "BTC", "DGB", "BCH", "BTC", "DGB"}
 
 	for i, tm := range times {
 		h.setTime(tm[0], tm[1])
@@ -541,7 +547,7 @@ func TestMoneyLoss_RapidCoinSwitchingNoBlocksLost(t *testing.T) {
 // =============================================================================
 
 func TestMoneyLoss_AuxBlockResultsPassedThrough(t *testing.T) {
-	h := newHarness(t, 6, 0)
+	h := newHarness(t, 14, 0) // DGB slot
 	h.selectAndAssign(1)
 
 	// Configure a share result that includes aux chain blocks (merge mining)
@@ -587,7 +593,7 @@ func TestMoneyLoss_AuxBlockResultsPassedThrough(t *testing.T) {
 // =============================================================================
 
 func TestMoneyLoss_BlockMetricsAccurate(t *testing.T) {
-	h := newHarness(t, 6, 0)
+	h := newHarness(t, 14, 0) // DGB slot
 
 	numSessions := 10
 	for i := uint64(1); i <= uint64(numSessions); i++ {
@@ -629,7 +635,8 @@ func TestMoneyLoss_BlockMetricsAccurate(t *testing.T) {
 // =============================================================================
 
 func TestMoneyLoss_ZeroDifficultyCoinNotSelected(t *testing.T) {
-	h := newHarness(t, 6, 0) // DGB slot
+	// At 14:00, DGB is the scheduled coin
+	h := newHarness(t, 14, 0) // DGB slot
 
 	// DGB reports 0 difficulty (syncing)
 	h.dgb.SetDifficulty(0)
@@ -649,7 +656,7 @@ func TestMoneyLoss_ZeroDifficultyCoinNotSelected(t *testing.T) {
 // =============================================================================
 
 func TestMoneyLoss_FullDisconnectReconnect(t *testing.T) {
-	h := newHarness(t, 6, 0)
+	h := newHarness(t, 14, 0) // DGB slot
 
 	// Connect 20 miners
 	for i := uint64(1); i <= 20; i++ {
