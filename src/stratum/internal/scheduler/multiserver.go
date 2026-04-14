@@ -343,6 +343,18 @@ func (ms *MultiServer) handleDisconnect(session *protocol.Session) {
 func (ms *MultiServer) handleMinerClassified(sessionID uint64, profile stratum.MinerProfile) {
 	ms.sessionClass.Store(sessionID, profile.Class)
 
+	// Log user-agent at INFO level to diagnose classification mismatches
+	// (e.g., Antminer bmminer showing as "unknown" on multi-port)
+	if session, ok := ms.server.GetSession(sessionID); ok {
+		ms.logger.Infow("Multi-port miner classified",
+			"sessionId", sessionID,
+			"class", profile.Class.String(),
+			"userAgent", session.UserAgent,
+			"remoteAddr", session.RemoteAddr,
+			"detectedModel", profile.DetectedModel,
+		)
+	}
+
 	// Apply difficulty settings from config or profile.
 	// In multi-port mode, coin pool handlers are not wired to the shared stratum
 	// server, so difficulty must be applied here. Without this, miners get the
