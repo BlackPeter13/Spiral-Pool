@@ -797,4 +797,4 @@ The endpoint is loopback-only and restarts automatically after errors with a 30-
 
 ---
 
-*Spiral Sentinel &mdash; Phi Hash Reactor 2.4.1*
+*Spiral Sentinel &mdash; Phi Hash Reactor 2.4.2*

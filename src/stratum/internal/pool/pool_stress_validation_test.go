@@ -953,7 +953,7 @@ func TestPlan2G_SoakFullPipeline(t *testing.T) {
 				// Advance daemon tip
 				daemon.advanceTip(newHeight, fmt.Sprintf("hash-%d", bn))
 
-				// Phase 1: Immediate invalidation
+				// Phase 1: Invalidation (BroadcastJob cleanJobs=true)
 				start := time.Now()
 				store.invalidateAll(fmt.Sprintf("zmq-%d", bn))
 				allMetrics.recordZMQLatency(time.Since(start))

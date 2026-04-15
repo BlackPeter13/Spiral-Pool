@@ -7,7 +7,20 @@ Versioning follows `MAJOR.MINOR.PATCH`  -  patch releases are applied in-place o
 
 ---
 
-## [2.4.1]  -  2026-04-13  -  Phi Hash Reactor
+## [2.4.2]  -  2026-04-14  -  Phi Hash Reactor
+
+> *Multi-port stale share storm fix — deferred job invalidation prevents orphans during slow GBT.*
+
+### Fixed
+
+**Stratum — Multi-Port Stale Share Storm During Slow GetBlockTemplate**
+
+- **All multi-port shares rejected as stale for 1-3+ seconds after every ZMQ block notification** — `OnBlockNotificationWithHash()` in both `manager.go` and `manager_v2.go` immediately set all existing jobs to `JobStateInvalidated` the moment ZMQ fired, BEFORE calling `GetBlockTemplate` to fetch the replacement template. When the daemon was busy processing a new block, the GBT RPC took 1-3+ seconds to return. During that entire window, every multi-port share was validated against the already-invalidated jobs and rejected as stale. Direct (single-coin) miners were unaffected because their stale check uses the stratum server's `s.jobs` map, which isn't cleared until `BroadcastJob(cleanJobs=true)` runs after the new template is ready. On DGB with 15-second blocks, a 3.4-second stale window meant ~25 rejected shares per block transition across 6 sessions — and any block-level solution found during that window was discarded, causing orphaned blocks
+- **Fix**: Removed the premature job invalidation from both `manager.go` and `manager_v2.go`. Old jobs now stay valid until `RefreshJob` succeeds and `BroadcastJob(cleanJobs=true)` naturally invalidates them — matching how direct miners already work. The height epoch advance (which cancels in-flight block submission contexts) is preserved. The narrow risk of a share solving a block against an outdated `prevBlockHash` is handled by the daemon rejecting the submission, which is far less costly than rejecting ALL shares for the entire GBT fetch duration
+
+---
+
+## [2.4.2]  -  2026-04-13  -  Phi Hash Reactor
 
 > *Smart Port start_hour scheduling fix, ZMQ job broadcast race condition fix, sentinel tuning.*
 
@@ -33,7 +46,7 @@ Versioning follows `MAJOR.MINOR.PATCH`  -  patch releases are applied in-place o
 
 ### Changed
 
-- **Version bump** -- all version strings updated to 2.4.1
+- **Version bump** -- all version strings updated to 2.4.2
 
 ---
 

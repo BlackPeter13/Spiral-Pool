@@ -451,4 +451,4 @@ See [SECURITY_MODEL.md](../architecture/SECURITY_MODEL.md) for full details with
 
 ---
 
-*Spiral Pool — Phi Hash Reactor 2.4.1*
+*Spiral Pool — Phi Hash Reactor 2.4.2*

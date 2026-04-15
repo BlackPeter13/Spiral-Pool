@@ -677,6 +677,11 @@ func NewSpiralRouterWithBlockTime(blockTimeSec int) *SpiralRouter {
 		// Covers: ALL Antminer S/T series (S9 through S21 XP Hyd)
 		{`(?i)bmminer`, MinerClassPro, "Bitmain (bmminer)"},
 
+		// Bitmain stock firmware (alternate) — some firmware versions send
+		// "Antminer {model}/{date}" instead of "bmminer/{version}"
+		// Source: live diagnostic logs from Antminer S19k Pro, BHB42 series [CONFIRMED]
+		{`(?i)antminer`, MinerClassPro, "Bitmain (Antminer)"},
+
 		// MicroBT stock firmware — sends "btminer/{version}"
 		// Source: pyasic [HIGH]
 		// Covers: ALL Whatsminer models (M30S through M79S)

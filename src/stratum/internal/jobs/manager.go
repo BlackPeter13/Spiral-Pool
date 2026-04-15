@@ -1519,19 +1519,19 @@ func (m *Manager) OnBlockNotificationWithHash(ctx context.Context, newTipHash st
 		m.heightEpoch.Advance(currentHeight + 1)
 	}
 
-	// IMMEDIATE INVALIDATION: Mark all current jobs as stale the moment ZMQ fires.
-	// This closes the race window where shares validated during the template refresh
-	// pipeline (250ms-1750ms+) would pass validation against still-Active jobs, get
-	// detected as blocks, and then be rejected by the daemon with "prev-blk-not-found"
-	// because the prevBlockHash is already outdated.
-	// NOTE: We set state to Invalidated but do NOT delete from the map. This way
-	// GetJob() still returns the job, and the validator sees JobStateInvalidated
-	// and rejects the share as stale rather than accepting it.
-	m.jobsMu.RLock()
-	for _, job := range m.jobs {
-		job.SetState(protocol.JobStateInvalidated, "ZMQ block notification - immediate invalidation")
-	}
-	m.jobsMu.RUnlock()
+	// NOTE: We intentionally do NOT invalidate existing jobs here. The old
+	// "immediate invalidation" approach marked all jobs stale the moment ZMQ
+	// fired, before a replacement template was fetched. When GetBlockTemplate
+	// was slow (1-3+ seconds on a busy daemon), every share submitted during
+	// that window was rejected as stale — causing massive stale-share bursts
+	// on multi-port miners and orphaned blocks when block-level solutions
+	// were discarded. Instead, we let RefreshJob → BroadcastJob(cleanJobs:true)
+	// handle invalidation naturally once the new template is ready. This
+	// matches how direct (single-coin) miners already work: their s.jobs map
+	// isn't cleared until BroadcastJob runs. The narrow risk — a share solving
+	// a block against the now-outdated prevBlockHash — is handled by the daemon
+	// rejecting the submission, which is far less costly than rejecting ALL
+	// shares for the entire GBT fetch duration.
 
 	// Capture current block hash to detect when template actually updates
 	m.stateMu.RLock()
@@ -1543,9 +1543,7 @@ func (m *Manager) OnBlockNotificationWithHash(ctx context.Context, newTipHash st
 	// daemon load during high-activity periods on fast-block coins like DGB
 	for i := 0; i < 20; i++ {
 		// Only force cleanJobs on the first attempt. Subsequent retries poll for the
-		// updated template without burning intermediate job IDs. The ZMQ handler
-		// already invalidated all existing jobs, so force=false retries won't
-		// accidentally accept stale shares.
+		// updated template without burning intermediate job IDs.
 		if err := m.RefreshJob(ctx, i == 0); err != nil {
 			m.logger.Errorw("Failed to refresh job", "error", err, "attempt", i+1)
 		}

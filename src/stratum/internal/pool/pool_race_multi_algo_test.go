@@ -787,7 +787,7 @@ func testMALongTerm(t *testing.T, tc algoTestCase) {
 			case <-ticker.C:
 				totalBlocks.Add(1)
 
-				// Phase 1: Immediate invalidation (OnBlockNotification)
+				// Phase 1: Invalidation (BroadcastJob cleanJobs=true)
 				store.invalidateAll(fmt.Sprintf("zmq-block-%d", blockNum))
 
 				// Phase 2: Create new job (storeJob)

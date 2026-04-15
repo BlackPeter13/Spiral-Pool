@@ -81,7 +81,8 @@ func (s *jobStore) all() []*protocol.Job {
 	return result
 }
 
-// invalidateAll simulates Phase 1 of OnBlockNotification — immediate invalidation.
+// invalidateAll simulates job invalidation that occurs when BroadcastJob is
+// called with cleanJobs=true after a new block template is fetched.
 func (s *jobStore) invalidateAll(reason string) {
 	s.mu.RLock()
 	for _, j := range s.jobs {
@@ -211,8 +212,8 @@ func TestG_ZMQBurstMultipleBlocks(t *testing.T) {
 	store.put(j2)
 	store.put(j3)
 
-	// --- Burst: 3 ZMQ notifications in rapid succession ---
-	// Each simulates Phase 1 immediate invalidation
+	// --- Burst: 3 block transitions in rapid succession ---
+	// Each simulates job invalidation via BroadcastJob cleanJobs=true
 	for i := 0; i < 3; i++ {
 		store.invalidateAll(fmt.Sprintf("ZMQ burst notification %d", i+1))
 	}
