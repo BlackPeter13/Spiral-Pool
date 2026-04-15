@@ -20,7 +20,7 @@ Versioning follows `MAJOR.MINOR.PATCH`  -  patch releases are applied in-place o
 
 ---
 
-## [2.4.2]  -  2026-04-13  -  Phi Hash Reactor
+## [2.4.1]  -  2026-04-13  -  Phi Hash Reactor
 
 > *Smart Port start_hour scheduling fix, ZMQ job broadcast race condition fix, sentinel tuning.*
 
