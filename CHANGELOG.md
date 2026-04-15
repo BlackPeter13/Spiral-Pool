@@ -9,7 +9,7 @@ Versioning follows `MAJOR.MINOR.PATCH`  -  patch releases are applied in-place o
 
 ## [2.4.2]  -  2026-04-14  -  Phi Hash Reactor
 
-> *Multi-port stale share storm fix — deferred job invalidation prevents orphans during slow GBT.*
+> *Multi-port stale share storm fix, Antminer user-agent classification fix for proper vardiff assignment.*
 
 ### Fixed
 
@@ -17,6 +17,11 @@ Versioning follows `MAJOR.MINOR.PATCH`  -  patch releases are applied in-place o
 
 - **All multi-port shares rejected as stale for 1-3+ seconds after every ZMQ block notification** — `OnBlockNotificationWithHash()` in both `manager.go` and `manager_v2.go` immediately set all existing jobs to `JobStateInvalidated` the moment ZMQ fired, BEFORE calling `GetBlockTemplate` to fetch the replacement template. When the daemon was busy processing a new block, the GBT RPC took 1-3+ seconds to return. During that entire window, every multi-port share was validated against the already-invalidated jobs and rejected as stale. Direct (single-coin) miners were unaffected because their stale check uses the stratum server's `s.jobs` map, which isn't cleared until `BroadcastJob(cleanJobs=true)` runs after the new template is ready. On DGB with 15-second blocks, a 3.4-second stale window meant ~25 rejected shares per block transition across 6 sessions — and any block-level solution found during that window was discarded, causing orphaned blocks
 - **Fix**: Removed the premature job invalidation from both `manager.go` and `manager_v2.go`. Old jobs now stay valid until `RefreshJob` succeeds and `BroadcastJob(cleanJobs=true)` naturally invalidates them — matching how direct miners already work. The height epoch advance (which cancels in-flight block submission contexts) is preserved. The narrow risk of a share solving a block against an outdated `prevBlockHash` is handled by the daemon rejecting the submission, which is far less costly than rejecting ALL shares for the entire GBT fetch duration
+
+**Stratum — Antminer User-Agent Not Recognized by SpiralRouter**
+
+- **All Antminers sending model-based user-agents classified as `MinerClassUnknown`** — Some Antminer firmware versions (notably S19 series and S19k Pro) send `"Antminer S19k Pro/{date}"` or `"Antminer BHB42XXX/{date}"` as their stratum user-agent instead of the expected `"bmminer/{version}"`. The SpiralRouter pattern list only had `(?i)bmminer` for Bitmain devices, so these miners fell through to `MinerClassUnknown`. Because `multiserver.go` forces config difficulty for unknown miners (`useConfig := ... || profile.Class == MinerClassUnknown`), all 8 affected miners were stuck on static config difficulty instead of receiving the correct Pro-tier vardiff profile (25,600 initial / 500,000 max / 1s target)
+- **Fix**: Added `(?i)antminer` → `MinerClassPro` pattern to the SpiralRouter detection list, directly after the existing `(?i)bmminer` pattern. Antminers sending model-name user-agents are now correctly classified and receive the Pro difficulty profile tuned for S19-class hardware (~110 TH/s)
 
 ---
 
