@@ -4440,6 +4440,36 @@
                 }
             }
 
+            // Update overview stats for the selected coin
+            if (coinData) {
+                // Blocks Found (per-coin)
+                const blocksEl = document.getElementById('blocks-found');
+                if (blocksEl) blocksEl.textContent = coinData.blocks || 0;
+
+                // Last Block Found (per-coin)
+                if (coinData.last_block_time) {
+                    updateLastBlockDisplay(coinData.last_block_time, coinData.last_block_finder, coinData.last_block_height);
+                } else {
+                    updateLastBlockDisplay(null, null, null);
+                }
+
+                // Estimated Time to Block (per-coin, calculated client-side)
+                const coinDiff = coinData.difficulty || 0;
+                const coinHps = coinData.hashrate || 0;
+                const coinAlgo = (coinData.algorithm || getAlgorithmForCoin(symbol));
+                const diffMul = coinAlgo === 'scrypt' ? (2 ** 16) : (2 ** 32);
+                if (coinDiff > 0 && coinHps > 0) {
+                    const etbSec = (coinDiff * diffMul) / coinHps;
+                    const etbEl = document.getElementById('etb-time');
+                    if (etbEl) etbEl.textContent = formatETBSeconds(etbSec);
+                    const etbProbEl = document.getElementById('etb-probability');
+                    if (etbProbEl) {
+                        const prob24h = (1 - Math.exp(-86400 / etbSec)) * 100;
+                        etbProbEl.textContent = '24h odds: ' + prob24h.toFixed(2) + '%';
+                    }
+                }
+            }
+
             // Update header badge active states
             const group = document.getElementById('coin-selector-group');
             if (group) {
@@ -5971,6 +6001,21 @@
             if (num >= 1e6) return (num / 1e6).toFixed(2) + 'M';
             if (num >= 1e3) return (num / 1e3).toFixed(2) + 'K';
             return num.toFixed(0);
+        }
+
+        // Format ETB seconds into human-readable string (matches backend format)
+        function formatETBSeconds(seconds) {
+            if (!seconds || seconds <= 0 || !isFinite(seconds)) return '--';
+            const days = Math.floor(seconds / 86400);
+            const hours = Math.floor((seconds % 86400) / 3600);
+            const mins = Math.floor((seconds % 3600) / 60);
+            if (days > 365) {
+                const years = (days / 365).toFixed(1);
+                return years + ' years';
+            }
+            if (days > 0) return days + 'd ' + hours + 'h';
+            if (hours > 0) return hours + 'h ' + mins + 'm';
+            return mins + 'm';
         }
 
         // Format pool URL - normalize by stripping protocol prefix for display
@@ -7877,16 +7922,28 @@
                 : 0;
             document.getElementById('reject-rate').textContent = `Rejected: ${rejectRate}%`;
 
-            // Use pool block count if available, fall back to miner-reported
-            const currentBlocks = poolBlocks > 0 ? poolBlocks : (totals.blocks_found || 0);
+            // Blocks Found: per-coin when a coin is selected, aggregate otherwise
+            let currentBlocks;
+            if (_userSelectedCoin && activeCoinData) {
+                currentBlocks = activeCoinData.blocks || 0;
+            } else {
+                currentBlocks = poolBlocks > 0 ? poolBlocks : (totals.blocks_found || 0);
+            }
             document.getElementById('blocks-found').textContent = currentBlocks;
             // Use pool best difficulty if available
             document.getElementById('best-diff').textContent = formatDifficulty(poolBestDiff || totals.best_diff);
 
-            // Update Last Block Found display
-            const lastBlockTime = data.last_block_time;
-            const lastBlockFinder = data.last_block_finder;
-            const lastBlockHeight = data.last_block_height;
+            // Last Block Found: per-coin when a coin is selected, global otherwise
+            let lastBlockTime, lastBlockFinder, lastBlockHeight;
+            if (_userSelectedCoin && activeCoinData && activeCoinData.last_block_time) {
+                lastBlockTime = activeCoinData.last_block_time;
+                lastBlockFinder = activeCoinData.last_block_finder;
+                lastBlockHeight = activeCoinData.last_block_height;
+            } else {
+                lastBlockTime = data.last_block_time;
+                lastBlockFinder = data.last_block_finder;
+                lastBlockHeight = data.last_block_height;
+            }
             updateLastBlockDisplay(lastBlockTime, lastBlockFinder, lastBlockHeight);
 
             // Check for new blocks and trigger celebration (with finder info from API)
@@ -8067,6 +8124,24 @@
         // Fetch and update Estimated Time to Block
         async function fetchETBData() {
             try {
+                // Per-coin ETB: calculate client-side from per-coin stats when a coin is selected
+                const pcs = _lastPerCoinStats || {};
+                const coinData = _userSelectedCoin ? pcs[_userSelectedCoin] : null;
+                if (_userSelectedCoin && coinData && coinData.difficulty > 0 && coinData.hashrate > 0) {
+                    const coinAlgo = coinData.algorithm || getAlgorithmForCoin(_userSelectedCoin);
+                    const diffMul = coinAlgo === 'scrypt' ? (2 ** 16) : (2 ** 32);
+                    const etbSec = (coinData.difficulty * diffMul) / coinData.hashrate;
+                    const etbTimeEl = document.getElementById('etb-time');
+                    if (etbTimeEl) etbTimeEl.textContent = formatETBSeconds(etbSec);
+                    const etbProbEl = document.getElementById('etb-probability');
+                    if (etbProbEl) {
+                        const prob24h = (1 - Math.exp(-86400 / etbSec)) * 100;
+                        etbProbEl.textContent = `24h odds: ${prob24h.toFixed(2)}%`;
+                    }
+                    return;
+                }
+
+                // Aggregate ETB: fetch from backend API (default / no coin selected)
                 const response = await fetch('/api/etb');
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.json();

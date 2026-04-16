@@ -1735,13 +1735,21 @@ def fetch_pool_stats():
             "qbitx": "QBX", "q-bitx": "QBX", "qbx": "QBX",
         }
 
-        # Build per-coin block counts from fetched blocks
+        # Build per-coin block counts and last-block info from fetched blocks
         _per_coin_blocks = {}
+        _per_coin_last_block = {}  # {COIN: {time, finder, height}}
         for blk in all_blocks:
             bc = blk.get("coin", "") or ""
             if bc:
                 bc_norm = _pool_coin_map.get(bc.lower(), bc.upper())
                 _per_coin_blocks[bc_norm] = _per_coin_blocks.get(bc_norm, 0) + 1
+                # Track latest block per coin (all_blocks is sorted newest-first)
+                if bc_norm not in _per_coin_last_block:
+                    _per_coin_last_block[bc_norm] = {
+                        "time": blk.get("created"),
+                        "finder": blk.get("worker") or blk.get("source") or blk.get("miner") or blk.get("minerAddress"),
+                        "height": blk.get("blockHeight"),
+                    }
 
         # Update all cache fields atomically under lock
         with _pool_stats_lock:
@@ -1777,6 +1785,7 @@ def fetch_pool_stats():
                     coin_symbol = _pool_coin_map.get(coin_type.lower(), coin_type.upper()) if coin_type else ""
                     pool_net = p.get("networkStats", {}) or {}
                     if coin_symbol:
+                        _coin_last_blk = _per_coin_last_block.get(coin_symbol, {})
                         per_coin[coin_symbol] = {
                             "hashrate": hashrate,
                             "miners": miners,
@@ -1786,6 +1795,9 @@ def fetch_pool_stats():
                             "block_height": pool_net.get("blockHeight", stats.get("blockHeight", 0)),
                             "blocks": _per_coin_blocks.get(coin_symbol, 0),
                             "pool_id": p.get("id", ""),
+                            "last_block_time": _coin_last_blk.get("time"),
+                            "last_block_finder": _coin_last_blk.get("finder"),
+                            "last_block_height": _coin_last_blk.get("height"),
                         }
 
                 pool_stats_cache["connected_miners"] = total_miners
