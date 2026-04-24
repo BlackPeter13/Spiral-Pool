@@ -270,7 +270,7 @@ Spiral Sentinel supports real-time alerts via **Discord**, **Telegram**, **XMPP/
 
 ## Acknowledgments
 
-Spiral Pool is community-driven free and open-source software. Bug reports, feature suggestions, and feedback from the community are what shape this project &mdash; every report helps make the software better for all operators. If you've found an issue or have an idea, open a [GitHub Issue](https://github.com/SpiralPool/Spiral-Pool/issues) or reach out via email at spiralpool@proton.me. All contributions are greatly appreciated.
+Spiral Pool is community-driven free and open-source software. Bug reports, feature suggestions, and feedback from the community are what shape this project &mdash; every report helps make the software better for all operators. If you've found an issue or have an idea, open a [GitHub Issue](https://github.com/SpiralPool/Spiral-Pool/issues) All contributions are greatly appreciated.
 
 This implementation follows the [Stratum V2 Specification](https://github.com/stratum-mining/sv2-spec) for V2 protocol support and uses the [Noise Protocol Framework](https://noiseprotocol.org/) for encryption. Block template handling follows BIP 22/23 specifications.
 
